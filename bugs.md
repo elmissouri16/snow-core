@@ -2,12 +2,13 @@
 
 ## BUG-228: Commit-message skills stop explicit commit and push requests
 
-- **Status:** Open — recorded for a later fix.
+- **Status:** Resolved — active-skill boundaries no longer replace the enclosing user request.
 - **Severity:** Medium
 - **Surface:** Agent-skill activation during explicit Git workflow requests
 - **Evidence:** Given `commit changes and push`, Snow automatically activated `caveman-commit`, generated a valid commit message, but then refused to stage, commit, or push because the skill says it only generates commit messages. Comparable coding agents use the generated message as one step and continue the explicitly requested Git operation.
 - **Expected behavior:** A commit-message generator should control how the commit message is produced without canceling an explicit parent request to stage, commit, and push. Snow should stop after message generation only when the user asked for a message rather than repository operations, or when a permission/safety check blocks those operations.
-- **Remediation:** Distinguish a skill's own capability boundary from the enclosing agent task. Preserve authoritative safety and permission constraints, but after generating the message, continue the requested Git workflow. Add a regression covering automatic `caveman-commit` activation for `commit changes and push` and a message-only request that still performs no Git mutation.
+- **Fix:** The agent now appends one generic core policy after every active skill set. A skill's methods, output scope, and stopping conditions govern only that skill's contribution; explicitly requested surrounding work continues through other capabilities. The same policy prevents skill activation from authorizing unrequested side effects and keeps collaboration-mode, safety, and permission controls authoritative. No skill name or Git workflow is special-cased.
+- **Verification:** A model-triggered generic limited-output skill regression covers both a multi-step enclosing request and an artifact-only request, verifies the policy follows activated content on the provider continuation, and verifies the original user request remains present. `go test ./...`, `go vet ./...`, `go test -race ./internal/agent -count=1`, `python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v`, and `python3 scripts/check_benchmarks.py` pass.
 
 ## BUG-227: Local Web Manager URL redirects away from localhost in LAN mode
 

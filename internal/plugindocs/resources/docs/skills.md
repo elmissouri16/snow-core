@@ -110,9 +110,17 @@ preference is separate from project activation consent and does not grant CLI
 extension trust or change tool permissions. Project skills still follow the
 existing trust rules above.
 
-Snow can also activate an applicable skill while handling a request. In the
-interactive TUI, run `/skills` to inspect available and active skills. Run
-`/skills clear` to clear active skills for the current session branch.
+Snow can also activate an applicable skill while handling a request. Active
+skills supply specialized methods, style, or intermediate artifacts; they do
+not replace or narrow the enclosing user request. When a skill contributes one
+part of explicitly requested work, Snow applies it and then continues the
+remaining work with other available capabilities. Conversely, activation does
+not authorize extra side effects: when the user requests only the skill's
+deliverable, Snow stops after providing it. Collaboration-mode restrictions,
+safety requirements, and tool permissions remain authoritative.
+
+In the interactive TUI, run `/skills` to inspect available and active skills.
+Run `/skills clear` to clear active skills for the current session branch.
 
 ## JavaScript plugin references are a tool, not a skill
 

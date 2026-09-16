@@ -1319,11 +1319,15 @@ the next continuation and resumed sessions omit that guidance.
 using a pinned per-operation `os.Root` for filesystem resources. Activated content is
 reattached on every provider call and reconstructed from successful markers
 and session history after resume so compaction does not drop it; current
-trust/disable/tool policy filters stale activations. New activations are
-admitted atomically against the final serialized fixed-context budget and are
-rejected before result/marker persistence rather than truncated. Existing
-resumed state remains grandfathered and observable through `/context`. See
-`docs/skills.md`.
+trust/disable/tool policy filters stale activations. A core policy appended
+after active skill content keeps each skill's methods, style and stopping
+conditions subordinate to the enclosing user request: limited skill output does
+not cancel explicitly requested surrounding work, while skill activation alone
+never authorizes extra side effects. Collaboration policy, safety and tool
+permissions remain authoritative. New activations are admitted atomically
+against the final serialized fixed-context budget and are rejected before
+result/marker persistence rather than truncated. Existing resumed state remains
+grandfathered and observable through `/context`. See `docs/skills.md`.
 
 Global and trust-gated project `skills.disabled`/`skills.overrides` policy can
 hide entries from prompts and activation without deleting their files. CLI
