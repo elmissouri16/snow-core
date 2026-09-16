@@ -41,7 +41,7 @@ func PlannerWithOptions(msgs []protocol.Message, opts PlannerOptions) Plan {
 		}
 	}
 	if opts.AllowGoalToolCycles {
-		starts := goalToolCycleStarts(msgs, turnStarts)
+		starts := goalToolCycleStarts(msgs, turnStarts, opts.AllowMailboxGoalToolCycles)
 		if plan := planAtStarts(msgs, starts, opts); len(plan.CompactionCandidates) > 0 {
 			return plan
 		}
@@ -139,17 +139,24 @@ func activeToolCycleStarts(msgs []protocol.Message, turnStarts []int) []int {
 	return appendToolCycleStarts(msgs, turnStarts, activeStart)
 }
 
-// goalToolCycleStarts is the pressure fallback for an assistant-originated
-// automatic goal turn. Such a turn has no exact user objective in provider
-// history: the active goal is injected separately on every request. If that
-// single turn grows beyond the context threshold, retaining its newest complete
-// cycles is safer than blocking while an old prefix is still compactable.
-func goalToolCycleStarts(msgs []protocol.Message, turnStarts []int) []int {
+// goalToolCycleStarts is the pressure fallback for an automatic goal turn.
+// Such a turn has no exact user objective in provider history: the active goal
+// is injected separately on every request. Trusted runtime state may also admit
+// a mailbox-headed goal continuation; ordinary mailbox and user turns remain
+// exact. If the turn grows beyond the context threshold, retaining its newest
+// complete cycles is safer than blocking while an old prefix is compactable.
+func goalToolCycleStarts(msgs []protocol.Message, turnStarts []int, allowMailbox bool) []int {
 	if len(turnStarts) == 0 {
 		return turnStarts
 	}
 	goalStart := turnStarts[len(turnStarts)-1]
-	if msgs[goalStart].Role != protocol.RoleAssistant && msgs[goalStart].Role != protocol.RoleInternal {
+	switch msgs[goalStart].Role {
+	case protocol.RoleAssistant, protocol.RoleInternal:
+	case protocol.RoleAgent:
+		if !allowMailbox {
+			return turnStarts
+		}
+	default:
 		return turnStarts
 	}
 	return appendToolCycleStarts(msgs, turnStarts, goalStart)

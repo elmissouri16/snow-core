@@ -50,6 +50,11 @@ type PlannerOptions struct {
 	// completed tool cycles as the exact retained tail when preserving complete
 	// recent turns would otherwise leave no compactable prefix.
 	AllowGoalToolCycles bool
+	// AllowMailboxGoalToolCycles permits the goal-cycle fallback to start at a
+	// mailbox message only when trusted runtime state identifies the admitted
+	// operation as an automatic goal. It has no effect unless
+	// AllowGoalToolCycles is also enabled.
+	AllowMailboxGoalToolCycles bool
 }
 
 const WorkingStateTitle = "# Working State Checkpoint"

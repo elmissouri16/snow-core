@@ -240,6 +240,15 @@ func (a *Agent) autoCompactGoalBoundary(ctx context.Context) (compacted bool, re
 	return true, nil
 }
 
+func (a *Agent) mailboxGoalToolCyclesAllowed() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.goalAtTurn == nil {
+		return false
+	}
+	return a.turnOrigin == "goal" || a.turnOrigin == "compact"
+}
+
 func (a *Agent) compactionPlannerOptions(model protocol.Model, messages []protocol.Message) compact.PlannerOptions {
 	budget := a.opts.Compaction.RetainTokens
 	if budget <= 0 {
@@ -259,10 +268,11 @@ func (a *Agent) compactionPlannerOptions(model protocol.Model, messages []protoc
 		minTurns++
 	}
 	return compact.PlannerOptions{
-		RetainTokens:          budget,
-		MinRetainedTurns:      minTurns,
-		AllowActiveToolCycles: activeTail,
-		AllowGoalToolCycles:   true,
+		RetainTokens:               budget,
+		MinRetainedTurns:           minTurns,
+		AllowActiveToolCycles:      activeTail,
+		AllowGoalToolCycles:        true,
+		AllowMailboxGoalToolCycles: a.mailboxGoalToolCyclesAllowed(),
 	}
 }
 

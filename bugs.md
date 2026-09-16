@@ -1,5 +1,14 @@
 # Known bugs
 
+## BUG-228: Commit-message skills stop explicit commit and push requests
+
+- **Status:** Open — recorded for a later fix.
+- **Severity:** Medium
+- **Surface:** Agent-skill activation during explicit Git workflow requests
+- **Evidence:** Given `commit changes and push`, Snow automatically activated `caveman-commit`, generated a valid commit message, but then refused to stage, commit, or push because the skill says it only generates commit messages. Comparable coding agents use the generated message as one step and continue the explicitly requested Git operation.
+- **Expected behavior:** A commit-message generator should control how the commit message is produced without canceling an explicit parent request to stage, commit, and push. Snow should stop after message generation only when the user asked for a message rather than repository operations, or when a permission/safety check blocks those operations.
+- **Remediation:** Distinguish a skill's own capability boundary from the enclosing agent task. Preserve authoritative safety and permission constraints, but after generating the message, continue the requested Git workflow. Add a regression covering automatic `caveman-commit` activation for `commit changes and push` and a message-only request that still performs no Git mutation.
+
 ## BUG-227: Local Web Manager URL redirects away from localhost in LAN mode
 
 - **Status:** Resolved — localhost and LAN now serve the same manager directly on independent exact origins.
@@ -742,7 +751,7 @@ Verified on the current checkout with:
 
 ## BUG-009: Long automatic goals can become uncompactionable
 
-- **Status:** Reopened — recurrence reported; fix later
+- **Status:** Resolved — mailbox-headed recurrence verified
 - **Severity:** High
 - **Surface:** Automatic goal continuation and context compaction
 - **Observed:** User-provided TUI screenshots showing blocked goals after 172
@@ -750,15 +759,23 @@ Verified on the current checkout with:
 
 ### Recurrence evidence (2026-09-16)
 
-A user-provided TUI screenshot shows the same automatic-compaction blocker after
-approximately 54.4 million tokens, 18 goal turns, and 1,865 steps:
-`goal auto-compaction: context threshold reached but no complete older turns are
-available to compact`. The affected Snow session is
-`1789498071676-n1htaery` (branch `main`; goal
-`goal-9bdeb55e1bb1bb3ad8f6572dd01bde9b`). This is evidence of a recurrence, not
-yet a deterministic reproduction; preserve the exact session history for later
-planner-boundary investigation. Do not treat the older resolution evidence below
-as verification of this newer failing history shape.
+The affected session `1789498071676-n1htaery` (branch `main`; goal
+`goal-9bdeb55e1bb1bb3ad8f6572dd01bde9b`) was reconstructed deterministically at
+the persisted blocked boundary. Its provider projection contained one existing
+checkpoint, exactly three mailbox-originated `RoleAgent` turn starts, two
+internal-context messages, 376 assistant tool-use messages, and 396 tool
+results. The tail was an active `tool_result`, so the configured two-turn floor
+increased to three. Ordinary planning required more than three starts, the
+active-cycle fallback required exactly one start, and the goal-cycle fallback
+rejected the latest `RoleAgent` start. All routes therefore returned an empty
+plan despite hundreds of balanced completed-cycle cuts.
+
+The same context planned successfully at the two-turn floor. After one later
+user message supplied a fourth turn start, Snow persisted a successful
+compaction through the exact boundary predicted by the reconstruction. Tool
+call/result IDs and provider-private continuity were balanced, establishing
+that candidate admission—not provider output or boundary safety—caused the
+block.
 
 ### Expected behavior
 
@@ -782,10 +799,18 @@ recognized assistant-only cycles but still failed when one exact conversation
 turn preceded the long goal: with the default two-turn retention floor, the
 planner again produced no candidates.
 
-The automatic worker treated that planning failure as fatal and durably blocked
-the goal with `context threshold reached but no complete older turns are
-available to compact`. A later manual `/compact` used the same empty plan and
-reported `compact: nothing to compact`.
+The recurrence added a second missed shape. Mailbox deliveries are explicit
+`RoleAgent` turn starts, but an automatic goal may continue after such a delivery
+without a synthetic user message. When exactly three mailbox starts survived an
+earlier checkpoint and the active tail raised the floor to three, ordinary
+planning had no older turn. `activeToolCycleStarts` rejected the multiple-start
+context, while `goalToolCycleStarts` accepted only assistant/internal starts and
+never enumerated the complete cycles after the latest mailbox message.
+
+The automatic worker treated either empty-plan shape as fatal and durably
+blocked the goal with `context threshold reached but no complete older turns
+are available to compact`. A later manual `/compact` could use the same empty
+plan and report `compact: nothing to compact`.
 
 ### Impact
 
@@ -797,13 +822,17 @@ has a compaction checkpoint.
 
 ### Reproduction
 
-1. Retain one ordinary user/assistant turn in a session.
-2. Start an automatic goal whose next admitted turn performs at least three
-   complete tool-call/result cycles without a synthetic user message.
-3. Return a terminal assistant response with provider usage at the automatic
-   compaction threshold while leaving the goal active.
-4. Observe automatic compaction return no candidates and block the goal; manual
-   compaction then reports that there is nothing to compact.
+1. Project an existing checkpoint followed by exactly three mailbox
+   `RoleAgent` turn starts.
+2. After the latest mailbox start, inject the automatic goal's private internal
+   context and perform several complete assistant-call/tool-result cycles.
+3. Cross the automatic-compaction threshold while the tail is a `tool_result`,
+   raising the effective retention floor from two turns to three.
+4. Observe ordinary planning fail at `len(starts) == MinRetainedTurns`, the
+   active-cycle fallback reject multiple starts, and the goal-cycle fallback
+   reject the mailbox-headed turn even though balanced cycle cuts exist.
+5. Before the recurrence fix, automatic compaction returns no candidates and
+   durably blocks the goal.
 
 ### Remediation
 
@@ -821,7 +850,12 @@ call/result pairing or provider-continuity ownership.
 
 The same model recognizes assistant-first history after an existing checkpoint,
 so repeated compaction replaces the prior checkpoint without resurrecting
-hidden messages. A truly short goal with no complete cycle still fails closed.
+hidden messages. The recurrence fix also permits a mailbox-headed cycle tail,
+but only when trusted runtime state identifies the admitted operation as an
+automatic goal or its automatic compaction boundary. Ordinary mailbox turns,
+user-originated turns, manual compaction without an admitted goal, unresolved
+calls, and provider-private continuity remain exact. A truly short goal with no
+complete cycle still fails closed.
 
 ### Regression coverage
 
@@ -833,12 +867,20 @@ Focused planner and agent tests cover:
 - repeated goal-cycle compaction without history resurrection;
 - an assistant-only earlier turn followed by a user-originated turn, which must
   not be mistaken for the goal-cycle fallback;
-- balanced tool pairs and provider-private data on the compacted boundary; and
+- balanced tool pairs and provider-private data on the compacted boundary;
+- an existing checkpoint followed by exactly three mailbox starts and an active
+  automatic-goal tool tail;
+- rejection of the same mailbox shape without trusted automatic-goal
+  provenance;
+- rejection of user-originated cycle splitting even when the trusted mailbox
+  capability is enabled;
+- agent-level continuation through mailbox-headed pressure compaction without
+  blocking the goal; and
 - the genuinely uncompactionable short-goal blocker path.
 
-### Resolution evidence
+### Earlier resolution evidence
 
-Verified on 2026-09-02 with:
+The earlier assistant-originated shape was verified on 2026-09-02 with:
 
 - a regression-first run of
   `go test ./internal/agent -run TestGoalAutoCompactsCompletedCyclesAfterLongSingleTurnStops -count=1`
@@ -853,6 +895,23 @@ Verified on 2026-09-02 with:
 - `git diff --check`;
 - an independent read-only review of the boundary model and regression cases;
   and
+- `./scripts/install-local.sh`, which installed the verified `0.1.0-dev` build.
+
+### Recurrence fix verification
+
+The mailbox-headed recurrence fix was verified on the current checkout with:
+
+- a regression-first focused planner run that reproduced the empty plan before
+  the fallback admitted trusted automatic-goal mailbox starts;
+- `go test ./internal/compact ./internal/agent -count=1`;
+- `go test ./internal/agent ./cmd/snow -count=1`;
+- `go test -race ./internal/compact ./internal/agent -count=1`;
+- `go test ./...`;
+- `go vet ./...`;
+- `python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v`;
+- `python3 scripts/check_benchmarks.py`;
+- `git diff --check`;
+- an independent read-only review with no release-blocking findings; and
 - `./scripts/install-local.sh`, which installed the verified `0.1.0-dev` build.
 
 ## BUG-010: Goal reads and terminal updates can disagree on the active ID

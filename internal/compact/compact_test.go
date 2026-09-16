@@ -286,6 +286,84 @@ func TestPlannerTreatsMailboxAsTurnBoundary(t *testing.T) {
 	}
 }
 
+func mailboxHeadedGoalMessages() []protocol.Message {
+	messages := []protocol.Message{
+		{ID: "checkpoint", Role: protocol.RoleCustom, Content: []protocol.ContentBlock{protocol.NewTextBlock("working state")}},
+	}
+	appendMailboxCycle := func(mailID, cycleID string) {
+		callID := cycleID + "-call"
+		assistant := protocol.NewAssistantMessage(cycleID+"-assistant", mailID, "test", "model", []protocol.ContentBlock{
+			{Type: protocol.BlockProviderData, Name: cycleID + "-state", Data: []byte(`{"opaque":true}`)},
+			{Type: protocol.BlockToolCall, ToolCallID: callID, Name: "read"},
+		}, protocol.StopToolUse, nil)
+		messages = append(messages,
+			protocol.Message{ID: mailID, Role: protocol.RoleAgent, Content: []protocol.ContentBlock{protocol.NewTextBlock("mail")}},
+			assistant,
+			protocol.NewToolResultMessage(cycleID+"-result", assistant.ID, callID, "read", []protocol.ContentBlock{protocol.NewTextBlock("complete")}, false),
+		)
+	}
+	appendMailboxCycle("mail-1", "mail-cycle-1")
+	appendMailboxCycle("mail-2", "mail-cycle-2")
+	messages = append(messages,
+		protocol.Message{ID: "mail-3", Role: protocol.RoleAgent, Content: []protocol.ContentBlock{protocol.NewTextBlock("mail")}},
+		protocol.Message{ID: "goal-context", Role: protocol.RoleInternal, InternalContextSource: "goal", Content: []protocol.ContentBlock{protocol.NewTextBlock("continue goal")}},
+		protocol.Message{ID: "mode-context", Role: protocol.RoleInternal, InternalContextSource: "collaboration-mode", Content: []protocol.ContentBlock{protocol.NewTextBlock("default mode")}},
+	)
+	for i := range 5 {
+		cycleID := "goal-cycle-" + fmtID(i)
+		callID := cycleID + "-call"
+		assistant := protocol.NewAssistantMessage(cycleID+"-assistant", "", "test", "model", []protocol.ContentBlock{
+			{Type: protocol.BlockProviderData, Name: cycleID + "-state", Data: []byte(`{"opaque":true}`)},
+			{Type: protocol.BlockToolCall, ToolCallID: callID, Name: "read"},
+		}, protocol.StopToolUse, nil)
+		messages = append(messages,
+			assistant,
+			protocol.NewToolResultMessage(cycleID+"-result", assistant.ID, callID, "read", []protocol.ContentBlock{protocol.NewTextBlock("complete")}, false),
+		)
+	}
+	return messages
+}
+
+func TestPlannerCompactsMailboxHeadedAutomaticGoalCycles(t *testing.T) {
+	messages := mailboxHeadedGoalMessages()
+	plan := PlannerWithOptions(messages, PlannerOptions{
+		RetainTokens:               1,
+		MinRetainedTurns:           3,
+		AllowActiveToolCycles:      true,
+		AllowGoalToolCycles:        true,
+		AllowMailboxGoalToolCycles: true,
+	})
+	if len(plan.CompactionCandidates) == 0 || plan.KeepFrom <= 7 || !toolPairingBalancedAt(messages, plan.KeepFrom) {
+		t.Fatalf("mailbox-headed automatic goal was not safely compactable: %+v", plan)
+	}
+	if messages[plan.KeepFrom].Role != protocol.RoleAssistant || messages[plan.KeepFrom-1].Role != protocol.RoleTool {
+		t.Fatalf("mailbox-headed goal cut was not between complete cycles: keep=%d messages=%+v", plan.KeepFrom, messages)
+	}
+}
+
+func TestPlannerDoesNotCompactMailboxHeadedCyclesWithoutGoalProvenance(t *testing.T) {
+	messages := mailboxHeadedGoalMessages()
+	plan := PlannerWithOptions(messages, PlannerOptions{RetainTokens: 1, MinRetainedTurns: 3, AllowActiveToolCycles: true, AllowGoalToolCycles: true})
+	if len(plan.CompactionCandidates) != 0 {
+		t.Fatalf("ordinary mailbox turn used automatic-goal fallback: %+v", plan)
+	}
+}
+
+func TestPlannerDoesNotCompactUserHeadedCyclesWithMailboxGoalPermission(t *testing.T) {
+	messages := mailboxHeadedGoalMessages()
+	messages[7] = protocol.NewUserMessage("user", "", "keep this exact request")
+	plan := PlannerWithOptions(messages, PlannerOptions{
+		RetainTokens:               1,
+		MinRetainedTurns:           3,
+		AllowActiveToolCycles:      true,
+		AllowGoalToolCycles:        true,
+		AllowMailboxGoalToolCycles: true,
+	})
+	if len(plan.CompactionCandidates) != 0 {
+		t.Fatalf("user-originated turn used mailbox goal fallback: %+v", plan)
+	}
+}
+
 func TestPlannerSmallConversation(t *testing.T) {
 	msgs := []protocol.Message{
 		mkMsg("1", "", "hello"),
