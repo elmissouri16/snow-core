@@ -1,5 +1,14 @@
 # Known bugs
 
+## BUG-232: Plugin reload fixture races its own delivery notification
+
+- **Status:** Resolved — ordered drain, busy-boundary, package, and full-suite checks pass.
+- **Severity:** Low
+- **Surface:** JavaScript plugin reload API-version regression fixture
+- **Evidence:** Exact-release CI run 35234481852 failed `TestReloadJavaScriptAPIVersions/1` on macOS when its immediate second reload returned `plugin reload: event delivery active`. A successful first reload asynchronously publishes `EvSessionUpdated`; the plugin manager's event subscriber correctly holds its delivery read lock while forwarding that event. The test could request its second reload before delivery completed, so the nonblocking generation-boundary lock correctly rejected it. The unapplied receipt confirmed that no partial reload occurred.
+- **Fix:** Drain the ordered agent event stream after checking the first reload and immediately before asserting that an unchanged-byte second reload succeeds. Active or snapshotted delivery still rejects reload; the production nonblocking lock, generation boundary, notification, and busy-admission behavior are unchanged.
+- **Verification:** The API-version fixture passes 100 normal and 100 race-enabled repetitions; the snapshotted-delivery refusal passes 100 repetitions; event-bus drain tests pass 20 repetitions; `go test ./internal/app ./internal/plugin -count=1`, `go test ./... -count=1`, and `go vet ./...` pass. Replacement exact-SHA CI and Documentation workflows remain required before tagging.
+
 ## BUG-231: Provider retry fixture fails the repository gofmt gate
 
 - **Status:** Resolved — the repository format gate and focused package checks pass.

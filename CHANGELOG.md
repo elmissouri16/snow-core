@@ -148,9 +148,10 @@ shape are unchanged from alpha.9.
   `crypto.randomUUID()`, which is unavailable on insecure private-IP origins;
   the fallback uses `crypto.getRandomValues()`.
 - Correct release browser fixtures that mistook read-only Shell inventory GETs
-  for mutations, and stabilize worker-loss cleanup verification by retaining
-  the fictional Git PID/PGID while replacing its heavyweight terminal test
-  image with a minimal fixed workload.
+  for mutations, stabilize worker-loss cleanup verification by retaining the
+  fictional Git PID/PGID with a minimal terminal workload, and order the plugin
+  reload fixture after its own asynchronous notification without weakening the
+  active-delivery generation boundary.
 - Fix compact mobile conversation-header geometry and short-height composer
   focus scrolling so header actions remain reachable.
 - Require an advanced revision and exact native receipt before treating a

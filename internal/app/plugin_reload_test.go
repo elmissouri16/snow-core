@@ -82,6 +82,9 @@ func TestReloadJavaScriptAPIVersions(t *testing.T) {
 			if _, ok := reg.Get("plugin_neighbor_echo"); !ok {
 				t.Fatal("neighbor removed")
 			}
+			if err := a.Agent.DrainEvents(t.Context()); err != nil {
+				t.Fatal(err)
+			}
 			second, err := a.ReloadPlugin(t.Context(), "demo")
 			if err != nil || !second.Applied || second.Fingerprint != result.Fingerprint || second.Generation != result.Generation+1 {
 				t.Fatalf("unchanged-byte reload=%+v %v", second, err)
