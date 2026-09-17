@@ -1833,7 +1833,7 @@ dispatches. Linux and macOS both run `go test ./...` and the standalone SDK
 tests; macOS additionally retains a focused native installer suite. Linux owns
 formatting, vet, the full support-script suite, the production build and
 credential-free lifecycle smoke, SDK example execution, the deterministic
-performance-regression guard, `go test -race ./internal/... ./pkg/snowsdk`,
+performance-regression guard, serialized `go test -race -p 1 ./internal/... ./pkg/snowsdk`,
 cgo-disabled builds for all four release targets, and the pinned `govulncheck`
 reachable-code scan. Real-provider checks remain manual.
 `.github/workflows/release-alpha.yml` accepts only

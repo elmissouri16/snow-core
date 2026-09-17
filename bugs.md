@@ -1,5 +1,14 @@
 # Known bugs
 
+## BUG-235: Concurrent race packages exhaust catalog query deadline
+
+- **Status:** Fix implemented; serialized local race gate passes, exact replacement CI pending.
+- **Severity:** Low
+- **Surface:** Linux race-detector release gate
+- **Evidence:** Exact-release CI run 35241456905 failed `TestCatalogToolHistoryBoundsRowsAndDecodeBytes` only in the whole-suite race job. The greater-than-8-MiB byte-budget cells took about 6.5 seconds and returned fail-closed query/read errors after the production five-second catalog deadline. The job ran race-instrumented package binaries concurrently; reported package durations totaled roughly 983 seconds, while the focused fixture passed 10 race-enabled repetitions in about 33 seconds and emitted no data-race warning.
+- **Fix:** Run the unchanged full internal/SDK race package set with Go's package concurrency set to one (`-p 1`). This removes hosted-runner oversubscription while preserving every race-tested package, the exact aggregate/per-record byte fixtures, and the production five-second query, SQLite cancellation, privacy, row, and decode bounds.
+- **Verification:** Ten focused race-enabled repetitions and `go test -race -p 1 ./internal/... ./pkg/snowsdk -count=1` pass; all 70 support-script tests pass. Replacement exact-SHA CI and Documentation workflows remain required before tagging.
+
 ## BUG-234: Host-clone timeout fixture expires before descendant admission
 
 - **Status:** Resolved — admission-ordered timeout, package, and full-suite checks pass.
