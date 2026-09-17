@@ -1,5 +1,23 @@
 # Known bugs
 
+## BUG-230: Tool timeline treats Shell inventory reads as runtime activation
+
+- **Status:** Resolved — the complete tool-timeline matrix passes.
+- **Severity:** Low
+- **Surface:** Saved-history tool-timeline browser regression fixture
+- **Evidence:** `tool-timeline/run.mjs` passed all live-timeline behavior but failed four saved-history reports solely because `tests.js` asserted that the complete shared request log was empty. The current shared layout fixture intentionally records exact read-only browser and sidebar inventory GETs from the React Shell separately from runtime/mutation traffic; counting those reads as activation contradicted the fixture's own `nonInventoryRequests()` boundary.
+- **Fix:** Use the shared filtered request projection for the saved-history no-activation assertion. Exact inventory validation, unexpected-request recording, runtime/mutation rejection, saved ownership, chronology, output bounds, and page-error checks remain unchanged.
+- **Verification:** `node scripts/tests/browser/tool-timeline/run.mjs` passes 288 assertions with zero failures across eight live/saved, 320/1280 × dark/light reports. `node --check scripts/tests/browser/tool-timeline/tests.js` also passes.
+
+## BUG-229: Queue next fixture counts Shell inventory reads as mutations
+
+- **Status:** Resolved — the complete native Queue next matrix passes.
+- **Severity:** Low
+- **Surface:** Native Queue next browser regression fixture
+- **Evidence:** The full `queue-next/run.mjs` matrix reported 804 passing assertions and 320 failures across four reports. Every functional queue assertion passed, but the fixture routed the React Shell's read-only `GET /access/browsers` and `GET /projects/{id}/sidebar-sessions?offset=0` startup requests into its CSRF-protected mutation parser. That recorded two expected-POST errors and two forbidden-route failures in each later transport-boundary check even though queue POST counts, exact queue behavior, page errors, and no-replay assertions passed.
+- **Fix:** Handle only those exact bounded Shell inventory GETs before mutation accounting, matching the already-correct Edit & resend, Regenerate, and Stop/Reuse fixtures. Unknown reads, mutation paths, CSRF/instance/session/queue authority, field allowlists, counts, and no-fallback assertions remain strict.
+- **Verification:** `node scripts/tests/browser/queue-next/run.mjs` passes 1,124 assertions with zero failures across all four 320/1280 × dark/light reports. The exact queue POST counts, field allowlists, CSRF/instance/session/queue binding, no-fallback checks, read-only Shell startup, page-error checks, and no-replay behaviors remain covered.
+
 ## BUG-228: Commit-message skills stop explicit commit and push requests
 
 - **Status:** Resolved — active-skill boundaries no longer replace the enclosing user request.
@@ -64,13 +82,14 @@
 - **Fix:** Parse the private startup frame for the exact `Pairing code (` line instead of a positional line. Keep the origin framing and credential suppression unchanged.
 - **Verification:** `TestFixturePairingCodeIgnoresAddressNotices` and the previously failing isolated real-worker compaction test pass. Broader package verification is recorded with the secure automatic-LAN increment.
 
-## BUG-221: Worker-loss project-operation fixture leaves fictional Git observable
+## BUG-221: Worker-loss fixture obscures Git process-group cleanup
 
-- **Status:** Open — reproduced again in the same `manager_death_false` cell during automatic trusted-LAN HTTP verification; unrelated to the network-profile change.
+- **Status:** Resolved — repeated, race, package, process-group, and full-suite checks pass.
 - **Severity:** Medium
 - **Surface:** Web Manager real-worker project-operation cancellation fixture
-- **Evidence:** `go test ./...` failed `TestWebProjectOperationsRealWorkerDeathRestartNoReplay/manager_death_false` after the fixture killed its worker, reporting `fictional Git remained active after cancellation/worker loss`. An immediate isolated uncached rerun of that exact cell failed identically after its eight-second deadline. The assertion requires both an unchanged tick file and `kill(pid, 0)` returning `ESRCH`; the current evidence does not yet distinguish a still-running child from an exited but unreaped process. The latest full-suite rerun reproduced the same assertion while every other package passed.
-- **Follow-up:** Capture the fictional Git process state and process-group ownership after worker SIGKILL, then ensure worker-loss cleanup terminates and reaps the complete operation process group without replaying, registering, or adopting the uncertain clone. Preserve the tick and process-existence checks rather than extending the timeout or retrying away the failure.
+- **Evidence:** Full-suite runs moved the same `fictional Git remained active after cancellation/worker loss` assertion between `manager_death_false` and `manager_death_true`, while isolated reruns often passed. Production starts fictional Git with `PID == PGID` and terminates/reaps that complete group, but the fixture checked `kill(pid, 0)`. After the original Git process is reaped, that probe can observe an unrelated process that reused the numeric PID. The stronger negative-PGID check then reproduced one intermittent failure; process observation showed Darwin can hold the large killed `snow.test` fixture image in kernel exit state with a stable tick, where no further signal can accelerate teardown. Focused process-tree observation confirmed the fictional Git leader owns its own process group.
+- **Fix:** Keep the stable-tick requirement and check `kill(-pid, 0)` for the complete original Git process group, matching production `procgroup.Shutdown`. After all ACK, durable-row, identity, partial-work, output-canary, and start evidence checks pass, `syscall.Exec` replaces the heavyweight test image with a fixed minimal `/bin/sh` terminal loop while preserving its PID and PGID. The root is a quoted positional argument, not shell source, and the hardened helper environment remains in force. The loop's `sleep` descendant keeps complete-group cleanup coverage. No timeout, cancellation, cleanup, or no-replay boundary is weakened, and failure diagnostics now report any process still in the group.
+- **Verification:** The complete worker-loss regression passes 50 consecutive normal repetitions and 10 consecutive race-enabled repetitions; `TestShutdownStopsCompleteProcessGroup` passes 50 repetitions; uncached `go test ./cmd/snow -count=1`, `go test ./...`, and `go vet ./...` pass. The broader internal/SDK race gate also passes.
 
 ## BUG-220: Long goal prompts stop extending the ChatGPT cache prefix
 
@@ -390,8 +409,8 @@
 
 ## BUG-176: Layout fixture bypasses its mock after settings moved to HTMX
 
-- **Status:** Open — reproduced again during BUG-226 verification; unrelated to the mobile header change.
-- **Regression evidence:** A fresh serial `node scripts/tests/browser/harness-layout/run.mjs --smoke` run consistently fails all `chat-model-root`, `chat-model-groups`, and `chat-sessions` cells at 390px/dark: model controls do not settle and the session menu does not receive the expected host DTOs. The base `chat` header/layout assertions, including BUG-226's new compact geometry checks, pass.
+- **Status:** Open — reproduced in the alpha.10 full release-layout gate; unrelated to the mobile header change.
+- **Regression evidence:** A fresh serial `node scripts/tests/browser/harness-layout/run.mjs` release run exited 1 with 170 of 2,058 viewport/state combinations failed. Repeated observed failures include `chat-model-root`, `chat-model-groups`, `chat-sessions`, and the model-empty explanation across multiple widths, themes, and heights: model controls do not settle and the session menu does not receive the expected host DTOs. The separately tracked reader-anchor failures remain under BUG-196; ordinary base layout and the real HTTP/SSE manager suites continue to pass.
 - **Evidence:** `harness-layout/run.mjs --smoke` fails model discovery/session-menu cases because its fixture intercepts `fetch` only, while the production settings/choices owner now uses HTMX XHR. The native HTTP/SSE matrix passes those workflows; telemetry layout cases also pass. The fixture never records or answers the new discovery transport.
 - **Remediation:** Route explicit handler-based HTMX requests through the layout fixture's existing strict public-response mock, preserving other HTMX behavior and request admission. Add fixture regressions; retain native-transport coverage as the production integration authority.
 - **Prior verification:** 28 layout-fixture unit tests passed after the earlier remediation, including the HTMX adapter's exact response/status forwarding, stale-instance rejection, failure preservation, ordinary-navigation fallback and runtime-panel read allowlist. That checkout's fresh `node scripts/tests/browser/harness-layout/run.mjs --smoke` passed **2,612 assertions across 147 reports**, zero failures/unexpected requests. The regression evidence above records the later recurrence on the current implementation; native HTTP/SSE remains independently covered.

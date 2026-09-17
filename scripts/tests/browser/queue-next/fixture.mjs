@@ -40,6 +40,19 @@ export function transport(files, fixture) {
         response.writeHead(200, {"Content-Type": {".js": "text/javascript", ".css": "text/css", ".html": "text/html", ".svg": "image/svg+xml"}[extname(path)] || "application/octet-stream", "Cache-Control": "no-store"}); response.end(files.get(path)); return;
       }
       if (path === "/favicon.ico") { response.writeHead(204); response.end(); return; }
+      // Full Shell inventories are read-only and must not enter mutation counts.
+      if (request.method === "GET" && path === "/access/browsers" && !url.search) {
+        json(response, {limit: 8, browsers: []}); return;
+      }
+      if (request.method === "GET" && url.search === "?offset=0") {
+        const project = [state.snapshot.project_id, "00000000-0000-4000-8000-000000000001"].find(id => path === `/projects/${id}/sidebar-sessions`);
+        if (project) {
+          const active = project === state.snapshot.project_id;
+          json(response, {project_id: project, instance_id: active ? state.snapshot.instance_id : "",
+            sessions: active ? [{session_id: state.snapshot.session_id, name: "Fixture conversation"}] : [], available: true,
+            active_session_id: active ? state.snapshot.session_id : "", delete_supported: false, has_more: false, next_offset: active ? 1 : 0}); return;
+        }
+      }
       const prefix = `/projects/${state.snapshot.project_id}/runtime`;
       if (path === prefix && request.method === "GET") { state.reads++; json(response, state.snapshot); return; }
       if (path === prefix + "/events" && request.method === "GET") {

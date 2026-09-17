@@ -32,6 +32,17 @@ import (
 
 const realProjectCanary = "FICTIONAL_GIT_OUTPUT_MUST_NEVER_BE_PUBLIC"
 
+const realProjectWaitScript = `
+trap 'exit 0' TERM INT HUP
+tick=0
+while :; do
+	tick=$((tick + 1))
+	printf '%s\n' "$tick" > "$1/git-tick" || exit 111
+	[ ! -e "$1/release-git" ] || exit 0
+	sleep 0.01
+done
+`
+
 // Only the test executable recognizes these private fixture arguments. The
 // production host helper early hook (in host_clone_helper_test.go) remains the
 // actual implementation, with real descriptor and liveness-pipe supervision.
@@ -202,13 +213,14 @@ func realProjectGit(root string) int {
 	}
 	fmt.Fprintln(os.Stdout, realProjectCanary)
 	fmt.Fprintln(os.Stderr, realProjectCanary)
-	for {
-		_ = os.WriteFile(filepath.Join(root, "git-tick"), []byte(strconv.FormatInt(time.Now().UnixNano(), 10)), 0600)
-		if _, err := os.Stat(filepath.Join(root, "release-git")); err == nil {
-			return 0
-		}
-		time.Sleep(10 * time.Millisecond)
+	// Preserve the validated fixture's PID and process-group identity while
+	// replacing the large test binary with a tiny terminal workload. Darwin can
+	// keep a killed snow.test image in kernel exit state long enough to obscure
+	// the helper's actual whole-group cleanup contract.
+	if err := syscall.Exec("/bin/sh", []string{"sh", "-c", realProjectWaitScript, "fictional-git", root}, os.Environ()); err != nil {
+		return fail(110)
 	}
+	return 0
 }
 
 type realProjectHTTP struct {
@@ -436,11 +448,29 @@ func assertRealProjectGitStopped(t *testing.T, root string) {
 		before, _ := os.ReadFile(path)
 		time.Sleep(150 * time.Millisecond)
 		after, _ := os.ReadFile(path)
-		if len(before) > 0 && bytes.Equal(before, after) && errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
+		if len(before) > 0 && bytes.Equal(before, after) && errors.Is(syscall.Kill(-pid, 0), syscall.ESRCH) {
 			return
 		}
 	}
-	t.Fatal("fictional Git remained active after cancellation/worker loss")
+	t.Fatalf("fictional Git process group remained active after cancellation/worker loss:\n%s", realProjectProcessGroupState(pid))
+}
+
+func realProjectProcessGroupState(groupID int) string {
+	output, err := exec.Command("ps", "-axo", "pid=,ppid=,pgid=,state=,command=").Output()
+	if err != nil {
+		return "process state unavailable: " + err.Error()
+	}
+	var rows []string
+	for line := range strings.SplitSeq(string(output), "\n") {
+		var processID, parentID, processGroupID int
+		if _, err := fmt.Sscanf(line, "%d %d %d", &processID, &parentID, &processGroupID); err == nil && processGroupID == groupID {
+			rows = append(rows, strings.TrimSpace(line))
+		}
+	}
+	if len(rows) == 0 {
+		return "process group disappeared before diagnostics"
+	}
+	return strings.Join(rows, "\n")
 }
 
 func (f *realProjectHTTP) assertAwaitingRegistration(op web.ProjectOperation) {

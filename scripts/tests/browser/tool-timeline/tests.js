@@ -152,7 +152,7 @@
       } else {
         window.SnowMessages.enhance(document); window.SnowMessages.enhance(document);
         check(savedState.every(item => item.tool.isConnected && item.tool.closest("[data-message-id]") === item.owner && item.tool.dataset.historyToolId === item.id && $(".activity-output", item.tool).textContent === item.output), "Repeated saved-page enhancement preserves exact original ownership, IDs, rows and output");
-        check(!fixture.requests.length, "Saved history does not activate or request a runtime");
+        check(!fixture.nonInventoryRequests().length, "Saved history does not activate or request a runtime");
       }
       check(!fixture.requests.some(request => request.method !== "GET" && !request.path.endsWith("/runtime/choices")), "No checks submit prompts, permissions, tools, manager or provider mutations");
       check(fixture.errors.length === 0, "Production scripts report no fixture errors or unhandled rejections");

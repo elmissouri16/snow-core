@@ -5,6 +5,217 @@ also include the generated GitHub comparison for the tagged commit.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.10] - 2026-09-17
+
+This is Snow's largest alpha update since the initial launch. It adds an
+opt-in, authenticated local Web Manager preview, expands the additive RPC v1
+control surface for managed clients, and hardens append-only session continuity,
+public history, goals, compaction, and skill-scoped execution. The terminal
+interface remains available, and the public installer and three-member archive
+shape are unchanged from alpha.9.
+
+### Added
+
+- Add `snow --mode web`, an authenticated local browser manager for registering
+  host projects, passively browsing bounded saved-session history, and explicitly
+  starting RPC-backed conversations. Merely starting or browsing the manager
+  does not initialize an agent, provider, project configuration, plugin, MCP
+  server, or session runtime.
+- Add a responsive conversation workspace with sanitized Markdown and plan
+  rendering, public tool activity, models and session-local reasoning, Default
+  and Plan controls, usage/context indicators, questions and approvals, Stop,
+  bounded attachments, `@` project-file references, and `$` installed-skill
+  suggestions. Browsing or selecting a suggestion sends nothing and activates
+  no skill; selection only inserts the reference into the draft.
+- Add serial **Queue next**, native steering, **Edit & resend**, **Regenerate**,
+  and owned manual compaction. Unsent queued work survives cancellation or
+  failure for explicit review and is never replayed automatically.
+- Add manager views for files and Git changes, Activity, workspace and
+  conversation labels/pins/archive, branch versions, public-history preview,
+  branch rename/fork, detached conversations, and two-minute single-use Restore.
+  These history operations preserve exact append-only records and do not undo
+  working-tree or command side effects.
+- Add explicit browser Thread Goal runs with optional token budgets, exact
+  session/branch/tip admission, whole-run Stop, and durable deferred state.
+  Also add bounded managed-process list/log/Stop controls using opaque handles
+  instead of exposing operating-system process IDs.
+- Add reviewed host project creation and anonymous HTTPS clone operations.
+  Destinations must be new, registration is a separate step, and neither
+  operation automatically activates an agent runtime.
+- Add durable, origin-scoped browser pairing, inventory and targeted revocation;
+  remembered activation consent for an exact registered workspace; host provider
+  status and future-worker defaults; and bounded manager organization controls.
+- Add `--rpc-startup catalog` for runtime-free saved-session, public-history,
+  public-tool-result, and user-image reads, plus `--rpc-startup control` for
+  bounded host defaults, provider status, API-key mutation, inactive-session
+  deletion, and project creation/clone without constructing an agent runtime.
+- Expand capability-gated RPC v1 controls for model discovery and selection,
+  session reasoning, Queue next, owned goals and compaction, managed steering,
+  process management, message edit/regenerate, branch versions and restore,
+  history controls, durable images, and explicit public-history projections.
+- Add dependency-light `pkg/agentclient/rpc` and `pkg/agentclient/process`
+  packages for bounded JSONL RPC over an owned connection and supervised Snow
+  subprocesses without invoking a shell.
+
+### Changed
+
+- Persist provider-only goal, mode, plugin, and steering context beside its
+  owning assistant response. Retry, resume, forks, hydration, cached prefixes,
+  and compaction now retain exact provider continuity while normal history,
+  RPC, SDK, TUI, catalog, Web Manager, logs, and summaries continue to omit it.
+- Make public tool-result provenance explicit. Browser and other security-
+  sensitive consumers can use bounded `tool_result`, `public_tool_result`, or
+  `messages_page` data marked public at execution time instead of treating
+  legacy `tool_output`, raw tool messages, arguments, images, thinking, provider
+  continuity, or plugin metadata as a safe projection.
+- Strengthen managed goal admission and ownership. A managed prompt cannot
+  invoke goal tools unless an exact goal run was explicitly accepted; that run
+  can inspect or update only its owning goal and cannot start in Plan Mode or
+  consume pending/recovered queue work.
+- Report mixed usage currencies as `cost_currency_conflict:true` without an
+  invalid combined monetary value. Token and request totals remain available.
+- Migrate the manager interface to a checked-in React 19.3, TypeScript 7, and
+  Vite 8 bundle. Production remains a single Go binary with embedded assets and
+  has no Node server, CDN, Next.js, or runtime npm dependency.
+- Add Node 24 frontend CI, type checks, native Chromium fixtures, reproducible
+  generated-asset checks, and frontend/harness third-party notices in release
+  archives while preserving the archive's `snow`, `README.md`, and `LICENSE`
+  member contract.
+
+### Security and networking
+
+- Web mode is a preview for a single user on a trusted private network. It
+  automatically serves `127.0.0.1:7331` and, when available, the first private
+  IPv4 address or IPv6 ULA. Localhost and LAN use independent exact Host/Origin,
+  CSRF, cookie, pairing, throttling, expiry, and revocation boundaries.
+- **Private-LAN traffic is unencrypted HTTP.** Pairing authenticates a browser
+  but does not encrypt the pairing code, cookies, prompts, responses, tool
+  output, or attachments. Never use Web mode on public Wi-Fi, forward its port,
+  or expose it to the public Internet. There is no supported TLS, certificate,
+  DNS-origin, trusted-proxy, custom-listener, or public-Internet deployment mode.
+- Web browsing, project creation/clone, workers, tools, and subprocesses use the
+  Snow host user's operating-system authority. Snow remains unsandboxed; Stop
+  cannot reverse file writes, commands, network effects, or detached descendants.
+- New Web Manager workers start in `ask`. Plugins, MCP servers, subagents, and
+  debug capture are disabled in the fixed managed profile. Installed skills are
+  disabled unless startup skill access is explicitly enabled; that saved project
+  preference is preselected on later starts and exposes the normal skill catalog,
+  so the model may activate any applicable enabled skill. Process and goal tools
+  remain subject to their additional admission and permission checks.
+- The browser never accepts provider credentials or performs OAuth. Runtime-free
+  API-key control is only for trusted same-user local stdio/RPC clients and is
+  not exposed through the HTTP manager.
+
+### Compatibility and migration
+
+- Alpha.9 had no Web Manager flags, so this release removes no alpha.9 Web CLI
+  contract. Users of intermediate source previews that had `--web-listen`,
+  `--web-tls-cert`, `--web-tls-key`, saved network profiles, or `snow web`
+  subcommands must switch to root-command `snow --mode web` and the automatic
+  localhost/private-LAN HTTP service on port 7331.
+- Stop and restart the foreground manager after installing a new binary, then
+  explicitly start fresh workers. Reloading a browser cannot replace a running
+  manager or worker executable.
+- The first upgrade from an older Web Manager preview revokes legacy unscoped
+  browser sessions because they cannot prove a localhost or LAN origin. The
+  pairing code remains available, but each origin must pair independently.
+  Existing project registrations also require one explicit remembered-activation
+  confirmation; removal, archive, restore, or identity replacement clears it.
+- SQLite remains at schema version 12 and exact history remains append-only.
+  Sessions can now include private `internal_context`, explicit public tool
+  results, and unknown-tool-outcome metadata that alpha.9 does not interpret
+  with the new semantics. Back up session databases with Snow stopped before
+  upgrading; rollback should restore that backup to avoid losing provider
+  continuity or the new public-history presentation.
+- RPC remains schema version 1, eager startup remains the default, and wire
+  changes are additive and capability-gated. Integrations must tolerate unknown
+  capabilities, commands, event types, and optional fields; strict decoders
+  that reject unknown members need updating. A prompt admission response is not
+  terminal—`prompt_completed` remains authoritative.
+- Web, catalog, and control startup profiles reject unrelated runtime flags.
+  Web provider/model choices come from host defaults or explicit activation,
+  not runtime flags passed to `snow --mode web`.
+- Source builds continue to require Go 1.27rc3. Frontend development requires
+  Node 22.12 or newer and npm; CI pins Node 24.16.0. Binary users and ordinary
+  Go source builds use checked-in embedded assets and do not require Node.
+
+### Fixed
+
+- Keep localhost directly usable alongside private-LAN Web mode instead of
+  redirecting the printed local URL to the LAN origin, and isolate LAN HTTP
+  cookies from retired secure-cookie names.
+- Generate browser request identifiers without relying on
+  `crypto.randomUUID()`, which is unavailable on insecure private-IP origins;
+  the fallback uses `crypto.getRandomValues()`.
+- Correct release browser fixtures that mistook read-only Shell inventory GETs
+  for mutations, and stabilize worker-loss cleanup verification by retaining
+  the fictional Git PID/PGID while replacing its heavyweight terminal test
+  image with a minimal fixed workload.
+- Fix compact mobile conversation-header geometry and short-height composer
+  focus scrolling so header actions remain reachable.
+- Require an advanced revision and exact native receipt before treating a
+  browser goal as admitted; uncertain failures remain fenced and are not replayed.
+- Preserve transcript/composer geometry when direct compaction is a no-op.
+- Compact automatic goals correctly when a trusted mailbox update begins the
+  next cycle, without weakening ordinary user/mailbox compaction boundaries.
+- Preserve the enclosing request after a skill contributes its scoped output.
+  Skill methods and stopping rules constrain only that contribution and do not
+  authorize unrequested side effects or bypass permissions.
+- Classify provider-confirmed RPC aborts as canceled, retain unknown-outcome
+  provenance for interrupted tools, and report field-level permission-effect
+  truncation instead of presenting incomplete review data as complete.
+
+### Known alpha limitations
+
+- Web Manager remains a bounded preview, not a remote deployment surface. At
+  most two projects can be live; restart begins with no workers; reconnects
+  perform fresh reads but never replay mutations or automatically resume work.
+- Clone supports anonymous HTTPS only: no SSH, credentials, local/file clones,
+  authenticated profiles, or disk/transfer quota. General Git writes, worktree
+  forks, a browser file editor, PTY, browser OAuth, plugin/MCP/subagent controls,
+  and automatic worker recovery remain out of scope.
+- Browser acceptance uses local fake providers, Chrome/Chromium, mocked public
+  DTOs where documented, and simulated viewports. It is not physical-device,
+  public-network, detached-side-effect, or live-provider compatibility evidence.
+- Open Web Manager fixture/presentation defects remain tracked: an Activity
+  privacy fixture can intermittently match a numeric sentinel (BUG-218),
+  reader-anchor assertions regress under intermediate React layouts (BUG-196),
+  settings/layout coverage has a stale transport path (BUG-176), and redundant
+  React telemetry reconciliation remains regressed (BUG-175).
+- Compact terminal session/branch panels can hide management-action hints even
+  though the keyboard actions still work (BUG-086).
+- Binaries are not code-signed or notarized. Checksums prove integrity against
+  the published GitHub release, not an independent signature.
+
+### Validation
+
+- The isolated release worktree passes all Go tests, vet, 70 support-script
+  tests, the benchmark regression guard, the full internal/SDK race suite,
+  standalone SDK execution, an exact-version production build, and a
+  credential-free fake-provider lifecycle smoke.
+- Node 24.16 frontend installation, typechecking, all 127 package tests,
+  reproducible generated assets/notices, and 202 native React-page assertions
+  pass. Real-manager access, runtime, host, workflow, execution, streaming, and
+  permission-execution suites pass. Production browser queue, history,
+  edit/regenerate, composer, tool, and responsive suites also pass; two stale
+  Shell-inventory fixture boundaries found during release verification were
+  corrected and rerun successfully. The corrected real-worker cancellation
+  fixture also passes 50 normal and 10 race-enabled consecutive repetitions.
+- The complete mocked layout matrix remains red at 170 of 2,058 reports because
+  of the already-disclosed BUG-176 transport drift and BUG-196 reader anchors.
+  The supplemental permission-policy matrix retains 14 BUG-175 reconciliation
+  failures. These fixture/presentation limitations do not replace the passing
+  real HTTP/RPC/worker suites and remain listed above as known alpha issues.
+- Secret-free live inference passes for OpenCode Go API-key authentication,
+  ChatGPT/Codex OAuth, and the configured authenticated OpenAI-compatible
+  endpoint. The two non-thinking models required an explicit `--thinking off`
+  override instead of the saved `high` default. The optional `llm-studio`
+  profile had no resolvable credential and was not counted as a live pass.
+- The local environment did not provide `govulncheck`; the pinned reachable-code
+  scan remains part of the required CI gate. Publication still requires
+  successful CI and Documentation push workflows for the exact release commit
+  before the immutable tag is created.
+
 ## [0.1.0-alpha.9] - 2026-09-11
 
 This alpha refreshes the terminal interface, adds branch-local plugin workflows
