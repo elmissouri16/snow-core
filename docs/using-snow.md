@@ -433,10 +433,14 @@ Expansion and bounded metadata are remembered in this tab, not durable settings.
 Registering a workspace opens an empty **New session** draft without creating a
 session or starting a runtime. Opening a cold workspace normally restores the
 last session you viewed in this tab if it is still available, otherwise its most
-recent saved session. Saved messages appear in the central conversation surface,
-with **Resume session** in the composer seat; a workspace with no sessions shows
-**Start session** or **Trust & start** there instead. The cold textarea remains
-editable before Start/Resume, but starting does not send its text. A draft owned
+recent saved session. That project-level navigation and direct URL/reload remain
+passive: saved messages appear in the central conversation surface with **Resume
+session** in the composer seat. Deliberately selecting a saved conversation in
+the same tab resumes it directly when workspace trust is already remembered;
+the row selection is the activation action. Untrusted workspaces stop at the
+trust confirmation instead. A workspace with no sessions shows **Start session**
+or **Trust & start**. The cold textarea remains editable before manual
+Start/Resume, but starting does not send its text. A draft owned
 by another cold session stays retained instead of being overwritten. Automatic
 transfer requires the exact acknowledged workspace, session and runtime instance.
 Existing session cleanup still applies: switching away from an unused, unnamed
@@ -448,15 +452,21 @@ when you browse. On desktop, a focused list row keeps focus after navigation
 instead of jumping into the conversation; moving focus elsewhere while a read
 is pending does not pull it back. Rapid sidebar selections supersede older
 pending reads. Closing the current conversation's sidebar Rename dialog returns
-focus to its row. Saved-history browsing still does not activate a worker.
+focus to its row. Expanding lists, project-level navigation, direct URLs, reloads
+and modified link clicks remain read-only. An ordinary same-tab saved-conversation
+row selection is deliberately different: with remembered workspace trust, that
+click resumes the exact selected session once and enters its live conversation.
 
-Starting a worker always requires an explicit action. On first
-activation, confirm **I trust this workspace. Remember my choice…**. That choice
-survives manager restarts for this exact registered folder and applies to this
-manager’s paired browsers. Later visits show compact **Start session** or
-**Resume session** controls instead of repeating the trust checkbox and warning.
-Nothing starts automatically, and trust does not grant tools Allow permissions.
-New sessions still start in Ask; resumed sessions restore their saved policy.
+Starting a worker always requires an explicit action. On first activation,
+confirm **I trust this workspace. Remember my choice…**. That choice survives
+manager restarts for this exact registered folder and applies to this manager’s
+paired browsers. Later project/deep-link visits show compact **Start session** or
+**Resume session** controls instead of repeating the trust checkbox and warning;
+a deliberate sidebar saved-conversation selection serves as Resume. Passive
+page loading starts nothing, and trust does not grant tools Allow permissions.
+New sessions still start in Ask; resumed sessions restore their saved policy. The
+saved-policy reminder remains available under **Startup settings** without
+occupying the default Resume form.
 
 Use **Settings → Workspaces → Remembered project trust → Forget trust** to require
 confirmation again. This affects future starts, not already-running workers.
@@ -910,17 +920,21 @@ worker with fixed arguments and the selected project CWD. At most two reads run
 concurrently without a queue or idle pool. Catalog startup bypasses app,
 configuration, credentials, instructions, extension and provider initialization.
 
-To work, explicitly activate a new session or the selected saved session. Activation uses the host's configured provider/model; if those defaults cannot
-start, configure them on the host first. After activation, use the discovered
+To work, explicitly activate a new session or a saved session. A deliberate
+same-tab saved-conversation selection is the activation action when workspace
+trust is remembered; project navigation, direct URLs, reloads and modified clicks
+remain passive. Activation uses the host's configured provider/model; if those
+defaults cannot start, configure them on the host first. After activation, use the discovered
 provider-grouped model picker rather than typing identities. Activation starts a separate
 Snow RPC worker, loads host configuration and applicable trusted project
 instructions, may discover provider models, and **defers any saved goal**. It
 does not send a prompt. New sessions start with permission mode `ask`; explicitly
 resuming a saved session can restore its saved policy. The live profile disables
-plugins, MCP, subagents and debug capture. Skills are disabled unless explicitly
-enabled with **Enable installed skills**, whose checkbox remembers the project's
-last saved choice. The opt-in adds only the three skill lifecycle tools and
-retains separate CLI extension trust. Its fixed
+plugins, MCP, subagents and debug capture. Installed skills follow the workspace's
+saved next-start policy and are enabled by default for newly registered projects.
+Disable or re-enable them under **Settings → Workspaces → Installed skills**;
+Start and Resume repeat no checkbox. Enabling adds only the three skill lifecycle
+tools and retains separate CLI extension trust. Its fixed
 `managed-explicit-goals` profile enables read/glob/grep/write/edit/bash/ask_user
 and the managed-process bundle. Goal tools are available only within an explicitly
 admitted native goal run, not ordinary prompts. This is still **OS-privileged agent
@@ -1039,13 +1053,14 @@ and do not retry automatically. Image-bearing messages do not offer text-only
 Edit/reuse actions. These previews require an updated manager and worker; a
 browser reload alone cannot upgrade an already-running process.
 
-Skills are off by default in web workers. To use them, close the runtime and
-select **Enable installed skills** when explicitly starting it. The choice is
-saved per project across manager restarts and preselects the checkbox on later
-starts or resumes. Uncheck it to save a disabled preference, or use **Settings →
-Workspaces → Installed skills**. Settings are shared by the manager's paired
-browsers and affect future starts only, never a running worker. Archiving/removing
-the project registration clears this preference.
+Installed skills are enabled by default for newly registered web workspaces.
+Start and Resume inherit the saved per-project policy without repeating a
+checkbox. To opt out, close the runtime and use **Settings → Workspaces →
+Installed skills**; use the same setting to re-enable them. Settings are shared by
+the manager's paired browsers and affect future starts only, never a running
+worker. Archiving/removing the project registration clears an explicit opt-out,
+so restoring or re-registering returns to the enabled default. Existing saved
+preferences are preserved during upgrade.
 
 Enabling skills admits the worker's normal installed-skill catalog, not only
 the skill you mention: the model can activate applicable enabled skills too.
@@ -1142,10 +1157,12 @@ happened. Tool output stays literal text and is excluded from Copy message.
 Browser disconnects do not cancel admitted work. Stop requests cancellation;
 Close and manager shutdown stop owned workers, but cannot prove that arbitrary
 tool side effects were canceled or reversed. A failed worker must be explicitly
-closed before replacement. Close takes you to the same saved session for review;
-**Resume session** remains a separate, confirmed activation. If a crashed
-session needs WAL recovery and the read-only catalog cannot display it, the
-explicit resume form still retains that exact session ID instead of silently
+closed before replacement. Close takes you to the same saved session for review.
+The visible **Resume session** remains an explicit activation; deliberately
+selecting that saved conversation again in the same tab serves as the same action
+when workspace trust is remembered. If a crashed session needs WAL recovery and
+the read-only catalog cannot display it, the explicit resume form still retains
+that exact session ID instead of silently
 creating a new conversation. Activation must independently verify the saved
 session; inspect its reloaded history before sending new work. No prompt, tool
 execution, approval, or answer is automatically replayed.

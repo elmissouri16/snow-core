@@ -106,10 +106,11 @@ The fixed `managed-explicit-goals` worker profile suppresses goal tool schemas
 and rejects their dispatch during ordinary prompts. Within explicit goal work,
 get/update apply only to the owning goal; the model cannot create or replace a
 goal. This is still the existing agent loop, not a browser scheduler or autonomous
-multi-agent workflow. Plugins, MCP and subagents remain disabled. Skills are disabled by default;
-the **Enable installed skills** startup checkbox admits the normal worker catalog
-and remembers its setting per project, independently of goal controls and tool
-permissions. Changes apply on the next explicit start, not to a live run. Managed
+multi-agent workflow. Plugins, MCP and subagents remain disabled. Installed skills
+follow the workspace's saved next-start policy and default to enabled for new
+registrations; opt out under **Settings → Workspaces → Installed skills**. The
+policy is independent of goal controls and tool permissions, and changes apply on
+the next explicit start, not to a live run. Managed
 process tools are enabled but retain normal hard-policy and permission checks.
 
 The optional budget follows the accounting rules below and is **not a strict

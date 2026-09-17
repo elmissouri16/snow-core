@@ -190,10 +190,11 @@ image bytes. Queue/edit/reuse remain text-only and cannot silently drop context.
 pagination and pinned-root protections; explicit selection captures complete
 bounded UTF-8 content, rejecting truncated previews. `$` uses an instance-bound
 100-entry metadata projection from RPC `skills` and inserts exact tokens without
-activation. The skills startup checkbox admits three lifecycle tools and now
-remembers its preference per project; Settings → Workspaces changes future starts.
-New/existing registrations remain disabled until opt-in, and archive/removal clears
-the preference. Manager consent never grants CLI extension trust or changes permission policy.
+activation. The workspace's saved next-start policy admits three lifecycle tools;
+Settings → Workspaces changes future starts without a repeated activation checkbox.
+New registrations default enabled, existing saved preferences survive upgrade, and
+archive/removal clears an opt-out back to that default. Manager consent never grants
+CLI extension trust or changes permission policy.
 Draft ownership, asynchronous query/caret/instance fencing and no replay are
 shared with the existing composer controller. PDFs/arbitrary binaries and native
 attachment queue/edit support remain out of scope.
@@ -228,8 +229,10 @@ Several groups remain expanded across native workspace replacements, with
 existing search, scroll, focus and no-op reconciliation preserved. Registration selects explicit `new=1`
 without creating a session; an ordinary cold workspace prefers a valid tab-memory
 `last_session` hint, then its most recently updated saved session. Explicit saved
-links retain their existing live-owner mismatch rejection. No GET switches or
-activates a runtime.
+links retain their existing live-owner mismatch rejection. A deliberate ordinary
+same-tab saved-session row selection resumes the exact session directly when
+workspace trust is remembered; its authenticated POST is the activation action.
+Direct GETs, reloads and modified clicks never switch or activate a runtime.
 
 - `GET /projects/{project}/sidebar-sessions?offset=N` exposes authenticated public
   metadata only: project/instance identity, session ID/name/update time, availability,
@@ -245,8 +248,11 @@ activates a runtime.
   access overlapping newly admitted runtime ownership.
 - `sidebar-sessions.js` owns bounded tab-memory branches and stale-response guards;
   `shell.js` dispatches deliberate row selections to `app.js`. The app verifies a
-  mounted live owner before consuming a cross-workspace mutation intent once.
-  `conversation.js` retains switch/queue/Stop/unknown-outcome admission. A busy
+  mounted live owner before consuming a cross-workspace mutation intent once. For
+  a cold workspace, it first binds the selected URL/session and requires the exact
+  remembered-trust hidden confirmation before submitting one activation; untrusted,
+  unavailable and read-only views stay passive. `conversation.js` retains
+  switch/queue/Stop/unknown-outcome admission. A busy
   instance-bound displayed target opens existing Stop & switch confirmation rather
   than trying an idle-only inventory read. The runtime validates the actual target.
 - Switching preserves a complete, identity-checked idle snapshot's connected
@@ -277,15 +283,18 @@ activates a runtime.
   apply the same edge to the compound field and suppress the inner textarea
   outline; model search and organization fields do not override this primitive.
 - Cold and saved sessions share the conversation surface and Start/Resume composer
-  seat. The cold draft is unnamed, disabled without JavaScript and never submitted
-  as prompt text during activation. A single bounded pending startup draft cannot
+  seat. Direct/project navigation remains at that passive seat; a deliberate
+  same-tab saved-session row selection uses the remembered-trust form as its one
+  Resume admission and enters the live conversation. The cold draft is unnamed,
+  disabled without JavaScript and never submitted as prompt text during activation. A single bounded pending startup draft cannot
   overwrite another cold or live draft; automatic transfer matches the explicit
   activation receipt's project/session/instance. Explicit Use draft is separate
   consent. Nothing is auto-sent, and a late activation receipt cannot pull a newer
   workspace view back to its retired form.
-- Trust, installed-skills opt-in, CLI extension trust and session permission policy
-  remain distinct. First-start host-privilege/no-sandbox disclosure and restored
-  saved-Allow warnings remain visible. Settings retains actual trust revocation.
+- Trust, the installed-skills next-start policy, CLI extension trust and session
+  permission policy remain distinct. First-start host-privilege/no-sandbox disclosure remains
+  visible; the restored saved-Allow reminder stays available under the collapsed
+  Startup settings disclosure. Settings retains actual trust revocation.
 
 Workflow verification status and reproduced integration defects are tracked in
 `bugs.md` (BUG-181 through BUG-184); historical matrix counts below are not a claim
@@ -490,9 +499,10 @@ refresh: after local installation, restart the manager and workers.
   stop managed processes, not guaranteed arbitrary detached effects.
 
 Existing Queue next, Edit & resend and Regenerate remain subject to their shared
-admission and recovery rules. Skills are disabled by default and can be enabled
-only by an explicit per-start checkbox; CLI extension trust and tool permissions
-stay independent. Plugins, MCP, subagents and debug remain
+admission and recovery rules. At that milestone, skills were disabled by default
+and required an explicit per-start checkbox; the later Settings-owned enabled
+default documented above supersedes that startup policy. CLI extension trust and
+tool permissions stay independent. Plugins, MCP, subagents and debug remain
 disabled. At that milestone, remote access, host-settings/provider-setup editors,
 clone-directory jobs, worktree forks and manual compaction were not supplied.
 The later local increment below supersedes only its implemented subset.
@@ -953,7 +963,10 @@ this mode is suitable only for a trusted private LAN.
 
 Every significant selection has a navigable URL. Browser Back restores project,
 session, scroll anchor, and inspector selection without resubmitting a prompt.
-Selecting a saved session for reading must not start plugins, goals, or an agent.
+Passive saved-session reads must not start plugins, goals, or an agent. A deliberate
+ordinary same-tab sidebar selection may resume the exact session only after
+remembered workspace trust is verified; direct URLs, reloads and modified clicks
+remain read-only.
 
 ### First launch
 

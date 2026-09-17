@@ -59,17 +59,20 @@ filesystem sandbox. Directory enumeration and pagination are bounded.
 
 Explicit live activation starts one existing Snow RPC worker for the project,
 loads normal host configuration and applicable trusted instructions, and may
-perform provider discovery. At most two live projects are admitted. The fixed
+perform provider discovery. With remembered workspace trust, deliberately
+selecting a saved conversation in the same tab is that activation action and
+resumes the exact selected session. Direct URLs, reloads, project-level
+navigation, modified link clicks and inactive-catalog expansion remain passive. At most two live projects are admitted. The fixed
 `managed-explicit-goals` worker profile starts new sessions with `ask` permissions
-and disables plugins, MCP, subagents and debug capture. Skills are disabled by
-default. **Enable installed skills** is a separate per-project startup preference,
-saved in the manager registry and shared by its paired browsers. It starts unchecked
-until explicitly enabled; later activation forms preselect the saved choice.
-Unchecking it on startup or changing Settings → Workspaces saves the next-start
-preference, without changing a live worker. Archiving/removing the registration
-clears it. The submitted startup checkbox still controls that particular start;
-omitting it never silently inherits enablement. Enabling skills adds only skill
-discovery and the activate/deactivate/resource tools to that worker. It does not
+and disables plugins, MCP, subagents and debug capture. Installed skills are
+enabled by default for new project registrations. The per-project next-start
+policy is saved in the manager registry and shared by its paired browsers; users
+can opt out through **Settings → Workspaces → Installed skills**. Activation forms
+inherit that saved policy and do not repeat a checkbox. Changing Settings does not
+affect a live worker. Archiving/removing the registration clears an explicit
+opt-out and returns a restored or re-registered project to the enabled default.
+Existing saved preferences are preserved during upgrade. Enabling skills adds only
+skill discovery and the activate/deactivate/resource tools to that worker. It does not
 change tool permission policy, write CLI extension trust, enable plugins/MCP/subagents,
 or derive authority from remembered manager trust.
 Personal/configured skills and already-CLI-trusted project skills follow the
@@ -114,13 +117,15 @@ The browser can explicitly remember project activation consent in the private
 manager database. Consent binds the registration ID, canonical path, device and
 inode, applies to this manager’s paired browsers, and survives restarts. It only
 removes repeated warning/checkbox presentation: every activation still needs an
-authenticated, CSRF-protected, explicit Start/Resume POST and fresh available
-folder identity. An old compact form cannot reuse revoked consent. Registration
+authenticated, CSRF-protected POST and fresh available folder identity. The POST
+comes from either explicit Start/Resume or one deliberate same-tab saved-session
+selection; GET, reload and modified-click navigation cannot issue it. An old
+compact form cannot reuse revoked consent. Registration
 and migration do not grant trust; archive/removal clears it atomically, and
 restore/re-registration requires fresh consent. Missing/replaced folders cannot
 use it. **Settings → Workspaces → Forget trust** revokes consent without stopping
 current workers or changing permissions. This is independent of CLI extension
-trust and does not authorize tool Allow policies, provider work, or auto-start.
+trust and does not authorize tool Allow policies, provider work, or passive page-load activation.
 
 The typed bridge permits text prompts, Stop, allow-once/deny permission decisions,
 and validated question replies. Truncated permission summaries cannot be allowed.

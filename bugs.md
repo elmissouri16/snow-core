@@ -1,5 +1,59 @@
 # Known bugs
 
+## BUG-241: Trusted saved-conversation selection stops at a redundant Resume form
+
+- **Status:** Resolved — deliberate trusted selection now resumes directly.
+- **Severity:** Medium
+- **Surface:** Web Manager saved-conversation navigation and runtime activation
+- **Evidence:** Selecting a saved conversation in a workspace whose trust was already remembered first opened its read-only transcript, then required a second **Resume session** action before the conversation became live. The repeated gate added no new decision because workspace trust and the saved session permission policy had already been persisted.
+- **Fix:** The cold sidebar row delegates an ordinary same-tab click to the existing activation owner. It first binds the exact project/session URL, then submits one activation only when the mounted form carries remembered trust for that exact session. Direct URLs, reloads, Back/Forward, modified clicks, unavailable/read-only views and untrusted workspaces remain passive; no prompt is sent.
+- **Verification:** The real-manager production workflow passes 108 assertions at both 320px dark and 1280px light, including one exact activation/no provider prompt for trusted selection, passive trusted reload, and no activation after trust revocation. React pages pass 210 assertions, workspace actions pass 25 assertions, and the frontend build plus all 127 package tests and reproducibility check pass.
+
+## BUG-240: Start and Resume repeat the installed-skills preference
+
+- **Status:** Resolved — the workspace setting now owns an enabled-by-default startup policy.
+- **Severity:** Medium
+- **Surface:** Web Manager project registration, activation, and workspace Settings
+- **Evidence:** Every Start and Resume form exposed an **Enable installed skills** checkbox and used an omitted field as disabled, even though the same next-start choice was already persisted per project under Settings → Workspaces. New registrations also began disabled, forcing an opt-in before ordinary skill-aware use.
+- **Fix:** New registrations and registrations migrated before the preference existed default to enabled. Start/Resume inherit the saved project policy, reject per-form overrides, and no longer render a checkbox. Settings is the sole opt-out/re-enable surface; existing saved preferences survive upgrade, while archive/removal clears an opt-out back to the default. CLI project-skill trust and tool permissions remain independent.
+- **Verification:** Registry migration/persistence, activation-field rejection, enabled/disabled presentation, Settings mutation and runtime-admission tests pass in `go test ./internal/web`. Native saved/trusted layout matrices pass at 320px dark and 360px light, the focused real-manager workflow passes 108 assertions at 320px dark, composer-context passes all 16 reports, and the frontend build plus all 127 package tests and reproducibility check pass.
+
+## BUG-239: Saved-policy reminder interrupts every Resume form
+
+- **Status:** Resolved — the reminder is available on demand without occupying the default Resume form.
+- **Severity:** Low
+- **Surface:** Web Manager cold saved-session activation panel
+- **Evidence:** Every saved session placed the two-line restored-permission reminder between the draft and normal startup controls, even though passive catalog browsing deliberately does not inspect the saved policy and therefore cannot determine whether the session will restore Allow. The same reminder repeated on every visit and expanded the default Resume form.
+- **Fix:** Move the unchanged restored-policy caveat into the existing collapsed **Startup settings** disclosure. First-start trust, host-privilege and no-sandbox disclosures remain unchanged.
+- **Verification:** Native production-layout checks require the note to be absent from the default painted Resume presentation and visible after opening Startup settings. Saved-session matrices pass at 320px dark and 360px light across 740px, 360px and 240px heights. Frontend build, all 127 package tests and generated-asset reproducibility pass.
+
+## BUG-238: Workspace-view checkboxes have no visible selected state
+
+- **Status:** Resolved — both view options now render and update the established visible checkmark.
+- **Severity:** Low
+- **Surface:** Web Manager workspace sidebar view-options menu
+- **Evidence:** The menu exposed `aria-checked=true` for **Show saved sessions** and `aria-checked=false` for **Pinned workspaces only**, but both rows rendered the same text-only presentation. Neither row had a check icon, pseudo-element, checked background or other visible state marker, even though conversation menus already reserved `.snow-menu-check` and displayed a check glyph for selected rows.
+- **Fix:** Add the shared check glyph to the Shell icon set and render the existing `.snow-menu-check` slot in both workspace-view rows, reserving its width while tying visibility to each row's checked state.
+- **Verification:** The production native React-page suite verifies both initial checkbox/checkmark pairs and the toggled pinned-only state; all 210 assertions pass across 30 scenarios. Frontend build, 127 package tests, reproducible generated-asset check, `go test ./...`, and `go vet ./...` pass.
+
+## BUG-237: Workspace disclosure arrows point away from their content state
+
+- **Status:** Resolved — disclosure direction now follows the session-list state.
+- **Severity:** Low
+- **Surface:** Web Manager workspace sidebar and mobile navigation drawer
+- **Evidence:** The base shell chevron pointed right, but CSS rotated collapsed workspaces upward and left expanded workspaces pointing right. Native inspection reproduced a collapsed `.pochi` arrow with a -90-degree transform and an expanded `Testing` arrow with an identity transform while its saved-session children were visible.
+- **Fix:** Keep the base right-pointing chevron unrotated for collapsed workspaces and rotate it 90 degrees for expanded workspaces.
+- **Verification:** Native production-layout regressions collapse and reopen a loaded workspace and check right/down transforms against `aria-expanded` and session visibility. The focused inactive/trusted matrices pass at 320px dark and 360px light across 740px, 360px and 240px heights. The broader 360px light layout run passed the changed home/inactive reports but remained nonzero only on the existing BUG-176/BUG-196 model/session and reader-anchor failures.
+
+## BUG-236: Wrapped Organization header overlaps registration controls
+
+- **Status:** Resolved — the Organization header now grows with wrapped content.
+- **Severity:** Medium
+- **Surface:** Web Manager Organize workspaces page at narrow widths
+- **Evidence:** At 320px and 360px, the introductory copy and **Back to workspaces** button overflowed the inherited 40px `.workspace-heading` height and painted through the Active registrations card. At 360px the header ended at y=102 and the grid started at y=123, while the wrapped button occupied y=172–207.
+- **Fix:** Override the shared fixed heading height in the Organization owner with `height: auto`, retaining its existing minimum height, padding and wrapping behavior.
+- **Verification:** The production native React-page suite checks 320px and 360px geometry, requires the header to contain both children and requires the registration grid to begin afterward; all 210 assertions pass across 30 scenarios. Frontend build/check, `go test ./internal/web`, and the full Go/Python/benchmark gates pass.
+
 ## BUG-235: Concurrent race packages exhaust catalog query deadline
 
 - **Status:** Fix implemented; serialized local race gate passes, exact replacement CI pending.

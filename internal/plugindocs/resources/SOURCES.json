@@ -10,7 +10,7 @@
     {
       "source": "docs/goals.md",
       "resource": "docs/goals.md",
-      "sha256": "bb746796416dd9df13a308cf06b1f26dc5be1b5c4048bf483b1a6a82d2486e41"
+      "sha256": "ed2ba206d342fd4ba768f41c3369c28802e82e8a2785ece21b5e43d905ff99db"
     },
     {
       "source": "docs/plan-mode.md",
@@ -50,7 +50,7 @@
     {
       "source": "docs/security.md",
       "resource": "docs/security.md",
-      "sha256": "3ae515568f105872cbf6fa7d23a69ca2039694be0efde82c70624c7495ed3356"
+      "sha256": "f23bf7e83da7886916eccad5ca32f07c4b8842d68ea9ec1ba3e4440e1d9bcd06"
     },
     {
       "source": "docs/sessions.md",
@@ -60,7 +60,7 @@
     {
       "source": "docs/skills.md",
       "resource": "docs/skills.md",
-      "sha256": "73ebf7c42b39148f19e5220683109a93b7afb51870f4f8e747509c331cd81f0a"
+      "sha256": "822c6fe8423fb31d33d419db56132105e88e6ae7522f2b1ce24d88baf49710b9"
     },
     {
       "source": "docs/subagents.md",

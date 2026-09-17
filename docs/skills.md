@@ -93,14 +93,14 @@ Mention an installed skill with its exact `$name` token in a prompt:
 $pdf-processing extract the tables from report.pdf
 ```
 
-In the optional web manager, select **Enable installed skills** when explicitly
-starting a runtime. The choice is saved per project on this manager and preselects
-the checkbox on later starts and resumes, including after manager restarts.
-New and existing projects default to disabled until you opt in. Uncheck it on
-startup to disable skills and save that preference, or change **Settings →
-Workspaces → Installed skills** for future starts. Settings are shared by this
+In the optional web manager, installed skills are enabled by default for newly
+registered projects. Starts and resumes inherit the per-project policy without a
+repeated activation checkbox. Use **Settings → Workspaces → Installed skills** to
+disable or re-enable skills for future starts. Settings are shared by this
 manager's paired browsers; changing them does not alter a running worker.
-Archiving/removing the registration clears the preference.
+Archiving/removing the registration clears an explicit opt-out, so restoring or
+re-registering returns to the enabled default. Existing saved preferences are
+preserved during upgrade.
 
 Type `$` in the composer to browse the worker's enabled/disabled skill catalog
 and insert an exact mention. Picking a suggestion does not activate or execute
