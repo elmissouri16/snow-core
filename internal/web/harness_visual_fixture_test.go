@@ -58,7 +58,7 @@ func TestExportHarnessVisualFixtures(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	project := Project{ID: "00000000-0000-4000-8000-000000000001", Name: "snow-core", Path: "/fixture/workspaces/snow-core", Available: true, State: "available"}
+	project := Project{ID: "00000000-0000-4000-8000-000000000001", Name: "snow-core", Path: "/fixture/workspaces/snow-core", Available: true, State: "available", SkillsEnabled: true}
 	base := pageData{
 		View: "overview", Version: "visual-fixture", CSRF: "fixture-only-not-a-credential",
 		RegistryEnabled: true, RuntimeEnabled: true, WorkflowEnabled: true, PermissionPolicyEnabled: true, TurnCancelEnabled: true,

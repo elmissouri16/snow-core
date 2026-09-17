@@ -7,6 +7,20 @@ export async function lifecycleChecks(t) {
   const reads = () => state.requests.filter(request => request.path === '/activity').length;
   const fresh = () => wait('document.querySelector("[data-manager-activity]")?.dataset.freshness === "fresh" && !document.querySelector("[data-manager-activity-refresh]").disabled');
   const nav = view => `a.sidebar-utility[href="/?view=${view}"]`;
+  await report('Workspace view options visibly track their checkbox state', async () => {
+    await page();
+    await click('[data-sidebar-view-toggle]');
+    await wait('document.querySelectorAll("[role=menuitemcheckbox]").length===2');
+    assert(await evaluate(`[...document.querySelectorAll('[role=menuitemcheckbox]')].every(row => {
+      const marker = row.querySelector('.snow-menu-check > span');
+      return marker && (getComputedStyle(marker).visibility !== 'hidden') === (row.getAttribute('aria-checked') === 'true');
+    })`), 'Both workspace view options reserve a checkmark that matches aria-checked');
+    await click('[role=menuitemcheckbox]:last-child');
+    await wait('document.querySelector("[role=menuitemcheckbox]:last-child")?.getAttribute("aria-checked")==="true"');
+    assert(await evaluate('getComputedStyle(document.querySelector("[role=menuitemcheckbox]:last-child .snow-menu-check > span")).visibility!=="hidden"'), 'Toggling pinned-only exposes its visible checkmark');
+    await evaluate('document.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}))');
+    await wait('!document.querySelector(".snow-menu")');
+  });
   await report('Native ancestor swap Activity → Organization → Activity and back remount once', async () => {
     await page(); await fresh();
     await evaluate('window.previousRoot=document.querySelector("[data-react-page=activity], [data-react-page=organization]");window.cleanupEvents=0;document.addEventListener("snow:navigation-before-swap",()=>window.cleanupEvents++)');

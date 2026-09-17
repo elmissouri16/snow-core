@@ -142,8 +142,8 @@ button.shell-project-action { font-size: 20px; line-height: 1; }
 /* Independent workspace disclosure; selection belongs to the conversation,
  * not to the expanded parent. Leave the native focus ring distinct from both. */
 .sidebar .workspace-disclosure { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; min-height: 28px; padding: 6px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; }
-.workspace-disclosure .icon { width: 16px; height: 16px; transform: rotate(-90deg); }
-.workspace-disclosure[aria-expanded=true] .icon { transform: rotate(0deg); }
+.workspace-disclosure .icon { width: 16px; height: 16px; transform: rotate(0deg); }
+.workspace-disclosure[aria-expanded=true] .icon { transform: rotate(90deg); }
 .sidebar .workspace-disclosure:hover { color: var(--text); background: color-mix(in srgb, var(--raised), var(--text) 7%); }
 .shell-project-row:has(.project-link.selected) { background: transparent; }
 .shell-project-row .project-link.selected { background: transparent; color: var(--text); }

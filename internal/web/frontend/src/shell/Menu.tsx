@@ -1,5 +1,6 @@
 import {useLayoutEffect, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
+import {Icon} from './Icons';
 import {canDelete, projectURL} from './model';
 import {SHELL_MENU_ID} from './menu-aria';
 import type {ShellController, ShellMenu} from './controller';
@@ -73,8 +74,12 @@ export function ShellPopup({controller: c, menu}: {controller: ShellController; 
       }}>Add workspace</a>
     </>}
     {menu.kind === 'view' && <>
-      <button type="button" className="snow-menu-row" role="menuitemcheckbox" aria-checked={!c.snapshot.hideSessions} onClick={() => { if (valid()) c.syncVisibility(!c.snapshot.hideSessions); }}>Show saved sessions</button>
-      <button type="button" className="snow-menu-row" role="menuitemcheckbox" aria-checked={c.snapshot.pinnedOnly} onClick={() => { if (valid()) c.publish({pinnedOnly: !c.snapshot.pinnedOnly}); }}>Pinned workspaces only</button>
+      <button type="button" className="snow-menu-row" role="menuitemcheckbox" aria-checked={!c.snapshot.hideSessions} onClick={() => { if (valid()) c.syncVisibility(!c.snapshot.hideSessions); }}>
+        <span className="snow-menu-row-label">Show saved sessions</span><span className="snow-menu-check" aria-hidden="true"><span style={{visibility: !c.snapshot.hideSessions ? 'visible' : 'hidden'}}><Icon name="check" /></span></span>
+      </button>
+      <button type="button" className="snow-menu-row" role="menuitemcheckbox" aria-checked={c.snapshot.pinnedOnly} onClick={() => { if (valid()) c.publish({pinnedOnly: !c.snapshot.pinnedOnly}); }}>
+        <span className="snow-menu-row-label">Pinned workspaces only</span><span className="snow-menu-check" aria-hidden="true"><span style={{visibility: c.snapshot.pinnedOnly ? 'visible' : 'hidden'}}><Icon name="check" /></span></span>
+      </button>
     </>}
   </div>, panel);
 }

@@ -15469,7 +15469,7 @@ function ua({ root: e, key: t, instance: n, request: r, changed: i = () => {}, e
 				if (!Re(e)) return;
 				if (!t || t.instance_id !== n || !Array.isArray(t.skills) || t.skills.length > 4096) throw Error("Invalid installed skill catalog.");
 				if (t.enabled !== !0) {
-					He(e, [], "Close and start with Enable installed skills to use installed skills.");
+					He(e, [], "Close this runtime, enable installed skills in Settings → Workspaces, then start again.");
 					return;
 				}
 				let i = t.skills.filter((t) => t && typeof t.name == "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(t.name) && t.name.toLowerCase().includes(e.value.toLowerCase())).slice(0, 256).map((t) => ({
@@ -19730,6 +19730,7 @@ function G({ name: e, className: t = "icon" }) {
 			list: "M9 6h12M9 12h12M9 18h12M3 6h1M3 12h1M3 18h1",
 			plus: "M12 5v14M5 12h14",
 			chevron: "m9 5 7 7-7 7",
+			check: "m5 12 4 4L19 6",
 			settings: "m9 3-1 3-3 1-2 5 2 5 3 1 1 3h6l1-3 3-1 2-5-2-5-3-1-1-3ZM16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z",
 			activity: "M2 12h5l3-8 4 16 3-8h5",
 			light: "M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z",
@@ -19794,7 +19795,14 @@ function kl({ c: e, group: t, row: n }) {
 					session: n.session_id,
 					instance: g,
 					trigger: r.currentTarget
-				} })) : e.navigate(r.currentTarget.href, r.currentTarget));
+				} })) : document.dispatchEvent(new CustomEvent("snow:session-resume", {
+					cancelable: !0,
+					detail: {
+						project: t.project,
+						session: n.session_id,
+						trigger: r.currentTarget
+					}
+				})) && e.navigate(r.currentTarget.href, r.currentTarget));
 			},
 			children: [/* @__PURE__ */ (0, D.jsx)(G, { name: "chat" }), /* @__PURE__ */ (0, D.jsx)("span", {
 				title: u,
@@ -20519,7 +20527,7 @@ function Fl({ controller: e, view: t }) {
 											id: "workspace-skills-title",
 											children: "Installed skills"
 										}),
-										/* @__PURE__ */ (0, D.jsx)("p", { children: "Remembered per project for future starts, across this manager’s paired browsers. Changes do not affect a running worker or grant project trust or tool permissions." }),
+										/* @__PURE__ */ (0, D.jsx)("p", { children: "Enabled by default for new workspaces and remembered per project for future starts across this manager’s paired browsers. Disable a workspace here when you do not want its installed skills available. Changes do not affect a running worker or grant project trust or tool permissions." }),
 										/* @__PURE__ */ (0, D.jsx)("ul", {
 											className: "project-trust-list",
 											children: a.projects.map((e) => /* @__PURE__ */ (0, D.jsxs)("li", { children: [/* @__PURE__ */ (0, D.jsxs)("span", { children: [/* @__PURE__ */ (0, D.jsx)("strong", { children: e.name }), /* @__PURE__ */ (0, D.jsxs)("small", { children: [e.skillsEnabled ? "Enabled for future starts" : "Disabled for future starts", !e.available && " · Folder unavailable"] })] }), /* @__PURE__ */ (0, D.jsxs)("form", {
@@ -20724,7 +20732,7 @@ function Ll({ controller: e, menu: t }) {
 					children: "Add workspace"
 				})
 			] }),
-			t.kind === "view" && /* @__PURE__ */ (0, D.jsxs)(D.Fragment, { children: [/* @__PURE__ */ (0, D.jsx)("button", {
+			t.kind === "view" && /* @__PURE__ */ (0, D.jsxs)(D.Fragment, { children: [/* @__PURE__ */ (0, D.jsxs)("button", {
 				type: "button",
 				className: "snow-menu-row",
 				role: "menuitemcheckbox",
@@ -20732,8 +20740,18 @@ function Ll({ controller: e, menu: t }) {
 				onClick: () => {
 					s() && e.syncVisibility(!e.snapshot.hideSessions);
 				},
-				children: "Show saved sessions"
-			}), /* @__PURE__ */ (0, D.jsx)("button", {
+				children: [/* @__PURE__ */ (0, D.jsx)("span", {
+					className: "snow-menu-row-label",
+					children: "Show saved sessions"
+				}), /* @__PURE__ */ (0, D.jsx)("span", {
+					className: "snow-menu-check",
+					"aria-hidden": "true",
+					children: /* @__PURE__ */ (0, D.jsx)("span", {
+						style: { visibility: e.snapshot.hideSessions ? "hidden" : "visible" },
+						children: /* @__PURE__ */ (0, D.jsx)(G, { name: "check" })
+					})
+				})]
+			}), /* @__PURE__ */ (0, D.jsxs)("button", {
 				type: "button",
 				className: "snow-menu-row",
 				role: "menuitemcheckbox",
@@ -20741,7 +20759,17 @@ function Ll({ controller: e, menu: t }) {
 				onClick: () => {
 					s() && e.publish({ pinnedOnly: !e.snapshot.pinnedOnly });
 				},
-				children: "Pinned workspaces only"
+				children: [/* @__PURE__ */ (0, D.jsx)("span", {
+					className: "snow-menu-row-label",
+					children: "Pinned workspaces only"
+				}), /* @__PURE__ */ (0, D.jsx)("span", {
+					className: "snow-menu-check",
+					"aria-hidden": "true",
+					children: /* @__PURE__ */ (0, D.jsx)("span", {
+						style: { visibility: e.snapshot.pinnedOnly ? "visible" : "hidden" },
+						children: /* @__PURE__ */ (0, D.jsx)(G, { name: "check" })
+					})
+				})]
 			})] })
 		]
 	}), r);
@@ -22666,33 +22694,35 @@ function Fu({ project: e, csrf: t, sessionID: n }) {
 							children: "Trust does not grant tools Allow permissions. Forget it in Settings → Workspaces."
 						})
 					] }),
-					n && /* @__PURE__ */ (0, D.jsx)("p", {
-						className: "fine",
-						children: "Resuming restores saved session permissions. A saved Allow policy skips tool approval prompts."
-					}),
-					/* @__PURE__ */ (0, D.jsxs)("label", {
-						className: "checkbox-label",
-						children: [
-							/* @__PURE__ */ (0, D.jsx)("input", {
-								name: "enable_skills",
-								type: "checkbox",
-								value: "runtime",
-								"aria-describedby": "activation-skills-help",
-								disabled: i.busy,
-								defaultChecked: e.skillsEnabled
-							}),
-							" ",
-							"Enable installed skills"
-						]
-					}),
 					/* @__PURE__ */ (0, D.jsxs)("details", {
 						className: "activation-model-help",
 						children: [
 							/* @__PURE__ */ (0, D.jsx)("summary", { children: "Startup settings" }),
-							/* @__PURE__ */ (0, D.jsx)("p", {
+							n && /* @__PURE__ */ (0, D.jsx)("p", {
 								className: "fine",
-								id: "activation-skills-help",
-								children: "The skills choice is remembered for this workspace when you start. Project skills still require separate CLI extension trust."
+								"data-saved-policy-note": !0,
+								children: "Resuming restores saved session permissions. A saved Allow policy skips tool approval prompts."
+							}),
+							/* @__PURE__ */ (0, D.jsxs)("p", {
+								className: "fine",
+								"data-skills-startup-policy": !0,
+								children: [
+									"Installed skills are ",
+									e.skillsEnabled ? "enabled" : "disabled",
+									" ",
+									"for this workspace. Change future starts in",
+									" ",
+									/* @__PURE__ */ (0, D.jsx)("button", {
+										type: "button",
+										className: "quiet",
+										"data-settings-open": "workspaces",
+										onClick: (e) => {
+											e.stopPropagation(), W.openSettings("workspaces", e.currentTarget);
+										},
+										children: "Settings → Workspaces"
+									}),
+									". Project skills still require separate CLI extension trust."
+								]
 							}),
 							/* @__PURE__ */ (0, D.jsx)("p", {
 								className: "fine",

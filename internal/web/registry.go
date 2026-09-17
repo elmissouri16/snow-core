@@ -45,7 +45,7 @@ var (
 type Project struct {
 	ID              string
 	Trusted         bool // Remembered activation consent only; never tool or extension permission.
-	SkillsEnabled   bool // Saved startup preference; never activates skills or grants project trust.
+	SkillsEnabled   bool // Saved next-start policy; enabled by default and never grants project trust.
 	TrustRemembered bool // Saved consent exists; permits revocation even when unavailable.
 	Pinned          bool // Manager-only organization; never execution authority.
 	Archived        bool // removed_at soft-removal; exact-ID restore is explicit.
@@ -322,7 +322,7 @@ func (r *Registry) Add(ctx context.Context, name, path string) (Project, error) 
 	if !ok {
 		return Project{}, ErrProjectInvalid
 	}
-	p := Project{ID: uuid.New().String(), Name: name, Path: path, device: dev, inode: ino}
+	p := Project{ID: uuid.New().String(), Name: name, Path: path, SkillsEnabled: true, device: dev, inode: ino}
 	p.checkIdentity()
 	if !p.Available {
 		return Project{}, ErrProjectInvalid
@@ -345,7 +345,7 @@ func (r *Registry) Add(ctx context.Context, name, path string) (Project, error) 
 	if count >= MaxProjects {
 		return Project{}, ErrProjectLimit
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO projects(id,name,path,device,inode,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`, p.ID, p.Name, p.Path, dev, ino, time.Now().UnixMilli(), time.Now().UnixMilli())
+	_, err = tx.ExecContext(ctx, `INSERT INTO projects(id,name,path,device,inode,skills_enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, p.ID, p.Name, p.Path, dev, ino, true, time.Now().UnixMilli(), time.Now().UnixMilli())
 	if err != nil {
 		return Project{}, registryError(ctx)
 	}

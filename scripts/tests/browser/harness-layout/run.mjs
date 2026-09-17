@@ -22,6 +22,7 @@ function options() {
     if (flag === "--screenshots") result.screenshots = true;
     else if (flag === "--runtime-only") result.runtimeOnly = true;
     else if (flag === "--trust-only") result.trustOnly = true;
+    else if (flag === "--saved-only") result.savedOnly = true;
     else if (flag === "--smoke") result.smoke = true;
     else if (flag === "--width") { const value = Number(args.shift()); if (![320, 360, 390, 768, 1024, 1280, 1512].includes(value)) throw new Error("Unsupported matrix width"); result.width = value; }
     else if (flag === "--theme") { const value = args.shift(); if (!["dark", "light"].includes(value)) throw new Error("Unsupported theme"); result.theme = value; }
@@ -153,6 +154,7 @@ async function run() {
     if (!Array.isArray(fixtures) || JSON.stringify(fixtures.map(value => value.name)) !== JSON.stringify(expected)) throw new Error("Unexpected fixture manifest; rerun the Go exporter");
     if (args.runtimeOnly) fixtures = fixtures.filter(fixture => fixture.name.startsWith("runtime-"));
     if (args.trustOnly) fixtures = fixtures.filter(fixture => fixture.name.startsWith("inactive"));
+    if (args.savedOnly) fixtures = fixtures.filter(fixture => ["saved-markdown", "saved-user"].includes(fixture.name));
     const runtimeTests = await readFile(join(here, "runtime-panels.js"), "utf8");
     const mock = await readFile(join(here, "fixture.js"), "utf8");
     const tests = await readFile(join(here, "tests.js"), "utf8");

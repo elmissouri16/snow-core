@@ -121,28 +121,29 @@ export function Activation({
             </p>
           </>
         )}
-        {sessionID && (
-          <p className="fine">
-            Resuming restores saved session permissions. A saved Allow policy
-            skips tool approval prompts.
-          </p>
-        )}
-        <label className="checkbox-label">
-          <input
-            name="enable_skills"
-            type="checkbox"
-            value="runtime"
-            aria-describedby="activation-skills-help"
-            disabled={activation.busy}
-            defaultChecked={project.skillsEnabled}
-          />{' '}
-          Enable installed skills
-        </label>
         <details className="activation-model-help">
           <summary>Startup settings</summary>
-          <p className="fine" id="activation-skills-help">
-            The skills choice is remembered for this workspace when you start.
-            Project skills still require separate CLI extension trust.
+          {sessionID && (
+            <p className="fine" data-saved-policy-note>
+              Resuming restores saved session permissions. A saved Allow policy
+              skips tool approval prompts.
+            </p>
+          )}
+          <p className="fine" data-skills-startup-policy>
+            Installed skills are {project.skillsEnabled ? 'enabled' : 'disabled'}
+            {' '}for this workspace. Change future starts in{' '}
+            <button
+              type="button"
+              className="quiet"
+              data-settings-open="workspaces"
+              onClick={(event) => {
+                event.stopPropagation();
+                shell.openSettings('workspaces', event.currentTarget);
+              }}
+            >
+              Settings → Workspaces
+            </button>
+            . Project skills still require separate CLI extension trust.
           </p>
           <p className="fine">
             Uses the host’s configured provider and model. Change models while

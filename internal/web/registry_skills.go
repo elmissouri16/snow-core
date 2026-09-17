@@ -8,21 +8,22 @@ import (
 )
 
 // The startup preference belongs to the registration, not project trust or the
-// worker's active skills. Existing registrations default to disabled.
+// worker's active skills. Registrations without a saved preference default on.
 func migrateProjectSkills(ctx context.Context, tx *sql.Tx) error {
 	var exists bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('projects') WHERE name='skills_enabled')`).Scan(&exists); err != nil {
 		return registryError(ctx)
 	}
 	if !exists {
-		if _, err := tx.ExecContext(ctx, `ALTER TABLE projects ADD COLUMN skills_enabled INTEGER NOT NULL DEFAULT 0 CHECK(skills_enabled IN (0,1))`); err != nil {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE projects ADD COLUMN skills_enabled INTEGER NOT NULL DEFAULT 1 CHECK(skills_enabled IN (0,1))`); err != nil {
 			return registryError(ctx)
 		}
 	}
-	_, err := tx.ExecContext(ctx, `CREATE TRIGGER IF NOT EXISTS project_skills_reset AFTER UPDATE ON projects
+	_, err := tx.ExecContext(ctx, `DROP TRIGGER IF EXISTS project_skills_reset;
+CREATE TRIGGER project_skills_reset AFTER UPDATE ON projects
  WHEN NEW.removed_at IS NOT NULL OR OLD.id!=NEW.id OR OLD.path!=NEW.path
   OR OLD.device!=NEW.device OR OLD.inode!=NEW.inode
- BEGIN UPDATE projects SET skills_enabled=0 WHERE id=NEW.id AND skills_enabled!=0; END;`)
+ BEGIN UPDATE projects SET skills_enabled=1 WHERE id=NEW.id AND skills_enabled!=1; END;`)
 	if err != nil {
 		return registryError(ctx)
 	}

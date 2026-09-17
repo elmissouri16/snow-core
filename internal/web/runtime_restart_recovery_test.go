@@ -56,6 +56,10 @@ func TestRuntimeRestartRecoveryWithRegistryAndExplicitReopen(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if err := registry.SetProjectSkills(t.Context(), project, false); err != nil {
+			t.Fatal(err)
+		}
+		project.SkillsEnabled = false
 		projects = append(projects, project)
 	}
 	logBefore, logAfter := filepath.Join(base, "before.log"), filepath.Join(base, "after.log")

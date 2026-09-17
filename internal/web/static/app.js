@@ -126,17 +126,32 @@
     finally { finishWorkspaceOpening(region); }
     if (!accepted && live?.project === intent.project && !live.actionError) workspaceFlowError("This session cannot be opened yet. Review any pending work or connection warning, then select it again.");
   }
-  async function selectWorkspaceSession(detail, isNew = false) {
+  function resumeColdWorkspaceIntent(intent) {
+    const workspace = $("#workspace"), params = new URL(location.href).searchParams;
+    if (!workspace || workspace.dataset.project !== intent.project || params.get("project") !== intent.project || params.get("session") !== intent.session) return false;
+    workspaceIntent = null; // The explicit saved-conversation click is consumed once.
+    requestNav(false, false);
+    const form = $("[data-runtime-open]", workspace);
+    // Untrusted, unavailable and read-only saved conversations remain passive.
+    // Only remembered trust admits the exact selected session automatically.
+    if (!form) return true;
+    const session = $('input[name="session_id"]', form), confirm = $('input[name="confirm"]', form);
+    if (session?.value !== intent.session || confirm?.type !== "hidden" || confirm.value !== "trusted") return true;
+    form.requestSubmit();
+    return true;
+  }
+  async function selectWorkspaceSession(detail, isNew = false, resumeCold = false) {
     const {project, trigger} = detail || {}, session = isNew ? "" : detail?.session;
     if (typeof project !== "string" || !project || project.length > 128 || typeof session !== "string" || session.length > 128 || !window.SnowNavigation) return;
     const intent = {...detail, project, session};
     workspaceIntent = intent;
     if (live?.project === project) { void consumeWorkspaceIntent(); return; }
     try {
-      intent.url = projectLocation(project) + (isNew ? "&new=1" : "");
+      intent.url = projectLocation(project) + (isNew ? "&new=1" : resumeCold ? "&session=" + encodeURIComponent(session) : "");
       await window.SnowNavigation.visit(intent.url, {source: trigger, history: "push"});
       if (workspaceIntent !== intent) return;
       if (!live || live.project !== project) {
+        if (resumeCold && resumeColdWorkspaceIntent(intent)) return;
         workspaceIntent = null;
         if (!isNew) workspaceFlowError("The workspace is no longer live. Select the saved session again to read or resume it.");
       } else void consumeWorkspaceIntent();
@@ -154,6 +169,7 @@
     }
   });
   document.addEventListener("snow:session-select", event => { void selectWorkspaceSession(event.detail); });
+  document.addEventListener("snow:session-resume", event => { event.preventDefault(); void selectWorkspaceSession(event.detail, false, true); });
   document.addEventListener("snow:session-new", event => { void selectWorkspaceSession(event.detail, true); });
   document.addEventListener("snow:navigation-start", event => {
     if (event.detail?.target?.id === "workspace" && workspaceIntent && event.detail.source !== workspaceIntent.trigger) workspaceIntent = null;

@@ -10,7 +10,10 @@ import (
 
 func TestRegistrySkillsMigrationPersistenceAndIdentity(t *testing.T) {
 	r, p, manager := trustTestProject(t)
-	// Upgrade a pre-preference registry without granting skills or trust.
+	if !p.SkillsEnabled || p.Trusted {
+		t.Fatalf("new registration did not apply the skills default independently of trust: %+v", p)
+	}
+	// Upgrade a pre-preference registry to the enabled default without granting trust.
 	for _, statement := range []string{`DROP TRIGGER project_skills_reset`, `ALTER TABLE projects DROP COLUMN skills_enabled`} {
 		if _, err := r.db.ExecContext(t.Context(), statement); err != nil {
 			t.Fatal(err)
@@ -21,10 +24,10 @@ func TestRegistrySkillsMigrationPersistenceAndIdentity(t *testing.T) {
 	}
 	r = registryTestOpen(t, manager)
 	p, err := r.Lookup(t.Context(), p.ID)
-	if err != nil || p.SkillsEnabled || p.Trusted {
-		t.Fatalf("migration granted consent: %+v, %v", p, err)
+	if err != nil || !p.SkillsEnabled || p.Trusted {
+		t.Fatalf("migration did not apply the skills default independently of trust: %+v, %v", p, err)
 	}
-	if err := r.SetProjectSkills(t.Context(), p, true); err != nil {
+	if err := r.SetProjectSkills(t.Context(), p, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Close(); err != nil {
@@ -32,8 +35,8 @@ func TestRegistrySkillsMigrationPersistenceAndIdentity(t *testing.T) {
 	}
 	r = registryTestOpen(t, manager)
 	projects, err := r.List(t.Context())
-	if err != nil || len(projects) != 1 || !projects[0].SkillsEnabled || projects[0].Trusted {
-		t.Fatalf("preference not retained independently of trust: %+v, %v", projects, err)
+	if err != nil || len(projects) != 1 || projects[0].SkillsEnabled || projects[0].Trusted {
+		t.Fatalf("opt-out not retained independently of trust: %+v, %v", projects, err)
 	}
 	if err := os.Rename(p.Path, p.Path+"-moved"); err != nil {
 		t.Fatal(err)
@@ -57,7 +60,7 @@ func TestRegistrySkillsMigrationPersistenceAndIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	restored, err := r.Lookup(t.Context(), p.ID)
-	if err != nil || restored.SkillsEnabled {
-		t.Fatalf("archive/restore retained opt-in: %+v, %v", restored, err)
+	if err != nil || !restored.SkillsEnabled {
+		t.Fatalf("archive/restore did not clear the opt-out to the default: %+v, %v", restored, err)
 	}
 }

@@ -39,7 +39,10 @@ function Session({c, group, row}: {c: ShellController; group: Group; row: Sessio
         if (!ordinary(event)) return;
         event.preventDefault(); event.stopPropagation(); c.navigation(false);
         if (instance) document.dispatchEvent(new CustomEvent('snow:session-select', {detail: {project: group.project, session: row.session_id, instance, trigger: event.currentTarget}}));
-        else void c.navigate(event.currentTarget.href, event.currentTarget);
+        else {
+          const delegated = !document.dispatchEvent(new CustomEvent('snow:session-resume', {cancelable: true, detail: {project: group.project, session: row.session_id, trigger: event.currentTarget}}));
+          if (!delegated) void c.navigate(event.currentTarget.href, event.currentTarget);
+        }
       }}><Icon name="chat" /><span title={name}>{name}</span></a>
     <button ref={trigger} type="button" onFocus={() => { triggerFocused.current = true; }} onBlur={event => { if (!event.currentTarget.hidden) triggerFocused.current = false; }} className="quiet shell-session-more" data-shell-session-menu="" hidden={!hasActions} disabled={!hasActions || !group.deleteSupported && !!rename && !!live?.renameDisabled}
       data-project={group.project} data-session={row.session_id} data-instance={group.instance} data-session-name={name}

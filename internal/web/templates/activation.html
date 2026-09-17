@@ -15,10 +15,9 @@
     <label class="checkbox-label"><input name="confirm" type="checkbox" value="activate" required> I trust this workspace. Remember my choice for future starts in this manager.</label>
     <p class="fine">Trust does not grant tools Allow permissions. Forget it in Settings → Workspaces.</p>
     {{end}}
-    {{if .SessionID}}<p class="fine">Resuming restores saved session permissions. A saved Allow policy skips tool approval prompts.</p>{{end}}
-    <label class="checkbox-label"><input name="enable_skills" type="checkbox" value="runtime" aria-describedby="activation-skills-help"{{if .Project.SkillsEnabled}} checked{{end}}> Enable installed skills</label>
     <details class="activation-model-help"><summary>Startup settings</summary>
-      <p class="fine" id="activation-skills-help">The skills choice is remembered for this workspace when you start. Project skills still require separate CLI extension trust.</p>
+      {{if .SessionID}}<p class="fine" data-saved-policy-note>Resuming restores saved session permissions. A saved Allow policy skips tool approval prompts.</p>{{end}}
+      <p class="fine" data-skills-startup-policy>Installed skills are {{if .Project.SkillsEnabled}}enabled{{else}}disabled{{end}} for this workspace. Change future starts in <button type="button" class="quiet" data-settings-open="workspaces">Settings → Workspaces</button>. Project skills still require separate CLI extension trust.</p>
       <p class="fine">Uses the host’s configured provider and model. Change models while idle after starting. If the default cannot start, configure it on the host first.</p>
       {{if .Project.Trusted}}<p class="fine">Workspace trust remembered. Manage it in <button type="button" class="quiet" data-settings-open="workspaces">Settings → Workspaces</button>.</p>{{end}}
     </details>

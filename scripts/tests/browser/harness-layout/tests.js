@@ -374,7 +374,14 @@
       const group = document.querySelector("[data-sidebar-project]"), tree = group.querySelector("[data-workspace-sessions]");
       const panel = $(".workspace-session-start"), pane = $(".inactive-conversation"), draft = $("#workspace-prompt");
       await settle(() => !tree.hasAttribute("aria-busy") && tree.querySelectorAll("[data-shell-session]").length === 25);
-      check(group.querySelector("[data-workspace-toggle]").getAttribute("aria-expanded") === "true" && !tree.hidden, "Cold selected workspace has an independently expanded grouped session branch");
+      const disclosure = group.querySelector("[data-workspace-toggle]"), disclosureIcon = disclosure.querySelector(".icon");
+      const disclosureTransform = () => new DOMMatrix(getComputedStyle(disclosureIcon).transform);
+      check(disclosure.getAttribute("aria-expanded") === "true" && !tree.hidden, "Cold selected workspace has an independently expanded grouped session branch");
+      check(near(disclosureTransform().a, 0, .05) && near(disclosureTransform().b, 1, .05), "Expanded workspace disclosure points down toward its visible sessions");
+      disclosure.click(); await settleFrame();
+      check(disclosure.getAttribute("aria-expanded") === "false" && tree.hidden && near(disclosureTransform().a, 1, .05) && near(disclosureTransform().b, 0, .05), "Collapsed workspace disclosure points right while its sessions are hidden");
+      disclosure.click(); await settleFrame();
+      check(disclosure.getAttribute("aria-expanded") === "true" && !tree.hidden && near(disclosureTransform().a, 0, .05) && near(disclosureTransform().b, 1, .05), "Reopened workspace disclosure restores its downward state");
       check(!$(".project-session-list .catalog-row") && !$("#live-session[data-runtime]") && !$("#live-composer"), "Cold session surface has no central catalog, live runtime or pretend live composer");
       check(!!draft && !draft.disabled && draft.maxLength === 65536 && panel.contains(draft), "Cold session has a bounded editable tab-local draft in its explicit start seat");
       enter(draft, "Keep this cold workspace draft");
@@ -399,7 +406,7 @@
       check(buttonBox.top >= 0 && buttonBox.bottom <= innerHeight + 1 && activate.contains(buttonHit), "Explicit cold Start remains focusable and hit-test reachable in narrow and short viewports");
       check(draft.value === "Keep this cold workspace draft", "Paging the workspace branch preserves the unsent cold draft");
       if (fixture.name === "inactive-trusted") {
-        check(!panel.querySelector('input[type="checkbox"][name="confirm"]') && panel.querySelector('input[name="confirm"]').value === "trusted" && panel.querySelector('input[name="enable_skills"]')?.checked === false, "Remembered project has no repeated trust checkbox; explicit activation remains and skill opt-in is never remembered");
+        check(!panel.querySelector('input[type="checkbox"][name="confirm"]') && panel.querySelector('input[name="confirm"]').value === "trusted" && !panel.querySelector('input[name="enable_skills"]') && panel.querySelector('[data-skills-startup-policy]')?.textContent.includes("enabled for this workspace"), "Remembered project has compact explicit activation and Settings-owned enabled skills");
         check(!panel.querySelector('.activation-boundary') && !!panel.querySelector('[data-settings-open="workspaces"]'), "Remembered activation is compact with discoverable trust management");
         panel.querySelector(".activation-model-help").open = true;
         const manageTrust = panel.querySelector("[data-settings-open=workspaces]"); manageTrust.focus(); manageTrust.click(); await settleFrame(); await wait(60);
@@ -418,6 +425,11 @@
       const resume = panel.querySelector('button[type="submit"]'), draft = $("#workspace-prompt");
       check(!$("#live-session[data-runtime]") && !!panel.querySelector('input[name="session_id"]') && resume.textContent.includes("Resume"), "Saved history uses the normal conversation and an explicit session-bound Resume seat without a worker");
       check(!draft.disabled && draft.classList.contains("activation-draft"), "Saved conversation has an editable cold draft with shared composer-seat styling");
+      const startup = panel.querySelector(".activation-model-help"), policyNote = startup.querySelector("[data-saved-policy-note]");
+      check(!startup.open && !!policyNote && !policyNote.checkVisibility(), "Saved-policy reminder stays out of the default Resume presentation");
+      startup.open = true; await settleFrame();
+      check(policyNote.checkVisibility(), "Startup settings retains the saved-policy reminder on demand");
+      startup.open = false; await settleFrame();
       enter(draft, "Keep saved-session draft");
       if (innerHeight > 480) {
         const before = rect(panel).toJSON();
@@ -429,8 +441,7 @@
       resume.focus(); resume.scrollIntoView({block: "center"}); await wait(30);
       const button = rect(resume), hit = document.elementFromPoint(button.x + button.width / 2, button.y + button.height / 2);
       check(button.top >= 0 && button.bottom <= innerHeight + 1 && resume.contains(hit), "Resume is keyboard and hit-test reachable even in short saved-history views");
-      const skills = panel.querySelector('input[name="enable_skills"]'); skills.focus(); skills.scrollIntoView({block: "center"}); await wait(30);
-      check(document.activeElement === skills && rect(skills).top >= 0 && rect(skills).bottom <= innerHeight + 1 && !skills.checked, "Saved-start skills choice remains reachable and unchecked without granting hidden authority");
+      check(!panel.querySelector('input[name="enable_skills"]') && panel.querySelector('[data-skills-startup-policy]')?.textContent.includes("enabled for this workspace"), "Saved Resume inherits the enabled workspace setting without a repeated skill checkbox");
       check(draft.value === "Keep saved-session draft" && fixture.nonInventoryRequests().length === 0, "Reading saved history and navigating Resume controls retains the draft without mutation, provider discovery or inspection");
     }
     if (fixture.name === "saved-markdown") {

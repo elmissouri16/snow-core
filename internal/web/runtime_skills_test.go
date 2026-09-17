@@ -241,31 +241,29 @@ func TestRuntimeSkillsHTTPStrictAuthority(t *testing.T) {
 	}
 }
 
-func TestRuntimeSkillsActivationOptInValidation(t *testing.T) {
+func TestRuntimeSkillsActivationRejectsFormOverride(t *testing.T) {
 	for _, trusted := range []bool{false, true} {
-		for _, choice := range []string{"", "runtime", "true", "project", "remember"} {
-			s := &shell{}
-			confirm := "activate"
-			if trusted {
-				confirm = "trusted"
-			}
-			form := url.Values{"csrf": {"upstream"}, "confirm": {confirm}, "enable_skills": {choice}}
-			r := httptest.NewRequest("POST", "/", nil)
-			r.PostForm = form
-			w := httptest.NewRecorder()
-			ok := s.authorizeProjectActivation(t.Context(), w, r, Project{Trusted: trusted})
-			if ok != (choice == "" || choice == "runtime") {
-				t.Fatalf("trusted=%v choice=%q accepted=%v", trusted, choice, ok)
-			}
-			form.Add("enable_skills", choice)
+		s := &shell{}
+		confirm := "activate"
+		if trusted {
+			confirm = "trusted"
+		}
+		form := url.Values{"csrf": {"upstream"}, "confirm": {confirm}}
+		r := httptest.NewRequest("POST", "/", nil)
+		r.PostForm = form
+		if !s.authorizeProjectActivation(t.Context(), httptest.NewRecorder(), r, Project{Trusted: trusted}) {
+			t.Fatalf("trusted=%v settings-owned activation rejected", trusted)
+		}
+		for _, choices := range [][]string{{""}, {"runtime"}, {"true"}, {"runtime", "runtime"}} {
+			form["enable_skills"] = choices
 			if s.authorizeProjectActivation(t.Context(), httptest.NewRecorder(), r, Project{Trusted: trusted}) {
-				t.Fatal("duplicate skill choice accepted")
+				t.Fatalf("trusted=%v startup override accepted: %q", trusted, choices)
 			}
 		}
 	}
 }
 
-func TestRuntimeSkillsActivationCheckboxUsesSavedPreference(t *testing.T) {
+func TestRuntimeSkillsActivationPresentsSettingsPolicy(t *testing.T) {
 	s, cookie, _ := projectShell(t)
 	project, err := s.registry.Add(t.Context(), "workspace", t.TempDir())
 	if err != nil {
@@ -279,21 +277,19 @@ func TestRuntimeSkillsActivationCheckboxUsesSavedPreference(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		for _, enabled := range []bool{false, true, false} {
+		for _, enabled := range []bool{true, false, true} {
 			if err := s.registry.SetProjectSkills(t.Context(), project, enabled); err != nil {
 				t.Fatal(err)
 			}
+			state := "disabled"
+			if enabled {
+				state = "enabled"
+			}
 			body := request(t, s, "GET", "/?view=projects&project="+project.ID, nil, cookie).Body.String()
-			_, input, ok := strings.Cut(body, `<input name="enable_skills"`)
-			if !ok {
-				t.Fatalf("trusted=%v missing opt-in", trusted)
-			}
-			input, _, _ = strings.Cut(input, ">")
-			if !strings.Contains(input, `value="runtime"`) || strings.Contains(input, "checked") != enabled || strings.Contains(input, "required") {
-				t.Fatalf("trusted=%v enabled=%v unexpected input: %s", trusted, enabled, input)
-			}
-			if !strings.Contains(body, "separate CLI extension trust") || !strings.Contains(body, "The skills choice is remembered for this workspace when you start.") || len(backend.calls) != 0 {
-				t.Fatalf("trusted=%v disclosure missing or render activated runtime", trusted)
+			if strings.Contains(body, `name="enable_skills"`) || !strings.Contains(body, "separate CLI extension trust") ||
+				!strings.Contains(body, "Installed skills are "+state+" for this workspace") ||
+				!strings.Contains(body, `data-settings-open="workspaces"`) || len(backend.calls) != 0 {
+				t.Fatalf("trusted=%v enabled=%v settings policy missing, startup override present, or render activated runtime", trusted, enabled)
 			}
 		}
 	}
@@ -331,7 +327,7 @@ func TestProjectSkillsSettings(t *testing.T) {
 	}
 }
 
-func TestRuntimeSkillsActivationHTTPExplicitOptInOnly(t *testing.T) {
+func TestRuntimeSkillsActivationHTTPUsesSettingsPolicy(t *testing.T) {
 	s, cookie, _ := projectShell(t)
 	project, err := s.registry.Add(t.Context(), "workspace", t.TempDir())
 	if err != nil {
@@ -349,35 +345,38 @@ func TestRuntimeSkillsActivationHTTPExplicitOptInOnly(t *testing.T) {
 			}
 			confirm = "trusted"
 		}
-		for _, choice := range []string{"runtime", "", "omitted"} {
+		for _, enabled := range []bool{true, false, true} {
+			if err := s.registry.SetProjectSkills(t.Context(), project, enabled); err != nil {
+				t.Fatal(err)
+			}
 			backend.live = false
 			before, beforeOptIns := len(backend.calls), len(backend.optIns)
 			form := url.Values{"csrf": {csrf}, "confirm": {confirm}}
-			if choice != "omitted" {
-				form.Set("enable_skills", choice)
-			}
 			w := request(t, s, "POST", path, form, cookie)
 			if w.Code != http.StatusOK || len(backend.calls) != before+1 || backend.calls[before] != "open" {
-				t.Fatalf("trusted=%v choice=%q activation: %d %s calls=%v", trusted, choice, w.Code, w.Body, backend.calls)
+				t.Fatalf("trusted=%v enabled=%v activation: %d %s calls=%v", trusted, enabled, w.Code, w.Body, backend.calls)
 			}
 			saved, err := s.registry.Lookup(t.Context(), project.ID)
-			if err != nil || saved.SkillsEnabled != (choice == "runtime") {
-				t.Fatalf("startup preference not saved: %+v, %v", saved, err)
+			if err != nil || saved.SkillsEnabled != enabled {
+				t.Fatalf("activation changed settings policy: %+v, %v", saved, err)
 			}
-			if choice == "runtime" {
+			if enabled {
 				if len(backend.optIns) != beforeOptIns+1 || !backend.optIns[beforeOptIns] {
-					t.Fatalf("explicit opt-in did not reach OpenWithSkills(true): %v", backend.optIns)
+					t.Fatalf("enabled policy did not reach OpenWithSkills(true): %v", backend.optIns)
 				}
 			} else if len(backend.optIns) != beforeOptIns {
-				t.Fatalf("default activation inherited skill opt-in: %v", backend.optIns)
+				t.Fatalf("disabled policy enabled skills: %v", backend.optIns)
 			}
 		}
 	}
-	// An optional backend must never be silently bypassed for an opt-in start.
+	// An enabled policy must never be silently bypassed by a legacy backend.
+	if err := s.registry.SetProjectSkills(t.Context(), project, true); err != nil {
+		t.Fatal(err)
+	}
 	legacy := &fakeRuntime{}
 	s.runtimes = legacy
-	w := request(t, s, "POST", path, url.Values{"csrf": {csrf}, "confirm": {"trusted"}, "enable_skills": {"runtime"}}, cookie)
+	w := request(t, s, "POST", path, url.Values{"csrf": {csrf}, "confirm": {"trusted"}}, cookie)
 	if w.Code != http.StatusServiceUnavailable || len(legacy.calls) != 0 {
-		t.Fatalf("unsupported opt-in started legacy worker: %d calls=%v", w.Code, legacy.calls)
+		t.Fatalf("unsupported enabled policy started legacy worker: %d calls=%v", w.Code, legacy.calls)
 	}
 }

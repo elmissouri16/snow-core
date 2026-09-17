@@ -62,6 +62,15 @@ func (r *inventoryActivationRuntime) Open(_ context.Context, p Project, _, _, _ 
 	r.owners[p.ID] = snapshot
 	return snapshot, nil
 }
+func (r *inventoryActivationRuntime) OpenWithSkills(ctx context.Context, p Project, session, provider, model string, enabled bool) (RuntimeSnapshot, error) {
+	if !enabled {
+		return RuntimeSnapshot{}, ErrRuntimeInvalid
+	}
+	return r.Open(ctx, p, session, provider, model)
+}
+func (*inventoryActivationRuntime) Skills(context.Context, string, string) (RuntimeSkills, error) {
+	return RuntimeSkills{}, ErrRuntimeInvalid
+}
 func (r *inventoryActivationRuntime) Snapshot(project string) (RuntimeSnapshot, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

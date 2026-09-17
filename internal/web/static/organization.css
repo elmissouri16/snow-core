@@ -1,5 +1,5 @@
 .organization-panel { width: 100%; max-width: 78rem; margin-inline: auto; padding: clamp(1rem, 3vw, 2rem); overflow-wrap: anywhere; }
-.organization-panel .workspace-heading { gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
+.organization-panel .workspace-heading { height: auto; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
 .organization-panel h2 { font-size: 1rem; margin: 0 0 .75rem; }
 .organization-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; margin-block: 1.5rem; }
 .organization-card { min-width: 0; border: 1px solid var(--border, #80808055); border-radius: .75rem; padding: 1rem; }

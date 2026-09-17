@@ -319,6 +319,10 @@ func newRuntimeControlsBrowserHTTP(t *testing.T, directory string) *managerExecu
 		_ = registry.Close()
 		t.Fatal(err)
 	}
+	if err := registry.SetProjectSkills(t.Context(), project, false); err != nil {
+		_ = registry.Close()
+		t.Fatal(err)
+	}
 	if err := registry.Close(); err != nil {
 		t.Fatal(err)
 	}

@@ -1,7 +1,7 @@
 import {projectID, archivedID, missingID, malicious, organization, csrf} from './fixture.mjs';
 
 export async function organizationChecks(t) {
-  const {page, wait, until, evaluate, click, type, assert, report, state, delay} = t;
+  const {send, page, wait, until, evaluate, click, type, assert, report, state, delay} = t;
   const posts = () => state.requests.filter(request => request.method === 'POST');
   const session = id => `#organization-session-${projectID}-${id}`;
   const submit = async (selector, fields) => {
@@ -11,6 +11,26 @@ export async function organizationChecks(t) {
     assert(JSON.stringify(posts().at(-1).fields) === JSON.stringify(fields), `Exact form fields: ${JSON.stringify(posts().at(-1).fields)}`);
     await delay(50); // Native 204 deliberately preserves the current document.
   };
+  await report('Wrapped Organization header contains its copy and action above the registration grid', async () => {
+    try {
+      for (const width of [320, 360]) {
+        await send('Emulation.setDeviceMetricsOverride', {width, height: 740, deviceScaleFactor: 1, mobile: false});
+        await page('organization');
+        const bounds = await evaluate(`(() => {
+          const header = document.querySelector('.organization-panel .workspace-heading');
+          const copy = header.firstElementChild, action = header.querySelector(':scope > a');
+          const grid = document.querySelector('.organization-grid');
+          const box = node => { const value = node.getBoundingClientRect(); return {top: value.top, bottom: value.bottom}; };
+          return {header: box(header), copy: box(copy), action: box(action), grid: box(grid)};
+        })()`);
+        assert(bounds.copy.bottom <= bounds.header.bottom + 1 && bounds.action.bottom <= bounds.header.bottom + 1,
+          `${width}px Organization header contains wrapped copy and action`);
+        assert(bounds.header.bottom <= bounds.grid.top + 1, `${width}px registration grid starts after the Organization header`);
+      }
+    } finally {
+      await send('Emulation.setDeviceMetricsOverride', {width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false});
+    }
+  });
   await report('Organization React filtering retains stable inputs, drafts and session rows', async () => {
     await page('organization');
     assert(await evaluate('document.querySelectorAll("[data-organization-session]").length===3'), 'Real bounded catalog props render all sessions');

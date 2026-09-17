@@ -56,7 +56,7 @@ func TestRuntimeHTTPExplicitActivationAndSafeActions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	backend := &fakeRuntime{}
+	backend := &skillsHTTPRuntime{}
 	s.runtimes = backend
 	base := "/projects/" + project.ID + "/runtime"
 	csrf := csrfFor(t, s, cookie)

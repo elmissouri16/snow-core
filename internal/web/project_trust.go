@@ -12,16 +12,12 @@ import (
 func (s *shell) authorizeProjectActivation(ctx context.Context, w http.ResponseWriter, r *http.Request, project Project) bool {
 	for key, values := range r.PostForm {
 		switch key {
-		case "csrf", "confirm", "session_id", "provider", "model", "remember_trust", "enable_skills":
+		case "csrf", "confirm", "session_id", "provider", "model", "remember_trust":
 			if len(values) == 1 {
 				continue
 			}
 		}
 		http.Error(w, "Invalid activation fields; reload this page", http.StatusBadRequest)
-		return false
-	}
-	if skills := r.PostForm.Get("enable_skills"); skills != "" && skills != "runtime" {
-		http.Error(w, "Invalid runtime skills choice", http.StatusBadRequest)
 		return false
 	}
 	remember := r.PostForm.Get("remember_trust")

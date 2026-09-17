@@ -307,7 +307,7 @@ export function init({root, key, instance, request, changed = () => {}, error = 
       const response = (await skillsPromise) as SkillsResponse;
       if (!validQuery(current)) return;
       if (!response || response.instance_id !== instance || !Array.isArray(response.skills) || response.skills.length > 4096) throw new Error("Invalid installed skill catalog.");
-      if (response.enabled !== true) { show(current, [], "Close and start with Enable installed skills to use installed skills."); return; }
+      if (response.enabled !== true) { show(current, [], "Close this runtime, enable installed skills in Settings → Workspaces, then start again."); return; }
       const choices = response.skills.filter(skill => skill && typeof skill.name === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(skill.name) && skill.name.toLowerCase().includes(current.value.toLowerCase())).slice(0, 256).map(skill => ({
         label: `$${skill.name}`, description: skill.enabled === true ? String(skill.description || "").slice(0, 512) : `Disabled${typeof skill.disabled_by === "string" ? `: ${skill.disabled_by.slice(0, 128)}` : ""}`,
         fullDescription: skill.enabled === true ? String(skill.description || "") : `Disabled${typeof skill.disabled_by === "string" ? `: ${skill.disabled_by}` : ""}`,

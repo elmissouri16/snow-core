@@ -69,14 +69,17 @@ func runStreamFixtureWorker() int {
 	if flag("--rpc-startup") != "eager" || slices.Contains(os.Args, "--permission") {
 		return 83
 	}
-	for _, option := range []string{"--no-session", "--no-plugins", "--no-mcp", "--no-skills", "--no-subagents", "--no-debug"} {
+	for _, option := range []string{"--no-session", "--no-plugins", "--no-mcp", "--no-subagents", "--no-debug"} {
 		if !slices.Contains(os.Args, option) {
 			return 84
 		}
 	}
+	if slices.Contains(os.Args, "--no-skills") {
+		return 84
+	}
 	// Keep the production interactive broker, but expose only safe local fixture
 	// tools. A provider cannot invoke Bash, write, plugins, MCP, or child agents.
-	a, err := app.New(ctx, app.Options{CWD: cwd, Provider: "fake", Model: "fake-1", NoSession: true, Tools: []string{"ask_user", "read"}, NoPlugins: true, NoMCP: true, NoSkills: true, Subagents: new(false), Debug: new(false)})
+	a, err := app.New(ctx, app.Options{CWD: cwd, Provider: "fake", Model: "fake-1", NoSession: true, Tools: []string{"ask_user", "read"}, NoPlugins: true, NoMCP: true, Subagents: new(false), Debug: new(false)})
 	if err != nil {
 		return 85
 	}

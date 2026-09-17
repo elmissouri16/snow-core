@@ -27,7 +27,7 @@ await component(async ({evaluate,check,click,key,settle,ids})=>{
   await check('intents.length===5 && intents[4].type==="select" && intents[4].instance==="worker-a" && intents[4].session==="a1"','Live inventory link delegates exact session/instance selection');
   await evaluate(`SnowSidebarSessions.invalidate(ids[0]);reply(pending.length-1,[{session_id:'a1',name:'First'}]);`);await settle();
   await click('[data-shell-session="a1"] [data-shell-session-open]');
-  await check('intents.length===5 && navigation.length===1 && new URL(navigation[0].href,location.href).searchParams.get("session")==="a1"','Cold inventory link navigates saved session without owner selection');
+  await check('intents.length===5 && navigation.length===1 && new URL(navigation[0].href,location.href).searchParams.get("session")==="a1"','Cold inventory link retains canonical navigation fallback when the production activation owner is absent');
   await check('navigation[0].source===row("a1").querySelector("a") && navigation[0].native===true','Navigation callback carries the actual source and native navigation marker');
   await click(selector(0,'menu'));
   await check('$(".snow-menu").parentElement===document.body && more(0).getAttribute("aria-expanded")==="true"','React project popup uses real shared body portal');

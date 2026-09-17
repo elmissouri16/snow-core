@@ -64,8 +64,8 @@ window.testComposerMentions = async assert => {
   assert(latest("prompt").fields.text === "$review " && !Object.hasOwn(latest("prompt").fields, "content"), "selected skill activates only through explicit legacy text Send");
   await accept("prompt");
   await swap({instance_id: "instance-disabled"}); draft("$"); await wait(() => posts("skills").length === 2);
-  latest("skills").resolve(skills({enabled: false, skills: []})); await wait(() => /Enable installed skills/i.test($("[data-composer-mentions]").textContent));
-  assert(rows().length === 0 && /Enable installed skills/i.test($("[data-composer-mentions]").textContent), "disabled runtime skills have explicit unavailable state and no stale rows");
+  latest("skills").resolve(skills({enabled: false, skills: []})); await wait(() => /Settings → Workspaces/i.test($("[data-composer-mentions]").textContent));
+  assert(rows().length === 0 && /Settings → Workspaces/i.test($("[data-composer-mentions]").textContent), "disabled runtime skills direct the user to the saved workspace setting without stale rows");
   key("Enter");
   assert(posts("prompt").length === 2 && $("#live-prompt").value === "$", "unavailable skill picker cannot auto-execute");
   await clear();

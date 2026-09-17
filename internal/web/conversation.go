@@ -172,7 +172,7 @@ func (s *shell) runtimeAction(w http.ResponseWriter, r *http.Request) {
 		if !s.authorizeProjectActivation(ctx, w, r, project) {
 			return
 		}
-		enableSkills := r.PostForm.Get("enable_skills") == "runtime"
+		enableSkills := project.SkillsEnabled
 		skillsBackend, supportsSkills := s.runtimes.(RuntimeSkillsBackend)
 		if enableSkills && !supportsSkills {
 			http.Error(w, "Skill-enabled activation unavailable", http.StatusServiceUnavailable)
@@ -184,10 +184,6 @@ func (s *shell) runtimeAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer releaseReads()
-		if err := s.registry.SetProjectSkills(ctx, project, enableSkills); err != nil {
-			http.Error(w, "Could not save skill preference. No runtime was started", http.StatusConflict)
-			return
-		}
 		var snapshot RuntimeSnapshot
 		if enableSkills {
 			snapshot, err = skillsBackend.OpenWithSkills(ctx, project, r.PostForm.Get("session_id"), r.PostForm.Get("provider"), r.PostForm.Get("model"), true)

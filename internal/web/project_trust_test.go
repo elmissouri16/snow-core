@@ -18,7 +18,7 @@ func TestProjectTrustActivationAndRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	backend := &fakeRuntime{}
+	backend := &skillsHTTPRuntime{}
 	s.runtimes = backend
 	csrf := csrfFor(t, s, cookie)
 	page := "/?view=projects&project=" + project.ID + "&new=1"
@@ -51,7 +51,7 @@ func TestProjectTrustActivationAndRevocation(t *testing.T) {
 	}
 	// A fresh inactive runtime owner simulates the surface after restart. Durable
 	// registry reopen/identity behavior is separately covered by registry tests.
-	backend = &fakeRuntime{}
+	backend = &skillsHTTPRuntime{}
 	s.runtimes = backend
 	body = request(t, s, "GET", page, nil, cookie).Body.String()
 	if strings.Contains(body, `name="confirm" type="checkbox"`) || !strings.Contains(body, `name="confirm" value="trusted"`) || !strings.Contains(body, "Start session") || len(backend.calls) != 0 {
@@ -90,7 +90,7 @@ func TestProjectTrustHTTPFieldsAndAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	backend := &fakeRuntime{}
+	backend := &skillsHTTPRuntime{}
 	s.runtimes = backend
 	csrf := csrfFor(t, s, cookie)
 	open := "/projects/" + project.ID + "/runtime/open"
@@ -154,7 +154,7 @@ func TestProjectTrustHTTPChangedFolderAndStorageFailure(t *testing.T) {
 			if err := s.registry.RememberProjectTrust(t.Context(), p); err != nil {
 				t.Fatal(err)
 			}
-			backend := &fakeRuntime{}
+			backend := &skillsHTTPRuntime{}
 			s.runtimes = backend
 			csrf := csrfFor(t, s, cookie)
 			if scenario == "replaced" {
@@ -183,7 +183,7 @@ func TestProjectActivationColdDraftIsUnnamedDisabledAndPassive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	backend := &fakeRuntime{}
+	backend := &skillsHTTPRuntime{}
 	s.runtimes = backend
 	response := request(t, s, "GET", "/?view=projects&project="+project.ID+"&new=1", nil, cookie)
 	if response.Code != http.StatusOK || catalog.calls != 0 || len(backend.calls) != 0 {
