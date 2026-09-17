@@ -1,5 +1,14 @@
 # Known bugs
 
+## BUG-231: Provider retry fixture fails the repository gofmt gate
+
+- **Status:** Resolved — the repository format gate and focused package checks pass.
+- **Severity:** Low
+- **Surface:** Linux CI formatting gate for the provider retry regression
+- **Evidence:** Exact-release CI run 35232873690 stopped its Ubuntu test job before tests because `gofmt -l $(git ls-files '*.go')` reported `internal/agent/provider_retry_test.go`. Local Go 1.27rc3 reproduced the same output. The file's `Model` field was not aligned with the adjacent `InternalContext` field in a composite literal; behavior and the macOS test job were otherwise unaffected.
+- **Fix:** Apply Go 1.27rc3 `gofmt` to the fixture and retain the existing retry assertions unchanged.
+- **Verification:** `gofmt -l $(git ls-files '*.go')` returns no paths; `go test ./internal/agent -count=1` and `go vet ./internal/agent` pass. Replacement exact-SHA CI and Documentation workflows remain required before tagging.
+
 ## BUG-230: Tool timeline treats Shell inventory reads as runtime activation
 
 - **Status:** Resolved — the complete tool-timeline matrix passes.

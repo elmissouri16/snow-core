@@ -79,7 +79,7 @@ func TestInternalContextPersistsOnceAfterNoActivityRetry(t *testing.T) {
 	provider := &retryStartupProvider{failures: 1}
 	agent, store := setup(t, provider, nil, permission.ModeDeny)
 	request := protocol.ChatRequest{
-		Model: agent.Model(),
+		Model:           agent.Model(),
 		InternalContext: []protocol.InternalContextFragment{{Source: "goal", Text: "continue once"}},
 	}
 	if _, err := agent.streamTurnWithErrors(t.Context(), request, false); err == nil {
