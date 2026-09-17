@@ -99,10 +99,10 @@ or rebuilding does not update already running managers/workers; explicitly
 restart them before exercising the new binary and embedded assets. Do not
 silently stop or replace a user's runtime as part of a frontend check.
 
-## Rendering ownership during migration
+## Rendering ownership
 
 The React rendering ports are wired into the production bundle, but source
-integration alone does not establish whole-product parity. They now cover:
+integration alone does not establish whole-product parity. They cover:
 
 - Activity, Organization, Home, the workspace catalog and cold/saved workspace,
   pairing/login, startup presentation and project-operation views.
@@ -118,8 +118,10 @@ The remaining classic scripts have separate, deliberate responsibilities:
 `app.js` owns serial transport/admission and external document/form lifecycle;
 `stream.js` owns the read-only snapshot connection; `menus.js` owns external
 popup geometry and keyboard focus. Cost formatting now belongs to the typed
-conversation model; the retired `costs.js` is no longer loaded or routed, while
-its stylesheet is retained. Go still owns
+conversation model; the retired `costs.js` implementation is removed while its
+stylesheet is retained. Retired classic scripts kept temporarily for unique
+regression fixtures are excluded from the embedded production asset set and
+remain unrouted. Go still owns
 public projection, document shells, empty mount hosts and non-React outer form
 metadata, with the first-party `SnowNavigation` controller replacing the bounded
 `#workspace` ancestor through the existing server-rendered fragment path. These

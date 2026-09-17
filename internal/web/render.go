@@ -12,14 +12,13 @@ import (
 	"time"
 )
 
-//go:embed templates/*.html static/*
+//go:embed templates/*.html static/*.css static/*.txt static/app.js static/menus.js static/stream.js static/generated/*
 var assets embed.FS
 
 var templates = template.Must(template.New("web").Funcs(template.FuncMap{
 	"markdown":                   markdownHTML,
 	"activityReactProps":         activityReactProps,
 	"organizationReactProps":     organizationReactProps,
-	"hostSettingsReactProps":     hostSettingsReactProps,
 	"browserInventoryReactProps": browserInventoryReactProps,
 	"inspectionReactProps":       inspectionReactProps,
 	"homeReactProps":             homeReactProps,

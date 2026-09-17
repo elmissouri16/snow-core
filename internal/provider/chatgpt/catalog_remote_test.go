@@ -39,7 +39,7 @@ func TestRemoteCatalogMappingETagAndAccountCache(t *testing.T) {
 		}})
 	}))
 	defer server.Close()
-	store := auth.NewMemoryStoreForTest()
+	store := auth.NewMemoryStore()
 	_ = store.Put(ProviderID, auth.Credential{Type: auth.CredentialOAuth, Access: "access", Refresh: "refresh", AccountID: "acct"})
 	root := t.TempDir()
 	p := New(Config{BaseURL: server.URL, Store: store, CacheRoot: root, HTTPClient: server.Client()})
@@ -84,7 +84,7 @@ func TestAuthenticatedCatalogDoesNotInjectBundledModelsOnFailure(t *testing.T) {
 		http.Error(w, "unavailable", http.StatusServiceUnavailable)
 	}))
 	defer server.Close()
-	store := auth.NewMemoryStoreForTest()
+	store := auth.NewMemoryStore()
 	if err := store.Put(ProviderID, auth.Credential{Type: auth.CredentialOAuth, Access: "access", Refresh: "refresh", AccountID: "acct"}); err != nil {
 		t.Fatal(err)
 	}

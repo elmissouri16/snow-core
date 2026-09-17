@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -24,7 +25,11 @@ func (*preflightTestTool) Schema() tools.ToolSchema {
 }
 
 func (t *preflightTestTool) Preflight(context.Context, json.RawMessage, tools.ToolHost) (permission.Analysis, error) {
-	return permission.CloneAnalysis(t.analysis), t.preflightErr
+	analysis := t.analysis
+	analysis.Effects = slices.Clone(analysis.Effects)
+	analysis.Capabilities = slices.Clone(analysis.Capabilities)
+	analysis.Paths = slices.Clone(analysis.Paths)
+	return analysis, t.preflightErr
 }
 
 func (t *preflightTestTool) Run(context.Context, json.RawMessage, tools.ToolHost) (tools.ToolResult, error) {

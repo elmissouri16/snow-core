@@ -39,7 +39,6 @@ FORBIDDEN_PUBLIC_PATHS = {
     "docs/code-audit.html",
     "docs/codex-plan-mode-and-goals.html",
     "docs/lazy-mcp-implementation-plan.html",
-    "docs/plugin-js-python-research.html",
     "docs/subagents-implementation-plan.html",
     "docs/tool-routing.html",
     "docs/tui-performance.html",

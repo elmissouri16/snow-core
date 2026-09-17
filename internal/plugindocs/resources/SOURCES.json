@@ -10,7 +10,7 @@
     {
       "source": "docs/goals.md",
       "resource": "docs/goals.md",
-      "sha256": "9608150b3edbda3d4a8a581675dd3be0b4c3feaff5cf84ab4134bc8b09a3e853"
+      "sha256": "bb746796416dd9df13a308cf06b1f26dc5be1b5c4048bf483b1a6a82d2486e41"
     },
     {
       "source": "docs/plan-mode.md",
@@ -30,12 +30,12 @@
     {
       "source": "docs/plugins.md",
       "resource": "docs/plugins.md",
-      "sha256": "5da4a5450e1c339b7118af433c75152a266fc5cf678cbb642fba3b0b2b940840"
+      "sha256": "92c7de9f6192567659a13212abd32117d849a361b5c6ee76899c9b25182919bc"
     },
     {
       "source": "docs/rpc.md",
       "resource": "docs/rpc.md",
-      "sha256": "d9a1fd19b001e44a1b538bfc1f9aa8df1b8c17f8fce7a9c778734ba55a8228bd"
+      "sha256": "9445a6e3eb7aa990091a4ed13a2946710f33e264ca0f13d0ebf8794a29df2b49"
     },
     {
       "source": "docs/sdk-reference.md",

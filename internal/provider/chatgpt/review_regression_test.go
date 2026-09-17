@@ -60,7 +60,7 @@ func TestForcedRefreshUsesNewerStoredCredential(t *testing.T) {
 		http.Error(w, "unexpected", http.StatusBadRequest)
 	}))
 	defer server.Close()
-	store := auth.NewMemoryStoreForTest()
+	store := auth.NewMemoryStore()
 	newer := auth.Credential{Type: auth.CredentialOAuth, Access: "new-access", Refresh: "new-refresh", AccountID: "acct"}
 	if err := store.Put(ProviderID, newer); err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestStaleCatalogCacheTriggersRefresh(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(modelsResponse{Models: []modelRecord{{Slug: "live", Visibility: "list"}}})
 	}))
 	defer server.Close()
-	store := auth.NewMemoryStoreForTest()
+	store := auth.NewMemoryStore()
 	_ = store.Put(ProviderID, auth.Credential{Type: auth.CredentialOAuth, Access: "access", AccountID: "acct"})
 	now := time.Now().UTC()
 	p := New(Config{BaseURL: server.URL, Store: store, CacheRoot: t.TempDir(), HTTPClient: server.Client(), Now: func() time.Time { return now }})

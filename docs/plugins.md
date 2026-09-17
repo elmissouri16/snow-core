@@ -123,8 +123,10 @@ package discovery. `/plugins reload <id>` replaces one already-loaded, enabled
 JavaScript package while idle; registration enablement still requires restart.
 See [reload lifecycle and failure semantics](plugin-workflows.md#reload-one-plugin).
 The SDK exposes `ReloadPlugin(ctx, id)` and RPC exposes `plugin_reload`.
-The retired executable `plugins` config key remains ignored,
-and the old `--plugin` flag remains unsupported.
+The former external-process JavaScript and Python plugin SDKs are retired;
+supported extensions are Goja JavaScript packages and compiled Go plugins
+supplied by an embedding application. The retired executable `plugins` config
+key remains ignored, and the old `--plugin` flag remains unsupported.
 
 For branch-local profiles, intersected tool restrictions, lifecycle guards, and
 mock-host tests, see [Plugin workflows and reload](plugin-workflows.md). These

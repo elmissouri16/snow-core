@@ -109,10 +109,3 @@ func (s *Server) handleSessionReasoning(ctx context.Context, req Request) (retEr
 	}
 	return s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: result})
 }
-
-func sessionReasoningErrorCode(err error) string {
-	if errors.Is(err, agent.ErrSessionReasoningUnknown) {
-		return protocol.RPCSessionReasoningUnknownErrorCode
-	}
-	return protocol.RPCSessionReasoningRejectedErrorCode
-}

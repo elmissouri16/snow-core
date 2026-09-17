@@ -28,10 +28,6 @@ func (m *Model) infoPickerVisibleItems() int {
 	return m.selectionCardLayout(m.infoCard()).listRows
 }
 
-func (m *Model) infoWindow() (start, end int) {
-	return settingsCardWindow(m.infoIndex, len(m.infoItems), m.infoPickerVisibleItems())
-}
-
 func (m *Model) renderInfoPicker() string {
 	if !m.pickInfo {
 		return ""
@@ -72,14 +68,6 @@ func (m *Model) sessionCard() selectionCard {
 
 func (m *Model) sessionPickerVisibleItems() int {
 	return m.selectionCardLayout(m.sessionCard()).listRows
-}
-
-func (m *Model) sessionWindow() (start, end int) {
-	return settingsCardWindow(m.sessionIndex, len(m.sessions), m.sessionPickerVisibleItems())
-}
-
-func (m *Model) sessionPickerRows() int {
-	return m.selectionCardLayout(m.sessionCard()).geometry.outerHeight
 }
 
 func (m *Model) renderSessionPicker() string {
@@ -132,14 +120,6 @@ func (m *Model) treeCard() selectionCard {
 
 func (m *Model) treePickerVisibleItems() int {
 	return m.selectionCardLayout(m.treeCard()).listRows
-}
-
-func (m *Model) treeWindow() (start, end int) {
-	return settingsCardWindow(m.branchIndex, len(m.branches), m.treePickerVisibleItems())
-}
-
-func (m *Model) treePickerRows() int {
-	return m.selectionCardLayout(m.treeCard()).geometry.outerHeight
 }
 
 func (m *Model) renderTreePicker() string {

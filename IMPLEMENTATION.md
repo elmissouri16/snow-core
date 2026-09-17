@@ -1762,10 +1762,7 @@ only; browser fixtures additionally require an installed Chrome/Chromium:
 ```sh
 node --check internal/web/static/app.js
 node --check internal/web/static/visibility.js
-node --check internal/web/static/markdown.js
 node --check internal/web/static/stream.js
-node --check internal/web/static/attention.js
-node --check internal/web/static/scroll.js
 node scripts/tests/browser/stream-client/run.mjs
 node scripts/tests/browser/live-stream/run.mjs
 node scripts/tests/browser/permission-workflow/run.mjs

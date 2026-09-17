@@ -165,6 +165,9 @@ func TestReactGeneratedAssetRoutesAndHead(t *testing.T) {
 		if w := request(t, s, http.MethodGet, "/static/"+name+".js", nil); w.Code != http.StatusNotFound {
 			t.Errorf("retired DOM owner still routed: %s = %d", name, w.Code)
 		}
+		if _, err := assets.ReadFile("static/" + name + ".js"); err == nil {
+			t.Errorf("retired DOM owner still embedded: %s", name)
+		}
 		switch name {
 		case "conversation", "markdown", "visibility", "shell", "sidebar-sessions", "session-actions":
 			continue // These owners use shared styles rather than a same-named CSS file.
@@ -175,7 +178,7 @@ func TestReactGeneratedAssetRoutesAndHead(t *testing.T) {
 	}
 }
 
-func TestReactHostSettingsAndBrowserBootstrap(t *testing.T) {
+func TestReactBrowserBootstrap(t *testing.T) {
 	const hostile = `"><script>alert('x')</script><img src=x onerror="alert(1)">&雪`
 	data := pageData{
 		CSRF: hostile, HostSettingsEnabled: true,
@@ -186,27 +189,7 @@ func TestReactHostSettingsAndBrowserBootstrap(t *testing.T) {
 		},
 		Live: &RuntimeSnapshot{InstanceID: "private-instance", CancelToken: "private-cancel", Messages: []RuntimeMessage{{Text: "private-transcript"}}},
 	}
-	props, markup := reactBootstrap(t, "host-settings", data)
-	var host hostSettingsFrontendProps
-	if err := json.Unmarshal([]byte(props), &host, json.RejectUnknownMembers(true)); err != nil {
-		t.Fatal(err)
-	}
-	if host.CSRF != hostile || !host.Enabled || len(host.Projects) != 1 || host.Projects[0] != (hostSettingsFrontendProject{ID: "available-id", Name: hostile}) {
-		t.Fatal("host settings bootstrap lost its available-project projection")
-	}
-	if !strings.Contains(markup, `data-react-page="host-settings"`) || strings.Contains(markup, "host-api-key") {
-		t.Fatal("host settings retained the removed browser API-key panel")
-	}
-	for _, forbidden := range []string{"private-", `"path"`, `"issue"`, `"trusted"`, `"available"`, `"pinned"`, `"skillsEnabled"`, `"trustRemembered"`} {
-		if strings.Contains(props, forbidden) {
-			t.Fatalf("host settings exposed non-projected data: %s", forbidden)
-		}
-	}
-	props, _ = reactBootstrap(t, "host-settings", pageData{})
-	if props != `{"csrf":"","enabled":false,"projects":[]}` {
-		t.Fatalf("disabled host settings bootstrap: %s", props)
-	}
-	props, markup = reactBootstrap(t, "browser-inventory", data)
+	props, markup := reactBootstrap(t, "browser-inventory", data)
 	var inventory browserInventoryFrontendProps
 	if err := json.Unmarshal([]byte(props), &inventory, json.RejectUnknownMembers(true)); err != nil || inventory.CSRF != hostile {
 		t.Fatalf("browser inventory bootstrap: %+v, %v", inventory, err)
@@ -216,10 +199,6 @@ func TestReactHostSettingsAndBrowserBootstrap(t *testing.T) {
 	}
 	tooLarge := strings.Repeat("x", maxReactPropsBytes)
 	for name, marshal := range map[string]func() (string, error){
-		"host csrf": func() (string, error) { return hostSettingsReactProps(tooLarge, true, nil) },
-		"host project": func() (string, error) {
-			return hostSettingsReactProps("", true, []Project{{ID: "available-id", Available: true, Name: tooLarge}})
-		},
 		"browser csrf": func() (string, error) { return browserInventoryReactProps(tooLarge) },
 	} {
 		t.Run(name, func(t *testing.T) {

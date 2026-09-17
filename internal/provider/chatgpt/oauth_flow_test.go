@@ -59,7 +59,7 @@ func TestBrowserLoginValidatesStateAndPersists(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(tokenResponse{AccessToken: access, RefreshToken: "refresh", ExpiresIn: 3600})
 	}))
 	defer server.Close()
-	store := auth.NewMemoryStoreForTest()
+	store := auth.NewMemoryStore()
 	status, err := Login(context.Background(), LoginOptions{Method: LoginBrowser, Store: store, AuthBaseURL: server.URL, HTTPClient: server.Client(), AllowedWorkspaceIDs: []string{"acct"}, OpenBrowser: func(_ context.Context, target string) error {
 		u, _ := url.Parse(target)
 		if got := u.Query().Get("scope"); got != "openid profile email offline_access api.connectors.read api.connectors.invoke" {
@@ -102,7 +102,7 @@ func (s *coordinatedMemoryStore) WithRefreshLock(_ string, fn func() error) erro
 
 func TestCoordinatedRefreshDoesNotResurrectLogout(t *testing.T) {
 	now := time.Now()
-	store := &coordinatedMemoryStore{MemoryStore: auth.NewMemoryStoreForTest()}
+	store := &coordinatedMemoryStore{MemoryStore: auth.NewMemoryStore()}
 	_ = store.Put(ProviderID, auth.Credential{Type: auth.CredentialOAuth, Access: "old", Refresh: "refresh", Expires: now.Add(-time.Minute).Unix(), AccountID: "acct"})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := store.Delete(ProviderID); err != nil {
@@ -138,7 +138,7 @@ func TestRefreshRotatesOnceAcrossConcurrentResolvers(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(tokenResponse{AccessToken: access, RefreshToken: "rotated", ExpiresIn: 3600})
 	}))
 	defer server.Close()
-	store := auth.NewMemoryStoreForTest()
+	store := auth.NewMemoryStore()
 	_ = store.Put(ProviderID, auth.Credential{Type: auth.CredentialOAuth, Access: "opaque", Refresh: "old", Expires: now.Add(-time.Minute).Unix(), AccountID: "acct"})
 	p := New(Config{Store: store, AuthBaseURL: server.URL, HTTPClient: server.Client(), Now: func() time.Time { return now }})
 	errs := make(chan error, 2)
@@ -165,11 +165,11 @@ func TestBrowserLoginTimeoutAndRefreshErrorRedaction(t *testing.T) {
 		fmt.Fprint(w, `{"error_description":"echo super-secret-refresh"}`)
 	}))
 	defer server.Close()
-	_, err := Login(context.Background(), LoginOptions{Method: LoginBrowser, Store: auth.NewMemoryStoreForTest(), AuthBaseURL: server.URL, HTTPClient: server.Client(), BrowserTimeout: 20 * time.Millisecond})
+	_, err := Login(context.Background(), LoginOptions{Method: LoginBrowser, Store: auth.NewMemoryStore(), AuthBaseURL: server.URL, HTTPClient: server.Client(), BrowserTimeout: 20 * time.Millisecond})
 	if err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("timeout err=%v", err)
 	}
-	store := auth.NewMemoryStoreForTest()
+	store := auth.NewMemoryStore()
 	now := time.Now()
 	_ = store.Put(ProviderID, auth.Credential{Type: auth.CredentialOAuth, Access: "old", Refresh: "super-secret-refresh", Expires: now.Add(-time.Minute).Unix(), AccountID: "acct"})
 	p := New(Config{Store: store, AuthBaseURL: server.URL, HTTPClient: server.Client(), Now: func() time.Time { return now }})
@@ -188,7 +188,7 @@ func TestDevicePendingHonorsTimeout(t *testing.T) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
 	defer server.Close()
-	_, err := Login(context.Background(), LoginOptions{Method: LoginDevice, Store: auth.NewMemoryStoreForTest(), AuthBaseURL: server.URL, HTTPClient: server.Client(), DeviceTimeout: 20 * time.Millisecond})
+	_, err := Login(context.Background(), LoginOptions{Method: LoginDevice, Store: auth.NewMemoryStore(), AuthBaseURL: server.URL, HTTPClient: server.Client(), DeviceTimeout: 20 * time.Millisecond})
 	if err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("device timeout err=%v", err)
 	}
@@ -211,7 +211,7 @@ func TestDeviceLoginImmediateAuthorization(t *testing.T) {
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
-	store := auth.NewMemoryStoreForTest()
+	store := auth.NewMemoryStore()
 	status, err := Login(ctx, LoginOptions{Method: LoginDevice, Store: store, AuthBaseURL: server.URL, HTTPClient: server.Client()})
 	if err != nil {
 		t.Fatal(err)

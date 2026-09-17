@@ -74,10 +74,13 @@ Submitting explicitly authorizes one goal run with the current model and session
 permissions. Goal objectives currently accept plain text, not attachments.
 
 Before admitting work, Snow inspects the exact live worker, durable session,
-branch, tip, goal identity, model, permissions, thinking and revision. A changed
-draft or scope cancels that submission instead of sending stale text or retargeting
-it. On confirmed admission, only an unchanged objective draft is cleared and
-Goal mode turns off. Concurrently typed text and unverified submissions are kept;
+branch, tip, goal identity, model, permissions, thinking and revision. The browser
+sends `expected_revision` only to the manager as a compare-and-swap guard for the
+reviewed snapshot; it is not part of the strict core `goal_run` RPC parameters. A
+changed draft or scope cancels that submission instead of sending stale text or
+retargeting it. On confirmed admission, only an unchanged objective draft is
+cleared and Goal mode turns off. Concurrently typed text and unverified
+submissions are kept;
 no failed or uncertain write is automatically replayed. Toggling Goal off by
 itself never clears text, cancels a run, or resumes a saved goal.
 

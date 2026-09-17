@@ -134,7 +134,7 @@ func TestImportAuthWritesSnowCredential(t *testing.T) {
 }
 
 func TestImportAuthRequiresAccountID(t *testing.T) {
-	store := auth.NewMemoryStoreForTest()
+	store := auth.NewMemoryStore()
 	_, err := ImportAuth(store, AuthSource{Name: "Codex", Credential: auth.Credential{Type: auth.CredentialOAuth, Access: "opaque", Refresh: "refresh"}})
 	if err == nil || !strings.Contains(err.Error(), "account ID") {
 		t.Fatalf("missing account error=%v", err)
@@ -145,7 +145,7 @@ func TestImportAuthRequiresAccountID(t *testing.T) {
 }
 
 func TestImportAuthAcceptsExpiredRefreshableCredential(t *testing.T) {
-	store := auth.NewMemoryStoreForTest()
+	store := auth.NewMemoryStore()
 	_, err := ImportAuth(store, AuthSource{
 		ID:   SourceCodex,
 		Name: "Codex",

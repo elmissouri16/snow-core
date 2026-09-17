@@ -25,7 +25,7 @@ func TestModelsReturnsCodexCatalog(t *testing.T) {
 }
 
 func TestCatalogAuthorityRequiresStoredAccount(t *testing.T) {
-	store := auth.NewMemoryStoreForTest()
+	store := auth.NewMemoryStore()
 	p := New(Config{Store: store})
 	if p.ModelCatalogAuthoritative() {
 		t.Fatal("catalog without stored account should be fallback-only")

@@ -16,11 +16,6 @@ func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{m: make(map[string]Credential)}
 }
 
-// NewMemoryStoreForTest is an alias used by test fixtures.
-func NewMemoryStoreForTest() *MemoryStore {
-	return NewMemoryStore()
-}
-
 // Get implements Store.
 func (s *MemoryStore) Get(provider string) (Credential, bool) {
 	s.mu.RLock()

@@ -631,11 +631,11 @@ func TestSessionPickerScrollsAndFitsTerminal(t *testing.T) {
 	m.inlineTranscript = true
 	m.layout()
 
-	rows := m.sessionPickerRows()
+	rows := m.selectionCardLayout(m.sessionCard()).geometry.outerHeight
 	if rows > m.managedFrameHeight() {
 		t.Fatalf("session picker rows = %d, inline budget = %d", rows, m.managedFrameHeight())
 	}
-	start, end := m.sessionWindow()
+	start, end := settingsCardWindow(m.sessionIndex, len(m.sessions), m.sessionPickerVisibleItems())
 	if end-start >= len(m.sessions) {
 		t.Fatalf("session window should be bounded: %d:%d", start, end)
 	}
@@ -670,7 +670,7 @@ func TestTreePickerInlineWindowFollowsSelection(t *testing.T) {
 	}
 	m.branchIndex = len(m.branches) - 1
 	m.layout()
-	if rows := m.treePickerRows(); rows > m.managedFrameHeight() {
+	if rows := m.selectionCardLayout(m.treeCard()).geometry.outerHeight; rows > m.managedFrameHeight() {
 		t.Fatalf("tree picker rows = %d, inline budget = %d", rows, m.managedFrameHeight())
 	}
 	if view := stripANSI(m.viewContent()); !strings.Contains(view, "branch-19") {

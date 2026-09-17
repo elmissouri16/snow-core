@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -594,21 +593,6 @@ func TestResponseRequestIDRedactsBeforeBounding(t *testing.T) {
 	}
 	if got := responseRequestID(http.Header{"X-Request-Id": []string{"\u009breq"}}); got != "req" {
 		t.Fatalf("C1 request id=%q", got)
-	}
-}
-
-func consumeSuccessfulStream(stream protocol.EventStream) error {
-	for {
-		event, err := stream.Next(context.Background())
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if event.Type == protocol.EvStreamError {
-			return event.Err
-		}
 	}
 }
 

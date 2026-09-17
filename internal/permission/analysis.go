@@ -24,10 +24,8 @@ const (
 	CapabilityPersistenceWrite          Capability = "persistence.write"
 	CapabilityPrivilegeEscalation       Capability = "privilege.escalation"
 	CapabilityProcessExec               Capability = "process.exec"
-	CapabilityDynamicExec               Capability = "process.exec.dynamic"
 	CapabilityNetworkRead               Capability = "network.read"
 	CapabilityNetworkWrite              Capability = "network.write"
-	CapabilityGitRead                   Capability = "git.read"
 	CapabilityGitWrite                  Capability = "git.write"
 	CapabilityGitRemoteRead             Capability = "git.remote_read"
 	CapabilityGitRemoteWrite            Capability = "git.remote_write"
@@ -102,13 +100,4 @@ func (DefaultPolicy) Evaluate(_ context.Context, req Request) (PolicyDecision, e
 		}
 	}
 	return PolicyDecision{}, nil
-}
-
-// CloneAnalysis makes a defensive copy for request assembly and tests.
-func CloneAnalysis(in Analysis) Analysis {
-	out := in
-	out.Effects = slices.Clone(in.Effects)
-	out.Capabilities = slices.Clone(in.Capabilities)
-	out.Paths = slices.Clone(in.Paths)
-	return out
 }

@@ -67,6 +67,8 @@ The public guide allowlist is:
 - `docs/skills.md`
 - `docs/mcp.md`
 - `docs/plugins.md`
+- `docs/plugin-extensions.md`
+- `docs/plugin-workflows.md`
 - `docs/security.md`
 - `docs/sdk.md`
 

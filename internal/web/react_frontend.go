@@ -51,17 +51,6 @@ type organizationFrontendSession struct {
 	Archived bool   `json:"archived"`
 }
 
-type hostSettingsFrontendProps struct {
-	CSRF     string                        `json:"csrf"`
-	Enabled  bool                          `json:"enabled"`
-	Projects []hostSettingsFrontendProject `json:"projects"`
-}
-
-type hostSettingsFrontendProject struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
 type browserInventoryFrontendProps struct {
 	CSRF string `json:"csrf"`
 }
@@ -92,16 +81,6 @@ func inspectionReactProps(project *Project, csrf string, live *RuntimeSnapshot) 
 	}
 	if live != nil {
 		props.Live = &inspectionFrontendLive{SessionID: live.SessionID, Provider: live.Provider, Model: live.Model}
-	}
-	return marshalReactProps(props)
-}
-
-func hostSettingsReactProps(csrf string, enabled bool, projects []Project) (string, error) {
-	props := hostSettingsFrontendProps{CSRF: csrf, Enabled: enabled}
-	for _, project := range projects {
-		if project.Available {
-			props.Projects = append(props.Projects, hostSettingsFrontendProject{ID: project.ID, Name: project.Name})
-		}
 	}
 	return marshalReactProps(props)
 }

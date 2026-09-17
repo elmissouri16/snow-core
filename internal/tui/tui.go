@@ -719,7 +719,6 @@ const (
 	permChoiceAllow = iota
 	permChoiceAlways
 	permChoiceDeny
-	permChoices
 )
 
 // ---------------------------------------------------------------------------

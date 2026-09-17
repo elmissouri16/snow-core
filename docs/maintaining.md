@@ -32,8 +32,8 @@ This index collects architecture, release procedures, and design history;
   rather than treating historical phase descriptions as current availability.
 - [Lazy MCP connection plan](lazy-mcp-implementation-plan.md): connection lifecycle
   and catalog design. Current setup is documented in [MCP](mcp.md).
-- [Retired plugin language research](plugin-js-python-research.md): historical
-  record for removed authoring SDKs and examples.
+- [Retired plugin language research](https://github.com/elmissouri16/snow-core/blob/8839ea0/docs/plugin-js-python-research.md):
+  historical record for removed authoring SDKs and examples.
 - [Session storage internals](session-storage-internals.md) — SQLite driver,
   schema, migrations, append-only branches, projections, and durable child data.
 - [ChatGPT authentication research](chatgpt-auth-research.md) — repository-only

@@ -126,7 +126,7 @@ func TestCheckAuthExpiredAndImportedMetadata(t *testing.T) {
 }
 
 func TestCheckStoreMissing(t *testing.T) {
-	status, err := CheckStore(auth.NewMemoryStoreForTest())
+	status, err := CheckStore(auth.NewMemoryStore())
 	if err != nil {
 		t.Fatal(err)
 	}

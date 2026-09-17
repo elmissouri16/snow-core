@@ -52,7 +52,6 @@ INTERNAL_DOCUMENTS = (
     "code-audit.md",
     "codex-plan-mode-and-goals.md",
     "lazy-mcp-implementation-plan.md",
-    "plugin-js-python-research.md",
     "subagents-implementation-plan.md",
     "tool-routing.md",
     "tui-performance.md",

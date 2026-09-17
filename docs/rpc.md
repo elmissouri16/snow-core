@@ -378,6 +378,7 @@ a project. Do not automatically replay prepare/clone after uncertain output.
     "active_input",
     "authentication",
     "branch_management",
+    "branch_versions",
     "compaction",
     "compaction_run",
     "context_report",
@@ -1388,6 +1389,44 @@ Selection and deletion return an acknowledgement; rename returns the updated
 `SessionBranch`. Existing app admission checks remain authoritative: these
 operations can fail with `session_busy` or `subagents_active`, and the active
 branch cannot be deleted.
+
+### Branch versions and restore
+
+The optional `branch_versions` capability exposes bounded, public saved-history
+inspection and an explicit prepare/commit restore flow. `branches_page` binds to
+an exact `session_id`, accepts an opaque cursor, and returns at most 100 branch
+versions per page. `branch_messages_page` binds to an exact `session_id`,
+`branch_id`, and saved `tip_id`, accepts an opaque cursor, and returns at most 64
+messages per page. Its public projection may include bounded `history_tools` and
+`history_tools_truncated`; it never exposes raw session storage or
+provider-private continuity data.
+
+Prepare a restore with the exact source and target branch-tip pairs:
+
+```json
+{"id":"restore-prepare-1","type":"branch_restore_prepare","params":{"session_id":"current-session","source_branch_id":"main","source_tip_id":"source-tip","target_branch_id":"experiment","target_tip_id":"target-tip"}}
+```
+
+Preparation performs no restore or execution. It returns an opaque, single-use
+`restore_token` that expires within two minutes. Commit it without resending or
+altering the reviewed branch identities:
+
+```json
+{"id":"restore-commit-1","type":"branch_restore_commit","params":{"session_id":"current-session","restore_token":"prepared-restore-token"}}
+```
+
+Commit rechecks both source and target branch-tip pairs with compare-and-swap
+semantics. The runtime must remain idle. Pending permission or user input,
+retained queue/review work, and a nonterminal goal reject restoration. Success
+selects the target branch's append-only saved history and applies that branch's
+saved collaboration mode while preserving current provider, model, permission,
+and related runtime authority. It performs no provider request, goal run,
+ordinary prompt, tool execution, provider replay, or filesystem rollback.
+
+`branch_restore_rejected` is a definitive admission or compare-and-swap
+rejection. `branch_restore_unknown` means the mutation outcome cannot safely be
+established. Clients must not automatically retry an unknown commit or reuse a
+consumed token.
 
 ### `compact`
 

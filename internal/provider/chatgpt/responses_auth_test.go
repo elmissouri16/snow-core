@@ -36,7 +36,7 @@ func TestResponses401RefreshesAndRetriesOnce(t *testing.T) {
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n")
 	}))
 	defer responseServer.Close()
-	store := auth.NewMemoryStoreForTest()
+	store := auth.NewMemoryStore()
 	old := auth.Credential{Type: auth.CredentialOAuth, Access: "old", Refresh: "old-refresh", AccountID: "acct"}
 	_ = store.Put(ProviderID, old)
 	p := New(Config{BaseURL: responseServer.URL, AuthBaseURL: authServer.URL, HTTPClient: responseServer.Client(), Store: store})
@@ -83,7 +83,7 @@ func TestResponses401RefreshThenTransientFailureReturnsToAgent(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":{"message":"temporarily unavailable","code":"service_unavailable"}}`))
 	}))
 	defer responseServer.Close()
-	store := auth.NewMemoryStoreForTest()
+	store := auth.NewMemoryStore()
 	old := auth.Credential{Type: auth.CredentialOAuth, Access: "old", Refresh: "old-refresh", AccountID: "acct"}
 	_ = store.Put(ProviderID, old)
 	p := New(Config{BaseURL: responseServer.URL, AuthBaseURL: authServer.URL, HTTPClient: http.DefaultClient, Store: store})
@@ -117,7 +117,7 @@ func TestResponsesRepeated401RefreshesOnlyOnce(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer responseServer.Close()
-	store := auth.NewMemoryStoreForTest()
+	store := auth.NewMemoryStore()
 	credential := auth.Credential{Type: auth.CredentialOAuth, Access: "old", Refresh: "old-refresh", AccountID: "acct"}
 	_ = store.Put(ProviderID, credential)
 	p := New(Config{BaseURL: responseServer.URL, AuthBaseURL: authServer.URL, HTTPClient: http.DefaultClient, Store: store})
