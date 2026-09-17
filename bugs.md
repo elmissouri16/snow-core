@@ -1,5 +1,23 @@
 # Known bugs
 
+## BUG-234: Host-clone timeout fixture expires before descendant admission
+
+- **Status:** Resolved — admission-ordered timeout, package, and full-suite checks pass.
+- **Severity:** Low
+- **Surface:** Host clone helper timeout/process-group integration fixture
+- **Evidence:** A local full-suite run failed `TestHostCloneHelperCancelTimeoutAndKillStopDescendants/timeout` because its fixed two-second deadline elapsed before the heavyweight fictional Git and grandchild test images created their readiness markers. The later five-second marker wait could never succeed after production correctly canceled the pre-admission fixture, so the run did not reach its descendant-cleanup assertion.
+- **Fix:** Give the timeout cell a test-only context that is explicitly expired with `context.DeadlineExceeded` only after both descendant markers exist. Parent test cancellation still propagates. This deterministically preserves timeout classification, real helper/Git admission, complete process-group termination, stable markers, and partial-destination retention without changing production behavior or increasing a wall-clock sleep.
+- **Verification:** The complete cancellation/timeout/TERM-resistant fixture passes 20 normal and 5 race-enabled repetitions; `go test ./cmd/snow -count=1`, `go test ./... -count=1`, and `go vet ./...` pass. Replacement exact-SHA workflows remain required before tagging.
+
+## BUG-233: Repetitive Git overflow fixture fails before its output bound
+
+- **Status:** Fix implemented; local verification passes, replacement Linux CI pending.
+- **Severity:** Low
+- **Surface:** Raw Git inspection bounds/cancellation integration fixture
+- **Evidence:** Exact-release Linux CI run 35236181242 failed `TestInspectionGitBoundsCancellationAndCleanup` because Git 2.55 returned a nonzero status during the repetitive wholesale-replacement diff before the patch writer observed overflow. `InspectDiff` failed closed with the documented unsupported-layout reason, empty text, and no availability rather than the output-bound reason the fixture expected. Apple Git 2.50.1 passed 100 focused repetitions, indicating a version-sensitive fixture workload rather than exposed or partial content.
+- **Fix:** Preserve the original tracked prefix and append the same 6,000 large lines. The resulting patch remains well above `InspectionPreviewLimit`, but its membership preflight is an unambiguous single appended hunk before the bounded patch command. Production Git arguments, trusted executable, snapshot validation, output limiter, cancellation, and fail-closed behavior remain unchanged.
+- **Verification:** The bounds/cancellation fixture passes 100 normal and 100 race-enabled repetitions; `go test ./internal/web -count=1`, `go test ./... -count=1`, and `go vet ./...` pass. Replacement exact-SHA Linux CI with Git 2.55 remains required before marking this resolved or tagging.
+
 ## BUG-232: Plugin reload fixture races its own delivery notification
 
 - **Status:** Resolved — ordered drain, busy-boundary, package, and full-suite checks pass.

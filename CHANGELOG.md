@@ -149,9 +149,11 @@ shape are unchanged from alpha.9.
   the fallback uses `crypto.getRandomValues()`.
 - Correct release browser fixtures that mistook read-only Shell inventory GETs
   for mutations, stabilize worker-loss cleanup verification by retaining the
-  fictional Git PID/PGID with a minimal terminal workload, and order the plugin
-  reload fixture after its own asynchronous notification without weakening the
-  active-delivery generation boundary.
+  fictional Git PID/PGID with a minimal terminal workload, order the plugin
+  reload fixture after its own asynchronous notification, make the oversized Git
+  patch fixture deterministic across Git versions, and expire host-clone timeout
+  coverage only after descendant admission. Security boundaries and active-
+  delivery admission remain unchanged.
 - Fix compact mobile conversation-header geometry and short-height composer
   focus scrolling so header actions remain reachable.
 - Require an advanced revision and exact native receipt before treating a

@@ -230,7 +230,7 @@ func TestInspectionGitBoundsCancellationAndCleanup(t *testing.T) {
 	p := inspectionTestRepository(t)
 	temp := t.TempDir()
 	t.Setenv("TMPDIR", temp)
-	inspectionTestWrite(t, p, "file", strings.Repeat("large changed line\n", 6000))
+	inspectionTestWrite(t, p, "file", "original\n"+strings.Repeat("large changed line\n", 6000))
 	result, err := InspectDiff(t.Context(), p, "file", "unstaged")
 	if err != nil || result.Available || result.Text != "" || result.Reason != inspectionGitBound {
 		t.Fatalf("overflow=%+v err=%v", result, err)

@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -241,6 +242,41 @@ func awaitHostFile(t *testing.T, path string) {
 	t.Fatalf("fixture never created %s", path)
 }
 
+type hostFixtureDeadlineContext struct {
+	context.Context
+	done chan struct{}
+	err  error
+	once sync.Once
+}
+
+func newHostFixtureDeadlineContext(t *testing.T) *hostFixtureDeadlineContext {
+	t.Helper()
+	ctx := &hostFixtureDeadlineContext{Context: t.Context(), done: make(chan struct{})}
+	stop := context.AfterFunc(t.Context(), func() { ctx.finish(t.Context().Err()) })
+	t.Cleanup(func() { stop() })
+	return ctx
+}
+
+func (c *hostFixtureDeadlineContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (c *hostFixtureDeadlineContext) Done() <-chan struct{}       { return c.done }
+func (c *hostFixtureDeadlineContext) Err() error {
+	select {
+	case <-c.done:
+		return c.err
+	default:
+		return nil
+	}
+}
+
+func (c *hostFixtureDeadlineContext) expire() { c.finish(context.DeadlineExceeded) }
+
+func (c *hostFixtureDeadlineContext) finish(err error) {
+	c.once.Do(func() {
+		c.err = err
+		close(c.done)
+	})
+}
+
 func TestHostCloneHelperGateAndPrivateEnvironment(t *testing.T) {
 	fixture, git := newHostCloneFixture(t, "success")
 	poison := t.TempDir()
@@ -325,16 +361,18 @@ func TestHostCloneHelperCancelTimeoutAndKillStopDescendants(t *testing.T) {
 			fixture, git := newHostCloneFixture(t, gitMode)
 			prepared := prepareHostFixture(t, git)
 			ctx := t.Context()
+			var deadline *hostFixtureDeadlineContext
 			if mode == "timeout" {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, 2*time.Second)
-				defer cancel()
+				deadline = newHostFixtureDeadlineContext(t)
+				ctx = deadline
 			}
 			clone := startHostFixture(t, ctx, prepared)
 			clone.Release()
 			awaitHostFile(t, filepath.Join(fixture, "child-tick"))
 			awaitHostFile(t, filepath.Join(fixture, "grandchild-tick"))
-			if mode != "timeout" {
+			if deadline != nil {
+				deadline.expire()
+			} else {
 				clone.Cancel()
 			}
 			result := awaitHostCompletion(t, clone)
