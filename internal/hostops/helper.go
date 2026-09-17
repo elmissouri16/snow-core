@@ -169,17 +169,33 @@ func executeGit(parent context.Context, payload helperPayload, private string) p
 		reaped = true
 	case <-ctx.Done():
 	}
-	// Clean up the entire group even when the leader exits successfully, so a
-	// forked descendant cannot outlive terminal publication. Shutdown sends TERM,
-	// waits two seconds, then KILL and another bounded two-second group wait.
-	cleanupErr := procgroup.Shutdown(cmd.Process, 2*time.Second)
+	// Reap the direct child before testing whether its process group disappeared.
+	// A zombie group leader remains observable to kill(-pgid, 0), so polling the
+	// group before Wait completes can consume the cleanup bound without proving
+	// whether Git exited. Descendants remain in Git's original process group and
+	// are terminated below even after the leader has been reaped.
+	var cleanupErr error
 	if !reaped {
+		cleanupErr = procgroup.Terminate(cmd.Process)
 		select {
 		case waitErr = <-wait:
-		case <-time.After(time.Second):
+			reaped = true
+		case <-time.After(2 * time.Second):
+		}
+	}
+	if !reaped {
+		cleanupErr = errors.Join(cleanupErr, procgroup.Kill(cmd.Process))
+		select {
+		case waitErr = <-wait:
+			reaped = true
+		case <-time.After(2 * time.Second):
 			return protocol.HostOperationCleanupFailed
 		}
 	}
+	// The outer helper allows eight seconds for worker-loss cleanup. Keep the
+	// residual TERM/KILL group proof within three seconds after the at-most-four
+	// second leader reap above.
+	cleanupErr = errors.Join(cleanupErr, procgroup.Shutdown(cmd.Process, 1500*time.Millisecond))
 	if cleanupErr != nil {
 		return protocol.HostOperationCleanupFailed
 	}
