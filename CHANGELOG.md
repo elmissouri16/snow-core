@@ -189,8 +189,9 @@ shape are unchanged from alpha.9.
 
 ### Validation
 
-- The isolated release worktree passes all Go tests, vet, 70 support-script
-  tests, the benchmark regression guard, the full internal/SDK race suite,
+- The isolated release worktree passes repository-wide Go formatting, all Go
+  tests, vet, 70 support-script tests, the benchmark regression guard, the
+  full internal/SDK race suite,
   standalone SDK execution, an exact-version production build, and a
   credential-free fake-provider lifecycle smoke.
 - Node 24.16 frontend installation, typechecking, all 127 package tests,
