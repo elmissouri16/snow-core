@@ -194,6 +194,7 @@
         check(near(stream.scrollTop, floor(), 3), "Explicit Jump re-enables following for subsequent output");
         stream.scrollTop = floor() - 500; stream.dispatchEvent(new Event("scroll")); await wait(40);
         const anchor2 = [...stream.querySelectorAll("[data-message-id]")].find(node => rect(node).bottom > rect(stream).top + 10 && rect(node).top < rect(stream).bottom - 10), before = rect(anchor2).top;
+        const readerBeforeAttention = {top: stream.scrollTop, floor: floor(), streamTop: rect(stream).top, streamHeight: rect(stream).height, anchorTop: before, seatTop: rect($("#live-composer-seat")).top, seatHeight: rect($("#live-composer-seat")).height};
         copy.focus({preventScroll: true});
         check(document.activeElement === copy && row.querySelector(".copy-code") === copy, "Surviving code-copy target owns actual browser focus immediately before bounded head eviction");
         await update({messages: fixture.snapshot.messages.slice(10), history_truncated: true});
@@ -203,9 +204,9 @@
         check(anchor2.isConnected && near(rect(anchor2).top, before, 3), `Bounded head trimming preserves surviving stable-ID content anchor (before=${before}, after=${rect(anchor2).top}, following=${$("#live-session").dataset.scrollFollowing})`);
         const input = {id: "stream-question", questions: [{id: "stream-answer", header: "Answer while reading", question: "Keep my place?"}]};
         await update({status: "input", input});
-        check(near(rect(anchor2).top, before, 3), "Question arrival and seat resize preserve manual reader anchor");
+        check(near(rect(anchor2).top, before, 3), `Question arrival and seat resize preserve manual reader anchor (before=${JSON.stringify(readerBeforeAttention)}, after=${JSON.stringify({top: stream.scrollTop, floor: floor(), streamTop: rect(stream).top, streamHeight: rect(stream).height, anchorTop: rect(anchor2).top, seatTop: rect($("#live-composer-seat")).top, seatHeight: rect($("#live-composer-seat")).height})}, following=${$("#live-session").dataset.scrollFollowing})`);
         $("[data-attention-collapse]").click(); await settleFrame(); await wait(60);
-        check(near(rect(anchor2).top, before, 3), "Collapsing attention preserves manual reader ownership and visible anchor");
+        check(near(rect(anchor2).top, before, 3), `Collapsing attention preserves manual reader ownership and visible anchor (before=${before}, after=${rect(anchor2).top}, top=${stream.scrollTop}, floor=${floor()}, following=${$("#live-session").dataset.scrollFollowing})`);
       }
       noOverflow("Final contentful fixture has no horizontal overflow");
       check(fixture.inventoryComplete(), "Exactly one startup public inventory read per mounted browser-inventory root; no interaction reload");

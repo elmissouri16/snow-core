@@ -57,7 +57,9 @@ export function mount(region: HTMLElement, key: string) {
     for (const item of rows()) {
       const rect = item.node.getBoundingClientRect();
       if (rect.bottom <= view.top || rect.height === 0) continue;
-      candidates.push({key: item.key, offset: rect.top - view.top});
+      // Keep the row at its viewport position even when surrounding chrome
+      // moves the scrollport itself; a stream-relative offset would drift.
+      candidates.push({key: item.key, offset: rect.top});
       if (candidates.length === 8) break;
     }
     return {top: top(), candidates};
@@ -79,7 +81,7 @@ export function mount(region: HTMLElement, key: string) {
     const keyed = new Map(rows().map(item => [item.key, item.node]));
     const survivor = anchor.candidates.find(item => keyed.has(item.key));
     if (survivor) {
-      const offset = keyed.get(survivor.key)!.getBoundingClientRect().top - stream.getBoundingClientRect().top;
+      const offset = keyed.get(survivor.key)!.getBoundingClientRect().top;
       write(top() + offset - survivor.offset);
     } else write(anchor.top);
     anchor = capture();

@@ -18804,7 +18804,7 @@ function Gc(e, t) {
 			let r = n.node.getBoundingClientRect();
 			if (!(r.bottom <= e.top || r.height === 0) && (t.push({
 				key: n.key,
-				offset: r.top - e.top
+				offset: r.top
 			}), t.length === 8)) break;
 		}
 		return {
@@ -18828,7 +18828,7 @@ function Gc(e, t) {
 		}
 		let e = new Map(te().map((e) => [e.key, e.node])), t = p.candidates.find((t) => e.has(t.key));
 		if (t) {
-			let n = e.get(t.key).getBoundingClientRect().top - i.getBoundingClientRect().top;
+			let n = e.get(t.key).getBoundingClientRect().top;
 			w(ee() + n - t.offset);
 		} else w(p.top);
 		p = T();

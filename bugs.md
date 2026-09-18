@@ -207,9 +207,10 @@
 
 ## BUG-218: Activity privacy fixture intermittently matches a numeric sentinel
 
-- **Status:** Open — exact response collision not captured; unrelated to the composer implementation.
-- **Evidence:** One full `go test ./internal/web` run fails all four statuses in `TestManagerActivityGoalRunHTTPCountsExcludeGoalContentAndAuthority` on the literal `8765`; the immediate uncached full package rerun passes in 27.030s. The test searches the entire serialized Activity response for this four-digit sentinel, including public IDs and timestamps. Those fields can contain the same digits without exposing goal usage, but the failing response was not retained, so its exact source remains unverified.
-- **Follow-up:** Reproduce with deterministic public IDs/timestamps and inspect the typed public projection. Preserve field/content exclusion checks; do not silence a possible disclosure or merely retry away the failure. No Go source or test was changed for this UI task.
+- **Status:** Resolved — deterministic collision, typed projection, package, race, and vet checks pass.
+- **Evidence:** One full `go test ./internal/web` run failed all four statuses in `TestManagerActivityGoalRunHTTPCountsExcludeGoalContentAndAuthority` on the literal `8765`; the immediate uncached package rerun passed. The test searched the entire serialized Activity response for this four-digit sentinel, including public IDs and timestamps. A deterministic project UUID ending in `8765` and an Activity timestamp with an `.8765` fraction reproduce the four failures, proving the raw substring check confused intended public navigation/observation fields with private goal usage.
+- **Fix:** The fixture now fixes the public project ID and timestamp, deliberately gives private `TokensUsed` the colliding value, and requires exactly the four occurrences owned by the public ID, URLs, and timestamp. It decodes and compares the complete typed public counts/project projection, enforces exact top-level/count/project JSON key allowlists, and retains string, authority-field, and separate noncolliding numeric canaries. A new private field or value therefore still fails without treating legitimate public digits as disclosure.
+- **Verification:** The deterministic pre-fix test failed all four runtime statuses on `8765`. The corrected test passes 20 normal and 20 race-enabled repetitions; all Manager Activity tests pass 10 repetitions; `go test ./internal/web -count=1` and `go vet ./internal/web` pass.
 
 ## BUG-217: Wrapped composer controls scroll the header out of reach on short screens
 
@@ -365,13 +366,12 @@
 - **Fix:** Preserve all 16 questions and 32 choices per choices page, while retaining one wrapping description sentence per option within the aggregate bound. The existing Go exporter now rejects initial input fixtures that fail `projectInput`.
 - **Verification:** Native exporter and question checks ran via the current harness layout smoke. No production validation bound was loosened.
 
-## BUG-196: Intermediate React layout clamps steal transcript reader ownership
+## BUG-196: Stream-relative anchors drift when conversation chrome moves
 
-- **Status:** Open — two reader-anchor assertions regressed in fresh BUG-226 layout verification; unrelated to the header geometry correction.
-- **Regression evidence:** A serial 390px/dark layout smoke passes all `stream` cells at 360px and 240px heights but fails `Question arrival and seat resize preserve manual reader anchor` and `Collapsing attention preserves manual reader ownership and visible anchor` at 740px. The same run's base `chat` compact-header assertions pass.
-- **Evidence:** Initial mounting briefly clamps the transcript before all composer roots finish, so a 4px geometry difference is mistaken for manual upward intent. Head eviction similarly clamps through intermediate commit layouts, recapturing the wrong anchor and moving surviving content by about 426px.
-- **Fix:** Initialize the reader after synchronous presentation setup, keep attention layout notifications separate from the parent update transaction, and retain the pre-update reader anchor instead of sampling intermediate commit clamps as user input.
-- **Verification:** Frontend build, all 132 package tests and reproducibility pass. The complete 2,058-report layout gate includes reader checks preserving initial following, incremental pinning, manual anchors, head eviction, attention resizing, copy focus and table scroll. The separate disconnected-state failure is also resolved (BUG-198).
+- **Status:** Resolved — manual reader position survives attention arrival and collapse at every tested viewport.
+- **Evidence:** The 390×740 stream fixture moved its scrollport top from 89px to 131px when a pending question changed conversation chrome. Reader ownership correctly remained manual, but the stored anchor offset was relative to the scrollport; preserving that offset moved the visible row from -558px to -515.625px in viewport coordinates. Short-height fixtures did not expose the drift because their compact header geometry remained fixed.
+- **Fix:** Capture and restore each stable row in viewport coordinates. Scroll-height changes, bounded head eviction, and a moving scrollport now share the same content-anchor calculation without changing follow-mode or browser scroll-intent handling.
+- **Verification:** Frontend typecheck, 127 package tests, production build, and generated-asset reproducibility pass. The complete layout matrix passes all 2,058 reports across seven widths, both themes, and three heights, including initial following, incremental pinning, manual anchors, head eviction, attention arrival/collapse, retained copy focus, and horizontal table position.
 
 ## BUG-195: Shell icons lose production sizing hooks during the React port
 
@@ -506,13 +506,12 @@
 - **Remediation:** Enable a bounded tab-memory draft, explicit workspace selection and Continue navigation through existing activation. Preserve the draft through activation without auto-sending, bypassing trust, or overwriting an existing conversation draft.
 - **Verification:** Real-manager/worker/browser suite passes 66 assertions including draft-first workspace selection, Add workspace/registration, explicit activation, no automatic send, no draft or activation fields in URLs, and preservation of an existing composer draft. The registration test initially submitted before HTMX settled; it now waits for the production navigation lifecycle. Existing layout smoke passes 147 reports; conversation workflows pass 1,736 assertions and frontend units pass 109 tests. `go test ./internal/web`, `go vet ./internal/web`, syntax/resource/diff checks pass. The separate stale Stop-geometry assertion found during this run is tracked and verified as BUG-178.
 
-## BUG-176: Layout fixture bypasses its mock after settings moved to HTMX
+## BUG-176: Layout fixture responses fail native fetch URL validation
 
-- **Status:** Open — reproduced in the alpha.10 full release-layout gate; unrelated to the mobile header change.
-- **Regression evidence:** A fresh serial `node scripts/tests/browser/harness-layout/run.mjs` release run exited 1 with 170 of 2,058 viewport/state combinations failed. Repeated observed failures include `chat-model-root`, `chat-model-groups`, `chat-sessions`, and the model-empty explanation across multiple widths, themes, and heights: model controls do not settle and the session menu does not receive the expected host DTOs. The separately tracked reader-anchor failures remain under BUG-196; ordinary base layout and the real HTTP/SSE manager suites continue to pass.
-- **Evidence:** `harness-layout/run.mjs --smoke` fails model discovery/session-menu cases because its fixture intercepts `fetch` only, while the production settings/choices owner now uses HTMX XHR. The native HTTP/SSE matrix passes those workflows; telemetry layout cases also pass. The fixture never records or answers the new discovery transport.
-- **Remediation:** Route explicit handler-based HTMX requests through the layout fixture's existing strict public-response mock, preserving other HTMX behavior and request admission. Add fixture regressions; retain native-transport coverage as the production integration authority.
-- **Prior verification:** 28 layout-fixture unit tests passed after the earlier remediation, including the HTMX adapter's exact response/status forwarding, stale-instance rejection, failure preservation, ordinary-navigation fallback and runtime-panel read allowlist. That checkout's fresh `node scripts/tests/browser/harness-layout/run.mjs --smoke` passed **2,612 assertions across 147 reports**, zero failures/unexpected requests. The regression evidence above records the later recurrence on the current implementation; native HTTP/SSE remains independently covered.
+- **Status:** Resolved — model discovery and session menus settle across the complete layout matrix.
+- **Evidence:** Initial smoke verification failed 13 of 147 reports. Settings and choices use bounded native `fetch`; the fixture returned `new Response(...)`, whose synthetic `response.url` was empty. Production `settingsRequest` correctly rejected the otherwise valid fixture payload because its URL did not equal the requested same-origin endpoint. After correcting the response URL, only the independently tracked BUG-196 stream report remained.
+- **Fix:** The fixture now assigns every synthetic response the exact intercepted request URL while preserving its strict method, fields, status, content-type, redirect, same-origin, CSRF, stale-instance, and unexpected-request checks. Production response validation remains unchanged.
+- **Verification:** All 38 focused fixture tests pass, including exact response URL and redirect assertions. Frontend checks pass, and the complete layout matrix passes all 2,058 reports across seven widths, both themes, and three heights.
 
 ## BUG-175: Context popup wastes space on inspector padding and repeated explanations
 

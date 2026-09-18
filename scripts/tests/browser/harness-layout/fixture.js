@@ -20,12 +20,17 @@
   // counts. All requests remain recorded, including rejected inventory requests.
   fixture.nonInventoryRequests = () => fixture.requests.filter(request => request.kind !== "browser-inventory" && request.kind !== "sidebar-inventory");
   fixture.inventoryComplete = () => fixture.requests.filter(request => request.kind === "browser-inventory").length === document.querySelectorAll("[data-browser-inventory]").length;
-  const response = (value, status = 200) => Promise.resolve(new Response(JSON.stringify(value), {
-    status, headers: {"Content-Type": "application/json"}
-  }));
-  const fail = message => { fixture.errors.push(message); return response({error: message}, 409); };
+  const makeResponse = (url, value, status = 200) => {
+    const result = new Response(JSON.stringify(value), {status, headers: {"Content-Type": "application/json"}});
+    // Synthetic Response objects have no network-owned URL. Preserve the exact
+    // intercepted request URL so production response-admission checks remain real.
+    Object.defineProperty(result, "url", {value: url.href});
+    return Promise.resolve(result);
+  };
   window.fetch = (input, options = {}) => {
     const url = new URL(String(input), location.href);
+    const response = (value, status = 200) => makeResponse(url, value, status);
+    const fail = message => { fixture.errors.push(message); return response({error: message}, 409); };
     if (options.headers?.["X-Snow-Navigation"] === "workspace" && browserFetch) return browserFetch(input, options);
     const method = options.method || "GET";
     const fields = Object.fromEntries(new URLSearchParams(options.body));

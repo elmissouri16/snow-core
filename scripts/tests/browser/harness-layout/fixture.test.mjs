@@ -147,6 +147,8 @@ test('layout native discovery uses the same scoped public fixture as other reque
   let response = await send({csrf: 'fixture-only-not-a-credential', instance_id: 'instance-one'});
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('Content-Type'), 'application/json');
+  assert.equal(response.url, url, 'synthetic response retains exact intercepted URL for production admission');
+  assert.equal(response.redirected, false);
   assert.equal((await response.json()).models.length, 30);
   assert.equal(f.state.requests.length, 1);
   response = await send({csrf: 'fixture-only-not-a-credential', instance_id: 'retired-instance'});
