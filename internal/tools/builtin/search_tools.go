@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"strings"
 	"time"
@@ -50,7 +51,7 @@ func (s *SearchTools) Run(ctx context.Context, raw json.RawMessage, host tools.T
 		Query string `json:"query"`
 		Limit int    `json:"limit"`
 	}
-	if err := json.Unmarshal(raw, &args); err != nil {
+	if err := jsonv2.Unmarshal(raw, &args); err != nil {
 		return tools.ErrorResult(fmt.Errorf("search_tools: invalid arguments: %w", err)), nil
 	}
 	args.Query = strings.TrimSpace(args.Query)

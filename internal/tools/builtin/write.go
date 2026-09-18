@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
 	"os"
@@ -53,7 +54,7 @@ func (w *Write) Run(ctx context.Context, args json.RawMessage, host tools.ToolHo
 		ctx = context.Background()
 	}
 	var a writeArgs
-	if err := json.Unmarshal(args, &a); err != nil {
+	if err := jsonv2.Unmarshal(args, &a); err != nil {
 		return tools.ErrorResult(fmt.Errorf("write: invalid arguments: %w", err)), nil
 	}
 	if strings.TrimSpace(a.Path) == "" {

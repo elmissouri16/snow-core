@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
 	"os"
@@ -55,7 +56,7 @@ func (g *Grep) Schema() tools.ToolSchema {
 func (g *Grep) Run(ctx context.Context, args json.RawMessage, host tools.ToolHost) (tools.ToolResult, error) {
 	ctx = nonNilContext(ctx)
 	var a grepArgs
-	if err := json.Unmarshal(args, &a); err != nil {
+	if err := jsonv2.Unmarshal(args, &a); err != nil {
 		return tools.ErrorResult(fmt.Errorf("grep: invalid args: %w", err)), nil
 	}
 	if strings.TrimSpace(a.Pattern) == "" {
@@ -222,7 +223,7 @@ func (g *Glob) Schema() tools.ToolSchema {
 func (g *Glob) Run(ctx context.Context, args json.RawMessage, host tools.ToolHost) (tools.ToolResult, error) {
 	ctx = nonNilContext(ctx)
 	var a globArgs
-	if err := json.Unmarshal(args, &a); err != nil {
+	if err := jsonv2.Unmarshal(args, &a); err != nil {
 		return tools.ErrorResult(fmt.Errorf("glob: invalid args: %w", err)), nil
 	}
 	if strings.TrimSpace(a.Pattern) == "" {

@@ -2,7 +2,7 @@ package rpc
 
 import (
 	"context"
-	"encoding/json"
+	json "encoding/json/v2"
 	"fmt"
 
 	"github.com/elmissouri16/snow-core/internal/subagent"

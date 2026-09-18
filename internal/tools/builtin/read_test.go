@@ -78,6 +78,47 @@ func TestRead_Basic(t *testing.T) {
 	}
 }
 
+func TestReadUsesStrictJSONV2InputSemantics(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "strict.txt")
+	if err := os.WriteFile(file, []byte("ok\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pathJSON, err := json.Marshal(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidUTF8 := append([]byte(`{"path":"`), 0xff)
+	invalidUTF8 = append(invalidUTF8, []byte(`"}`)...)
+
+	for _, tc := range []struct {
+		name         string
+		args         json.RawMessage
+		wantError    bool
+		wantContains string
+	}{
+		{name: "valid", args: json.RawMessage(`{"path":` + string(pathJSON) + `}`)},
+		{name: "unknown member remains allowed", args: json.RawMessage(`{"path":` + string(pathJSON) + `,"future":true}`)},
+		{name: "duplicate member", args: json.RawMessage(`{"path":` + string(pathJSON) + `,"path":` + string(pathJSON) + `}`), wantError: true, wantContains: "duplicate object member name"},
+		{name: "invalid UTF-8", args: invalidUTF8, wantError: true, wantContains: "invalid UTF-8"},
+		{name: "case mismatch", args: json.RawMessage(`{"Path":` + string(pathJSON) + `}`), wantError: true, wantContains: "path is required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := NewRead(NewPathGuard([]string{dir}, dir))
+			result, err := reader.Run(t.Context(), tc.args, stubHost{cwd: dir, roots: []string{dir}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.IsError != tc.wantError {
+				t.Fatalf("IsError = %v, want %v: %+v", result.IsError, tc.wantError, result)
+			}
+			if tc.wantContains != "" && (len(result.Content) == 0 || !strings.Contains(result.Content[0].Text, tc.wantContains)) {
+				t.Fatalf("result = %+v, want content containing %q", result, tc.wantContains)
+			}
+		})
+	}
+}
+
 func TestRead_OffsetLimit(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "a.txt")

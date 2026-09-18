@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -62,7 +63,7 @@ func (b *Bash) Schema() tools.ToolSchema {
 
 func decodeBashArgs(args json.RawMessage) (bashArgs, error) {
 	var decoded bashArgs
-	if err := json.Unmarshal(args, &decoded); err != nil {
+	if err := jsonv2.Unmarshal(args, &decoded); err != nil {
 		return bashArgs{}, fmt.Errorf("bash: invalid arguments: %w", err)
 	}
 	if decoded.Command == "" {

@@ -50,6 +50,10 @@ newline-delimited stream to stdout.
 - Frames are UTF-8 JSON, exactly one object per LF (`\n`) line.
 - The maximum input line is 16 MiB.
 - A zero-length line is ignored; a whitespace-only line is invalid JSON.
+- Inbound frames use Go's JSON v2 semantics: object member names are matched
+  case-sensitively, and duplicate member names or invalid UTF-8 are rejected.
+  Unknown members remain command-specific; only closed-schema handlers reject
+  them.
 - Split only on the LF byte. Unicode line separators are not frame
   boundaries.
 - Responses and events share one serialized writer, so bytes from different

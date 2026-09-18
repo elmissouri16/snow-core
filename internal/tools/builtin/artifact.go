@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -49,7 +50,7 @@ func (t *ArtifactRead) Run(ctx context.Context, raw json.RawMessage, _ tools.Too
 		Offset     int    `json:"offset"`
 		Limit      int    `json:"limit"`
 	}
-	if err := json.Unmarshal(raw, &args); err != nil {
+	if err := jsonv2.Unmarshal(raw, &args); err != nil {
 		return tools.ErrorResult(fmt.Errorf("artifact_read: invalid arguments: %w", err)), nil
 	}
 	if args.Offset <= 0 {
@@ -153,7 +154,7 @@ func (t *ArtifactGrep) Run(ctx context.Context, raw json.RawMessage, _ tools.Too
 		IgnoreCase bool   `json:"ignore_case"`
 		MaxMatches int    `json:"max_matches"`
 	}
-	if err := json.Unmarshal(raw, &args); err != nil {
+	if err := jsonv2.Unmarshal(raw, &args); err != nil {
 		return tools.ErrorResult(fmt.Errorf("artifact_grep: invalid arguments: %w", err)), nil
 	}
 	if args.Pattern == "" || len(args.Pattern) > 4096 {

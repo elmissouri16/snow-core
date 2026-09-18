@@ -4,7 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
+	jsonv1 "encoding/json"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -873,7 +874,7 @@ func publicMessages(messages []protocol.Message) []protocol.Message {
 }
 
 func (s *Server) write(v any) error {
-	b, err := json.Marshal(v)
+	b, err := jsonv1.Marshal(v)
 	if err != nil {
 		s.recordWriteErr(err)
 		return err

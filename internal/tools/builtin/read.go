@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
 	"os"
@@ -65,7 +66,7 @@ func (r *Read) Run(ctx context.Context, args json.RawMessage, host tools.ToolHos
 		ctx = context.Background()
 	}
 	var a readArgs
-	if err := json.Unmarshal(args, &a); err != nil {
+	if err := jsonv2.Unmarshal(args, &a); err != nil {
 		return tools.ErrorResult(fmt.Errorf("read: invalid arguments: %w", err)), nil
 	}
 	if strings.TrimSpace(a.Path) == "" {

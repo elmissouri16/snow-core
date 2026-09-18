@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"strings"
 
@@ -38,7 +39,7 @@ func (*UpdatePlan) Run(_ context.Context, raw json.RawMessage, host tools.ToolHo
 		return tools.ToolResult{Content: []protocol.ContentBlock{protocol.NewTextBlock("update_plan is a TODO/checklist tool and is not allowed in Plan mode")}, IsError: true}, nil
 	}
 	var update protocol.PlanUpdate
-	if err := json.Unmarshal(raw, &update); err != nil {
+	if err := jsonv2.Unmarshal(raw, &update); err != nil {
 		return tools.ErrorResult(fmt.Errorf("update_plan: invalid arguments: %w", err)), nil
 	}
 	if len(update.Plan) == 0 {

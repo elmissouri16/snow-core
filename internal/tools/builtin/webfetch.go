@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -123,7 +124,7 @@ func (w *WebFetch) Run(ctx context.Context, raw json.RawMessage, host tools.Tool
 		ctx = context.Background()
 	}
 	var args webFetchArgs
-	if err := json.Unmarshal(raw, &args); err != nil {
+	if err := jsonv2.Unmarshal(raw, &args); err != nil {
 		return tools.ErrorResult(fmt.Errorf("webfetch: invalid arguments: %w", err)), nil
 	}
 

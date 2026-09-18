@@ -33,6 +33,8 @@ func TestRPCPermissionReplyInvalidAndNoPending(t *testing.T) {
 		`{"id":"r2","type":"permission_reject","params":{"request_id":"perm-1"}}`,
 		`{"id":"r3","type":"permission_reply","params":{"request_id":"perm-1","decision":"bogus"}}`,
 		`{"id":"r4","type":"permission_reply"}`,
+		`{"id":"r5","type":"permission_reply","params":{"request_id":"perm-1","decision":"allow","decision":"deny"}}`,
+		`{"id":"r6","type":"permission_reject","params":{"request_id":"perm-1","request_id":"perm-2"}}`,
 		"",
 	}, "\n")
 
@@ -41,9 +43,25 @@ func TestRPCPermissionReplyInvalidAndNoPending(t *testing.T) {
 	if err := srv.Serve(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"r1", "r2", "r3", "r4"} {
+	for _, id := range []string{"r1", "r2", "r3", "r4", "r5", "r6"} {
 		assertResponseFailed(t, &out, id)
 	}
+	assertResponseErrorContains(t, &out, "r5", "duplicate object member name")
+	assertResponseErrorContains(t, &out, "r6", "duplicate object member name")
+}
+
+func assertResponseErrorContains(t *testing.T, out *bytes.Buffer, id, want string) {
+	t.Helper()
+	for frame := range strings.SplitSeq(strings.TrimSpace(out.String()), "\n") {
+		var resp Response
+		if json.Unmarshal([]byte(frame), &resp) == nil && resp.ID == id {
+			if !strings.Contains(resp.Error, want) {
+				t.Fatalf("response %s error = %q, want substring %q", id, resp.Error, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("no response with id %s", id)
 }
 
 func assertResponseFailed(t *testing.T, out *bytes.Buffer, id string) {

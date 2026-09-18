@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"regexp"
@@ -86,7 +87,7 @@ func (a *AskUser) Run(ctx context.Context, raw json.RawMessage, host tools.ToolH
 	var args struct {
 		Questions []protocol.UserInputQuestion `json:"questions"`
 	}
-	if err := json.Unmarshal(raw, &args); err != nil {
+	if err := jsonv2.Unmarshal(raw, &args); err != nil {
 		return tools.ErrorResult(fmt.Errorf("%s: invalid arguments: %w", name, err)), nil
 	}
 	if err := validateQuestions(args.Questions); err != nil {

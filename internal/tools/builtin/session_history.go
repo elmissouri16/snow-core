@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -78,7 +79,7 @@ func (s *SessionSearch) Run(ctx context.Context, raw json.RawMessage, _ tools.To
 		Query string `json:"query"`
 		Limit int    `json:"limit"`
 	}
-	if err := json.Unmarshal(raw, &args); err != nil {
+	if err := jsonv2.Unmarshal(raw, &args); err != nil {
 		return tools.ErrorResult(fmt.Errorf("session_search: invalid arguments: %w", err)), nil
 	}
 	if s.Engine == nil {
@@ -147,7 +148,7 @@ func (s *SessionReference) Run(ctx context.Context, raw json.RawMessage, _ tools
 		TipID     string `json:"tip_id"`
 		MaxBytes  int    `json:"max_bytes"`
 	}
-	if err := json.Unmarshal(raw, &args); err != nil {
+	if err := jsonv2.Unmarshal(raw, &args); err != nil {
 		return tools.ErrorResult(fmt.Errorf("session_reference: invalid arguments: %w", err)), nil
 	}
 	if s.Engine == nil {

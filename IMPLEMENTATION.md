@@ -229,6 +229,25 @@ MCP handshakes. Go SDK sessions seed the same linked value. Release builds
 replace the symbol through `-ldflags -X`, while untagged builds remain
 `0.1.0-dev`.
 
+### JSON serialization policy
+
+Go 1.27 `encoding/json/v2` is the default for new JSON operations and for
+migrated untrusted-input decoders. In particular, eager RPC frames and built-in
+tool arguments use v2's case-sensitive member matching and reject duplicate
+object names and invalid UTF-8. Closed schemas opt into
+`RejectUnknownMembers(true)` explicitly; v2 decoding alone does not imply that
+unknown members are rejected.
+
+Migration targets operations rather than import uniformity. Public and shared
+contracts continue to expose `encoding/json.RawMessage` where changing the type
+would break callers, and such files may use v1 for the type alongside v2 for
+encoding or decoding. Existing RPC/JSONL output, persisted files, provider
+wire formats, and other byte-sensitive paths retain v1 behavior until parity is
+covered deliberately. V2 output that participates in hashes, byte budgets, or
+stable storage must request deterministic ordering, escaping, indentation, and
+legacy raw-value allowances explicitly as its contract requires. Eliminating
+every `encoding/json` import is not a project goal.
+
 `internal/update` is constructed by `internal/app.New` without doing I/O and is
 invoked only through explicit app facades. The interactive TUI schedules an
 opt-in metadata-only startup check after successful app attachment; every

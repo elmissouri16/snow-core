@@ -619,21 +619,30 @@ func TestRPCUnknownCommand(t *testing.T) {
 }
 
 func TestRPCInvalidJSON(t *testing.T) {
-	var in bytes.Buffer
-	var out bytes.Buffer
-	a, err := app.New(context.Background(), app.Options{Provider: "fake", NoSession: true, Permission: "allow"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer a.Close()
+	for _, tc := range []struct {
+		name  string
+		frame string
+	}{
+		{name: "malformed", frame: `{not json}`},
+		{name: "duplicate id", frame: `{"id":"first","id":"second","type":"bogus"}`},
+		{name: "duplicate type", frame: `{"id":"first","type":"bogus","type":"prompt"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			a, err := app.New(t.Context(), app.Options{Provider: "fake", NoSession: true, Permission: "allow"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer a.Close()
 
-	srv := New(context.Background(), a, &in, &out)
-	in.WriteString("{not json}\n")
-	if err := srv.Serve(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), "invalid JSON") {
-		t.Fatalf("expected invalid json response, got %q", out.String())
+			srv := New(t.Context(), a, strings.NewReader(tc.frame+"\n"), &out)
+			if err := srv.Serve(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out.String(), "invalid JSON") {
+				t.Fatalf("expected invalid json response, got %q", out.String())
+			}
+		})
 	}
 }
 

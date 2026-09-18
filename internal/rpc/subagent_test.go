@@ -44,6 +44,23 @@ func TestRPCSubagentCommandsAndFraming(t *testing.T) {
 	}
 }
 
+func TestRPCSubagentCommandsRejectDuplicateParams(t *testing.T) {
+	enabled := true
+	a, err := app.New(t.Context(), app.Options{CWD: t.TempDir(), Provider: "fake", NoSession: true, NoPlugins: true, NoMCP: true, NoSkills: true, Permission: "allow", Subagents: &enabled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	s := New(t.Context(), a, strings.NewReader(""), &bytes.Buffer{})
+	err = s.handleSubagentCommand(t.Context(), Request{
+		Type:   "subagent_list",
+		Params: json.RawMessage(`{"path_prefix":"/root/a","path_prefix":"/root/b"}`),
+	})
+	if err == nil || !strings.Contains(err.Error(), "duplicate object member name") {
+		t.Fatalf("error = %v, want duplicate-member rejection", err)
+	}
+}
+
 func TestRPCSubagentWaitUntilAll(t *testing.T) {
 	enabled := true
 	a, err := app.New(context.Background(), app.Options{CWD: t.TempDir(), Provider: "fake", NoSession: true, NoPlugins: true, NoMCP: true, NoSkills: true, Permission: "allow", Subagents: &enabled})

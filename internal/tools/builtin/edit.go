@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"os"
 	"strings"
@@ -65,7 +66,7 @@ func (e *Edit) Schema() tools.ToolSchema {
 func (e *Edit) Run(ctx context.Context, args json.RawMessage, host tools.ToolHost) (tools.ToolResult, error) {
 	ctx = nonNilContext(ctx)
 	var a editArgs
-	if err := json.Unmarshal(args, &a); err != nil {
+	if err := jsonv2.Unmarshal(args, &a); err != nil {
 		return tools.ErrorResult(fmt.Errorf("edit: invalid arguments: %w", err)), nil
 	}
 	if a.Path == "" {

@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"slices"
@@ -95,7 +96,7 @@ func (t *processStartTool) Schema() tools.ToolSchema {
 
 func (t *processStartTool) Run(ctx context.Context, args json.RawMessage, host tools.ToolHost) (tools.ToolResult, error) {
 	var input processStartArgs
-	if err := json.Unmarshal(args, &input); err != nil {
+	if err := jsonv2.Unmarshal(args, &input); err != nil {
 		return tools.ErrorResult(fmt.Errorf("process_start: invalid arguments: %w", err)), nil
 	}
 	state, err := t.manager.Start(ctx, managedprocess.StartRequest{Command: input.Command, Name: input.Name, Readiness: input.Readiness}, func(message string) {
@@ -122,7 +123,7 @@ func (t *processStatusTool) Schema() tools.ToolSchema {
 
 func (t *processStatusTool) Run(_ context.Context, args json.RawMessage, _ tools.ToolHost) (tools.ToolResult, error) {
 	var input processIDArgs
-	if err := json.Unmarshal(args, &input); err != nil {
+	if err := jsonv2.Unmarshal(args, &input); err != nil {
 		return tools.ErrorResult(fmt.Errorf("process_status: invalid arguments: %w", err)), nil
 	}
 	state, err := t.manager.Status(input.ProcessID)
@@ -161,7 +162,7 @@ func (t *processLogsTool) Schema() tools.ToolSchema {
 
 func (t *processLogsTool) Run(ctx context.Context, args json.RawMessage, _ tools.ToolHost) (tools.ToolResult, error) {
 	var input processLogsArgs
-	if err := json.Unmarshal(args, &input); err != nil {
+	if err := jsonv2.Unmarshal(args, &input); err != nil {
 		return tools.ErrorResult(fmt.Errorf("process_logs: invalid arguments: %w", err)), nil
 	}
 	result, err := t.manager.Logs(ctx, managedprocess.LogsRequest{ProcessID: input.ProcessID, Cursor: input.Cursor, MaxBytes: input.MaxBytes, Wait: time.Duration(input.WaitMS) * time.Millisecond})
@@ -196,7 +197,7 @@ func (t *processStopTool) Schema() tools.ToolSchema {
 
 func (t *processStopTool) Run(ctx context.Context, args json.RawMessage, host tools.ToolHost) (tools.ToolResult, error) {
 	var input processStopArgs
-	if err := json.Unmarshal(args, &input); err != nil {
+	if err := jsonv2.Unmarshal(args, &input); err != nil {
 		return tools.ErrorResult(fmt.Errorf("process_stop: invalid arguments: %w", err)), nil
 	}
 	emitProgress(host, "stopping process", false, false)

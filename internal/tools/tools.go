@@ -5,6 +5,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"regexp"
@@ -389,7 +390,7 @@ func normalizeDescriptor(desc ToolDescriptor) (ToolDescriptor, error) {
 		desc.Schema.Parameters = json.RawMessage(`{"type":"object"}`)
 	}
 	var schema map[string]any
-	if err := json.Unmarshal(desc.Schema.Parameters, &schema); err != nil || schema == nil {
+	if err := jsonv2.Unmarshal(desc.Schema.Parameters, &schema); err != nil || schema == nil {
 		return ToolDescriptor{}, fmt.Errorf("tool %q has invalid parameters schema", desc.Schema.Name)
 	}
 	if desc.Risk == "" || !validRisk(desc.Risk) {
