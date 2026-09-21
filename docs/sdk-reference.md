@@ -145,7 +145,7 @@ separates inheritance from clean-install defaults.
 | Field | Meaning and effective behavior |
 |---|---|
 | `CWD` | Active project root. Empty uses the process working directory. |
-| `Provider` | A built-in ID or configured named OpenAI-compatible profile. Empty inherits config; clean-install default is `opencode-zen`. |
+| `Provider` | A built-in ID or configured named OpenAI-compatible profile. Empty inherits config; clean-install default is `opencode-go`. |
 | `Model` | Model ID. Empty resolves the configured or provider default. |
 | `SessionPath` | SQLite `.db` path to open or create; an existing database is resumed. Empty creates a new indexed durable session unless `NoSession` is true. |
 | `NoSession` | Use an in-memory conversation. Branches work for the process lifetime, but Thread Goals are unavailable; auth and model caches remain persistent. |

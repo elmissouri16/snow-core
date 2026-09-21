@@ -1,8 +1,8 @@
 # Choose and configure a provider
 
-Snow supports OpenCode Zen, OpenCode Go, ChatGPT, and OpenAI-compatible
-endpoints. Choose one provider, complete its setup, then launch Snow from the
-project you want to work on.
+Snow supports OpenCode Go, ChatGPT, and OpenAI-compatible endpoints. Choose
+one provider, complete its setup, then launch Snow from the project you want to
+work on.
 
 > **Warning:** Review a provider's privacy and training policy before sending
 > private code. Keep API keys and OAuth tokens out of `config.json`.
@@ -10,7 +10,6 @@ project you want to work on.
 ## On this page
 
 - [Compare providers](#compare-providers)
-- [OpenCode Zen](#opencode-zen)
 - [OpenCode Go](#opencode-go)
 - [ChatGPT](#chatgpt)
 - [OpenAI-compatible endpoints](#openai-compatible-endpoints)
@@ -22,44 +21,17 @@ project you want to work on.
 
 | Provider | Authentication | Start Snow |
 |---|---|---|
-| OpenCode Zen | None required; OpenCode key optional | `snow --provider opencode-zen` |
 | OpenCode Go | OpenCode API key | `snow --provider opencode-go` |
 | ChatGPT | Browser or device-code OAuth | `snow --provider chatgpt` |
 | OpenAI-compatible | Endpoint and optional Bearer key | `snow --provider NAME` |
 
-A fresh configuration defaults to `opencode-zen`. Add `--model MODEL` to a
+A fresh configuration defaults to `opencode-go`. Add `--model MODEL` to a
 launch command when you need to select a specific available model.
 
-## OpenCode Zen
-
-OpenCode Zen works without a credential:
-
-```sh
-snow --provider opencode-zen
-```
-
-Its promotional free-model availability and quotas can change. To use an
-optional OpenCode API key, store it before launching Snow:
-
-```sh
-snow login opencode-zen
-snow --provider opencode-zen
-```
-
-The `OPENCODE_API_KEY` environment variable and `--api-key` flag are also
-accepted for the current process.
-
-Snow discovers new free Zen models from the live model list and models.dev
-pricing, capabilities, and endpoint metadata. Paid, deprecated, and unsupported
-models are excluded. New models with missing pricing or endpoint metadata stay
-hidden until that information is available.
-
-Opening `/model` checks for an expired Zen catalog and refreshes it in the
-background; successful catalogs are cached for 15 minutes. Press **Ctrl+R** in
-the picker to refresh immediately. Your search and selected row are preserved
-when still available. This does not require restarting Snow. If discovery is
-offline, Snow uses its last verified cache, or its bundled fallback when no
-valid cache exists, and retries on a later lookup.
+> **OpenCode Zen is disabled:** its models are restricted to OpenCode clients
+> and no longer work through Snow. Existing `opencode-zen` selections fail with
+> an actionable startup error instead of silently switching providers. Choose
+> OpenCode Go, ChatGPT, or an OpenAI-compatible endpoint explicitly.
 
 ## OpenCode Go
 
@@ -122,7 +94,7 @@ The profile name becomes the value passed to `--provider`. Named profiles keep
 endpoints and credentials separate; a profile can also describe a keyless
 endpoint when added directly to `config.json`. Names use 1–64 lowercase
 letters, digits, or internal `.`, `_`, and `-` characters. The reserved IDs are
-`opencode-go`, `opencode-zen`, `chatgpt`, and `fake`.
+`opencode-go`, `opencode-zen` (disabled legacy ID), `chatgpt`, and `fake`.
 
 For a keyless local endpoint that you do not need to save, pass its settings for
 one launch:
@@ -154,9 +126,8 @@ snow --provider PROVIDER
 snow --provider PROVIDER --model MODEL
 ```
 
-`auth check` reports whether Snow can resolve a credential. A keyless provider
-such as anonymous `opencode-zen` or a local compatible endpoint can work even
-when no credential is configured.
+`auth check` reports whether Snow can resolve a credential. A keyless local
+compatible endpoint can work even when no credential is configured.
 
 ## Troubleshooting
 

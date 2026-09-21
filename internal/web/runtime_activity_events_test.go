@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/elmissouri16/snow-core/pkg/agentclient/process"
 	clientrpc "github.com/elmissouri16/snow-core/pkg/agentclient/rpc"
@@ -126,6 +127,34 @@ func TestRuntimeActivityRootStreamProjection(t *testing.T) {
 				t.Fatal("idle event/disconnection changed completed tool")
 			}
 		})
+	}
+}
+
+func TestRuntimeErrorProjectionRejectsForeignAndBoundsPublicDetail(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	r := &liveRuntime{ctx: ctx, cancel: cancel, busy: true, promptID: "prompt", turnID: "turn", rootEpoch: 2, assistant: -1, snapshot: RuntimeSnapshot{Status: "running"}}
+	root := &protocol.AgentRef{ThreadID: "root-thread", Path: protocol.RootAgentPath, Role: "root"}
+	for _, event := range []protocol.AgentEvent{
+		{Type: protocol.EvError, Message: "SECRET-CHILD", RootEpoch: 2, TurnID: "turn", Agent: &protocol.AgentRef{ThreadID: "child", ParentThreadID: "root-thread", Path: "/root/child", ParentPath: protocol.RootAgentPath, Depth: 1}},
+		{Type: protocol.EvError, Message: "SECRET-STALE", RootEpoch: 1, TurnID: "turn", Agent: root},
+		{Type: protocol.EvError, Message: "SECRET-FUTURE", RootEpoch: 3, TurnID: "turn", Agent: root},
+		{Type: protocol.EvError, Message: "SECRET-FOREIGN", RootEpoch: 2, TurnID: "other", Agent: root},
+	} {
+		r.consumeEvent(clientrpc.Event{AgentEvent: &event})
+	}
+	if r.snapshot.Error != "" {
+		t.Fatalf("foreign error projected: %q", r.snapshot.Error)
+	}
+	prefix := "agent: provider stream: Reasona failed:\x00 "
+	message := prefix + strings.Repeat("x", runtimeErrorBytes-len(prefix)-1) + "界"
+	r.consumeEvent(clientrpc.Event{AgentEvent: &protocol.AgentEvent{Type: protocol.EvError, Message: message, RootEpoch: 2, TurnID: "turn", Agent: root}})
+	if !strings.HasPrefix(r.snapshot.Error, "Reasona failed: ") || strings.Contains(r.snapshot.Error, "agent: provider stream:") || strings.ContainsRune(r.snapshot.Error, '\x00') || strings.ContainsRune(r.snapshot.Error, utf8.RuneError) || len(r.snapshot.Error) > runtimeErrorBytes {
+		t.Fatalf("public error was not normalized and bounded: length=%d error=%q", len(r.snapshot.Error), r.snapshot.Error)
+	}
+	r.consumePromptCompletion(protocol.RPCPromptCompleted{RequestID: "prompt", Status: protocol.RPCPromptFailedStatus, Error: "SECRET-COMPLETION"})
+	if r.snapshot.Status != "idle" || !strings.Contains(r.snapshot.Error, "Reasona failed:") || !strings.Contains(r.snapshot.Error, "Review the saved session") || strings.Contains(r.snapshot.Error, "SECRET") || len(r.snapshot.Error) > runtimeErrorBytes {
+		t.Fatalf("failed completion lost public detail, exceeded its bound, or exposed private detail: %+v", r.snapshot)
 	}
 }
 

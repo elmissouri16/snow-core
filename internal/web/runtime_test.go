@@ -150,6 +150,9 @@ func TestRuntimePromptStreamAndDefinitiveCompletion(t *testing.T) {
 	if strings.Contains(failed.Error, "SECRET") {
 		t.Fatal("remote completion error escaped")
 	}
+	if !strings.Contains(failed.Error, "Reasona failed: upstream returned 503") {
+		t.Fatalf("public prompt error missing: %q", failed.Error)
+	}
 }
 
 func TestRuntimePermissionAndInputReplies(t *testing.T) {

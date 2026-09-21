@@ -52,7 +52,7 @@ Environment overrides:
 |---|---|
 | `SNOW_HOME` | Replaces the global `~/.snow` directory for config, auth, trust, caches, oversized goal content, themes, keys, and search policy |
 | `SNOW_SESSIONS_DIR` | Replaces the session database root, including durable Thread Goal state |
-| `OPENCODE_API_KEY` | Fallback credential for `opencode-go` and optional credential for `opencode-zen` |
+| `OPENCODE_API_KEY` | Fallback credential for `opencode-go` |
 | `OPENAI_API_KEY` | Optional fallback Bearer credential for the legacy `openai-compatible` profile only |
 | `XDG_DATA_HOME` | Included when discovering compatible OpenCode ChatGPT credentials |
 | `SNOW_DEBUG` | File path for TUI debug logs, for example `SNOW_DEBUG=/tmp/snow.log`; intended for development |
@@ -194,8 +194,8 @@ A representative configuration:
 
 ```json
 {
-  "default_provider": "opencode-zen",
-  "default_model": "big-pickle",
+  "default_provider": "opencode-go",
+  "default_model": "kimi-k2.6",
   "default_project_trust": "ask",
   "thinking": "off",
   "project_selections": {
@@ -223,10 +223,6 @@ A representative configuration:
     "opencode-go": {
       "base_url": "https://opencode.ai/zen/go/v1",
       "default_model": "kimi-k2.6"
-    },
-    "opencode-zen": {
-      "base_url": "https://opencode.ai/zen/v1",
-      "default_model": "big-pickle"
     },
     "openai-compatible": {
       "base_url": "https://gateway.example/v1",
@@ -310,7 +306,7 @@ fills required zero-value defaults before validation.
 
 | JSON field | Values / default | Meaning |
 |---|---|---|
-| `default_provider` | `opencode-zen` | Global fallback provider ID for projects without a remembered selection; works anonymously |
+| `default_provider` | `opencode-go` | Global fallback provider ID for projects without a remembered selection; requires an OpenCode API key |
 | `default_model` | provider default | Global fallback model ID; provider-specific config may also declare a default |
 | `default_project_trust` | `ask` | `ask`, `allow`, or `deny`; legacy `always`/`never` are aliases |
 | `thinking` | `off` | Global fallback effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra` |
@@ -398,11 +394,11 @@ OpenAI-compatible profiles:
 
 ```json
 {
-  "default_provider": "opencode-zen",
-  "default_model": "big-pickle",
+  "default_provider": "opencode-go",
+  "default_model": "kimi-k2.6",
   "providers": {
-    "opencode-zen": {
-      "default_model": "big-pickle"
+    "opencode-go": {
+      "default_model": "kimi-k2.6"
     },
     "x-provider": {
       "type": "openai-compatible",
@@ -440,16 +436,17 @@ snow --provider x-provider
 
 The name becomes the provider selector and credential key. Names use 1–64
 lowercase letters, digits, or internal `.`, `_`, and `-` characters. The
-reserved IDs are `opencode-go`, `opencode-zen`, `chatgpt`, and `fake`. Named
-profiles keep endpoints, model defaults, timeouts, and credentials separate.
+reserved IDs are `opencode-go`, `opencode-zen` (disabled legacy ID), `chatgpt`,
+and `fake`. Named profiles keep endpoints, model defaults, timeouts, and
+credentials separate.
 
 > **Warning:** Do not put API keys or OAuth tokens in `config.json`.
 > Credentials belong in `~/.snow/auth.json`; use `snow login`, `--api-key`, or
 > an environment variable.
 
-`OPENCODE_API_KEY` applies to `opencode-go` and optional authenticated
-`opencode-zen` access. `OPENAI_API_KEY` applies only to the unnamed
-`openai-compatible` profile; named profiles do not inherit it. Compatible
+`OPENCODE_API_KEY` applies to `opencode-go`. OpenCode Zen is disabled because
+its models are restricted to OpenCode clients. `OPENAI_API_KEY` applies only to
+the unnamed `openai-compatible` profile; named profiles do not inherit it. Compatible
 profiles support Bearer authentication but not custom Azure headers or query
 parameters.
 

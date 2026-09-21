@@ -190,6 +190,11 @@ func TestRecoveryFailedWorkerCloseReopenIsIsolated(t *testing.T) {
 	if err := m.Prompt(t.Context(), projects[1].ID, second.InstanceID, "permission"); err != nil {
 		t.Fatal(err)
 	}
+	pending := runtimeWait(t, m, projects[1].ID, func(s RuntimeSnapshot) bool { return s.Status == "permission" && s.Permission != nil })
+	if pending.InstanceID != second.InstanceID {
+		t.Fatalf("unrelated worker replaced before peer failure: %+v", pending)
+	}
+	permissionID := pending.Permission.ID
 	if err := m.Prompt(t.Context(), projects[0].ID, first.InstanceID, "ack-exit"); err != nil {
 		t.Fatal(err)
 	}
@@ -224,8 +229,23 @@ func TestRecoveryFailedWorkerCloseReopenIsIsolated(t *testing.T) {
 		t.Fatalf("stale permission accepted: %v", err)
 	}
 	other, _ := m.Snapshot(projects[1].ID)
-	if other.InstanceID != second.InstanceID || other.Status != "permission" || other.Permission == nil {
+	if other.InstanceID != second.InstanceID || other.Status != "permission" || other.Permission == nil || other.Permission.ID != permissionID {
 		t.Fatalf("unrelated worker changed: %+v", other)
+	}
+	if err := m.ReplyPermission(t.Context(), projects[1].ID, second.InstanceID, permissionID, protocol.PermissionAllow); err != nil {
+		t.Fatal(err)
+	}
+	completed := runtimeWait(t, m, projects[1].ID, func(s RuntimeSnapshot) bool { return s.Status == "idle" })
+	if completed.InstanceID != second.InstanceID || completed.Permission != nil || len(completed.Messages) == 0 {
+		t.Fatalf("unrelated worker did not complete: %+v", completed)
+	}
+	answer := completed.Messages[len(completed.Messages)-1]
+	if answer.Role != "assistant" || answer.Text != "approved or denied" {
+		t.Fatalf("unrelated worker response: %+v", answer)
+	}
+	stillFresh, ok := m.Snapshot(projects[0].ID)
+	if !ok || stillFresh.InstanceID != fresh.InstanceID || stillFresh.Status != "idle" {
+		t.Fatalf("completed peer changed replacement runtime: %+v", stillFresh)
 	}
 }
 

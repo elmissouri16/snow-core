@@ -253,11 +253,21 @@ func TestSettingsSaveFailureRollsBackAndStaysOpen(t *testing.T) {
 		t.Fatalf("session permission depended on global config save: runtime=%q error=%q", m.app.Perm.Mode(), m.settingsError)
 	}
 
+	fakeApp, err := app.New(context.Background(), app.Options{
+		Provider: "fake", NoSession: true, Permission: "allow", CWD: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fakeApp.Close() })
+	fakeApp.ConfigPath = blocked
+	m.app = fakeApp
 	oldModel := m.app.Agent.Model()
 	m.settingsIndex = settingsModel
 	_, _ = m.handleSettingsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.modelList = append(m.modelList, protocol.Model{Provider: "fake", ID: "fake-rollback"})
 	if len(m.modelList) < 2 {
-		t.Fatalf("chatgpt model catalog too small for rollback test: %d", len(m.modelList))
+		t.Fatalf("fake model catalog too small for rollback test: %d", len(m.modelList))
 	}
 	m.modelIndex = (m.modelIndex + 1) % len(m.modelList)
 	_, _ = m.handleModelPick(tea.KeyPressMsg{Code: tea.KeyEnter})

@@ -66,7 +66,6 @@ session.
 
 Choose the setup that matches the account or endpoint you want to use:
 
-- No credential: `snow --provider opencode-zen`
 - OpenCode API key: `snow login opencode-go`
 - ChatGPT subscription: `snow login chatgpt`
 - Another compatible endpoint:
@@ -82,12 +81,13 @@ provider you configured:
 
 ```sh
 cd /path/to/project
-snow --provider opencode-zen
+snow --provider opencode-go
 ```
 
-Replace `opencode-zen` with `opencode-go`, `chatgpt`, or a configured provider
-name when appropriate. A bare `snow` command uses the configured default
-provider, which is `opencode-zen` in a fresh configuration.
+Replace `opencode-go` with `chatgpt` or a configured provider name when
+appropriate. A bare `snow` command uses the configured default provider, which
+is `opencode-go` in a fresh configuration. OpenCode Zen is disabled because its
+models are restricted to OpenCode clients.
 
 On the first launch in a project, Snow asks whether it may load project-local
 configuration. This is a trust decision about input; it is not an operating

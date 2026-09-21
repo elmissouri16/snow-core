@@ -62,6 +62,18 @@ export async function exercise(options) {
     await evaluate(`document.querySelector('[data-runtime-open]').requestSubmit()`);
     await wait('document.querySelector("#live-connection")?.dataset.connected === "true"');
     await wait(`!document.querySelector('[data-sidebar-project="${options.ready.project}"] [data-workspace-sessions]')?.hasAttribute('aria-busy')`);
+    await evaluate(`window.currentWorkspaceProbe = {workspace: document.querySelector('#workspace'), prompt: document.querySelector('#live-prompt'), starts: 0};
+      window.currentWorkspaceStarted = () => { window.currentWorkspaceProbe.starts++; };
+      document.addEventListener('snow:navigation-start', window.currentWorkspaceStarted);
+      document.querySelector('[data-sidebar-project="${options.ready.project}"] .project-link').click()`);
+    await delay(160);
+    const currentWorkspace = await evaluate(`(() => {
+      document.removeEventListener('snow:navigation-start', window.currentWorkspaceStarted);
+      const result = {starts: window.currentWorkspaceProbe.starts, sameWorkspace: window.currentWorkspaceProbe.workspace === document.querySelector('#workspace'), samePrompt: window.currentWorkspaceProbe.prompt === document.querySelector('#live-prompt')};
+      delete window.currentWorkspaceStarted; delete window.currentWorkspaceProbe;
+      return result;
+    })()`);
+    if (currentWorkspace.starts || !currentWorkspace.sameWorkspace || !currentWorkspace.samePrompt) throw Error("Current workspace click remounted the live composer: " + JSON.stringify(currentWorkspace));
     const historyFrameStart = await evaluate("window.switchFrames.length");
     const historySession = await evaluate('document.querySelector("#live-session").dataset.session');
     const otherSession = await evaluate(`Array.from(document.querySelectorAll('[data-sidebar-project="${options.ready.project}"] [data-shell-session]')).find(row=>row.dataset.shellSession !== ${JSON.stringify(historySession)})?.dataset.shellSession`);
@@ -80,7 +92,7 @@ export async function exercise(options) {
       await wait(`!document.querySelector('[data-sidebar-project="${options.ready.project}"] [data-workspace-sessions]')?.hasAttribute('aria-busy')`);
     }
     if (!await evaluate('document.querySelectorAll("#live-transcript [data-message-id]").length > 0 && document.querySelector("#live-empty").hidden')) throw Error("Saved target history must paint without an empty frame");
-    await evaluate('window.switchAnchor=document.querySelector("#live-transcript").firstElementChild');
+    await evaluate('window.switchAnchor=document.querySelector("#live-transcript").firstElementChild; undefined');
     await evaluate(`document.querySelector('[data-sidebar-project="${options.ready.project}"] [data-shell-session="${historySession}"] [data-shell-session-open]').click()`);
     await delay(160);
     if (!await evaluate('window.switchAnchor === document.querySelector("#live-transcript").firstElementChild')) throw Error("No-op selection replaced transcript DOM");

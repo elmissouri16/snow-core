@@ -31,15 +31,19 @@ in a project:
 
 ```sh
 cd /path/to/project
-snow --provider opencode-zen
+snow login opencode-go
+snow --provider opencode-go
 ```
 
-OpenCode Zen supports anonymous access. To use your ChatGPT account instead:
+OpenCode Go requires an API key. To use your ChatGPT account instead:
 
 ```sh
 snow login chatgpt
 snow --provider chatgpt
 ```
+
+OpenCode Zen is no longer available in Snow because its models are restricted
+to OpenCode clients.
 
 Type a task and press Enter. Snow asks before tools that need approval. Use
 `/help` for commands, `/model` to choose a model, and `snow resume` to return

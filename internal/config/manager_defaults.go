@@ -74,7 +74,11 @@ func managerSafeString(value string, limit int) bool {
 
 func managerProviderID(id string) bool {
 	switch id {
-	case "chatgpt", "opencode-go", "opencode-zen", "openai-compatible":
+	case "chatgpt", "opencode-go", "openai-compatible":
+		return true
+	case "opencode-zen":
+		// Read legacy selections so Web settings remain available for migration.
+		// managerProviders intentionally omits Zen, preventing new selections.
 		return true
 	}
 	return ValidateProviderProfileID(id) == nil
@@ -85,9 +89,9 @@ func managerProviders(root managerObject) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	ids := []string{"chatgpt", "opencode-go", "opencode-zen", "openai-compatible"}
+	ids := []string{"chatgpt", "opencode-go", "openai-compatible"}
 	for id, raw := range providers {
-		if slices.Contains(ids, id) {
+		if id == "opencode-zen" || slices.Contains(ids, id) {
 			continue
 		}
 		// Only locally configured compatible profiles belong in the public list.
@@ -195,7 +199,7 @@ func managerSnapshot(root managerObject, request protocol.HostDefaultsRequest) (
 	if err != nil {
 		return response, err
 	}
-	global := protocol.HostGlobalDefaults{ProviderModel: protocol.HostProviderModelDefault{Explicit: pair, Effective: protocol.HostProviderModel{Provider: "opencode-zen"}, Source: "builtin"}}
+	global := protocol.HostGlobalDefaults{ProviderModel: protocol.HostProviderModelDefault{Explicit: pair, Effective: protocol.HostProviderModel{Provider: "opencode-go"}, Source: "builtin"}}
 	if pair != nil {
 		global.ProviderModel.Source = "global"
 		if pair.Provider != "" {

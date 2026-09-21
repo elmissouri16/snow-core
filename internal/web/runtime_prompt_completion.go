@@ -97,7 +97,7 @@ func (r *liveRuntime) consumePromptCompletion(completed protocol.RPCPromptComple
 	r.snapshot.Permission = nil
 	r.snapshot.Input = nil
 	if completed.Status == protocol.RPCPromptFailedStatus {
-		r.snapshot.Error = "Prompt failed. Review the saved session before explicitly retrying."
+		r.snapshot.Error = runtimePromptFailureText(r.snapshot.Error)
 	}
 	r.publishLocked()
 	r.mu.Unlock()

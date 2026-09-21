@@ -1536,6 +1536,9 @@
       if (context?.hasContent && new URLSearchParams({...fields, csrf: csrf(), instance_id: current.instance}).toString().length > 4 * 1024 * 1024) {
         liveError("Encoded attachments exceed the 4 MiB request limit. Remove or reduce a file before sending."); return;
       }
+      // A new explicit prompt starts a fresh error-notice lifecycle even when a
+      // later failure has the same text as the dismissed previous failure.
+      liveError("");
       if (await runtimeAction(action, fields)) {
         if (live !== current || !prompt.isConnected) return;
         if (context?.hasContent) window.SnowComposerContext?.accepted(context);

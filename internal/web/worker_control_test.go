@@ -18,7 +18,7 @@ import (
 )
 
 func hostTestDefaults(scope string) protocol.HostDefaultsResponse {
-	pair := protocol.HostProviderModelDefault{Effective: protocol.HostProviderModel{Provider: "opencode-zen"}, Source: "builtin"}
+	pair := protocol.HostProviderModelDefault{Effective: protocol.HostProviderModel{Provider: "opencode-go"}, Source: "builtin"}
 	thinking := protocol.HostStringDefault{Effective: "off", Source: "builtin"}
 	result := protocol.HostDefaultsResponse{Scope: scope, Revision: strings.Repeat("a", 64), AppliesTo: "future_runtime"}
 	if scope == "global" {
@@ -65,7 +65,7 @@ func TestHostControlWorkerFixture(t *testing.T) {
 		raw.CWD = input.CWD
 		response := protocol.RPCResponse{ID: request.ID, Type: "response", Command: request.Type, Success: true, Data: raw}
 		if request.Type == "provider_status_list" {
-			response.Data = protocol.HostProviderStatusResponse{CheckedLocally: true, Providers: []protocol.HostProviderStatus{{ProviderID: "opencode-zen", State: "configured", Reason: "anonymous_access", CheckedLocally: true}}}
+			response.Data = protocol.HostProviderStatusResponse{CheckedLocally: true, Providers: []protocol.HostProviderStatus{{ProviderID: "opencode-go", State: "unavailable", Reason: "credential_missing", CheckedLocally: true}}}
 		}
 		switch mode {
 		case "secret":

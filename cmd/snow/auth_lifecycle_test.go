@@ -2,26 +2,21 @@ package main
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/elmissouri16/snow-core/internal/auth"
 	"github.com/elmissouri16/snow-core/internal/config"
 )
 
-func TestCLIAuthServiceRegistersOpenCodeZenOptionalAuth(t *testing.T) {
-	t.Setenv("OPENCODE_API_KEY", "")
+func TestCLIAuthServiceDoesNotRegisterOpenCodeZen(t *testing.T) {
 	service, _, err := newCLIAuthService(auth.NewMemoryStore())
 	if err != nil {
 		t.Fatal(err)
 	}
-	credential, err := service.Resolve(context.Background(), "opencode-zen")
-	if err != nil || credential.Key != "" {
-		t.Fatalf("anonymous credential=%+v err=%v", credential, err)
-	}
-	t.Setenv("OPENCODE_API_KEY", "zen-key")
-	credential, err = service.Resolve(context.Background(), "opencode-zen")
-	if err != nil || credential.Key != "zen-key" {
-		t.Fatalf("environment credential=%+v err=%v", credential, err)
+	_, err = service.Resolve(t.Context(), "opencode-zen")
+	if !errors.Is(err, auth.ErrUnknownProvider) {
+		t.Fatalf("resolve error = %v, want %v", err, auth.ErrUnknownProvider)
 	}
 }
 

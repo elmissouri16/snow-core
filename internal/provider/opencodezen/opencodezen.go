@@ -1,6 +1,6 @@
-// Package opencodezen implements OpenCode Zen's promotional free-model API.
-// Authentication is optional: when no key is resolved requests omit the
-// Authorization header and use Zen's anonymous allowance.
+// Package opencodezen contains Snow's disabled legacy OpenCode Zen adapter.
+// Snow does not register or link it into ordinary binaries because Zen models
+// are restricted to OpenCode clients.
 package opencodezen
 
 import (

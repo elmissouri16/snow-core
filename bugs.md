@@ -1,5 +1,50 @@
 # Known bugs
 
+## BUG-247: OpenCode Zen models reject non-OpenCode clients
+
+- **Status:** Resolved — OpenCode Zen is disabled in Snow.
+- **Severity:** High
+- **Surface:** Provider selection, fresh defaults, authentication, model discovery, and Web host settings
+- **Evidence:** OpenCode Zen's models are now restricted to OpenCode clients, so Snow can no longer provide a functioning Zen inference path. Leaving Zen registered would advertise unusable anonymous/free models and keep it as the clean-install default.
+- **Fix:** Snow no longer registers Zen as an app runtime or CLI auth provider, excludes it from provider/model/settings choices, and defaults fresh configurations to `opencode-go`. Existing `opencode-zen` selections fail with actionable migration guidance rather than silently switching providers; the legacy ID remains reserved and Web settings can still read it so operators can choose a supported provider.
+- **Verification:** Existing provider/default/auth/settings coverage was updated without adding a new harness. Focused and full verification is recorded with the implementing change.
+
+## BUG-246: Live prompt error notice cannot be dismissed
+
+- **Status:** Resolved — live errors now have an accessible client-only dismiss control.
+- **Severity:** Low
+- **Surface:** Web Manager live conversation error notice
+- **Evidence:** After a definitive provider failure, `#live-error` remained above the conversation with no close or dismiss control. The production browser regression reached the visible Reasona diagnostic and failed because `[data-live-error-dismiss]` did not exist.
+- **Fix:** The live error component now offers a labeled dismiss button, returns focus to the composer, and hides only that presentation of the current error. Dismissal does not send a request or alter runtime/recovery state. Repeated snapshots with the same error remain dismissed; a changed or cleared error resets the component, and explicit prompt submission starts a fresh notice lifecycle so an identical later failure is visible again.
+- **Verification:** The production-browser workflow verifies the control, focus return, absence of a dismissal POST, repeated-snapshot stability, and reappearance of the same diagnostic after a later failed prompt. Both live-stream workflows pass all 92 assertions; the complete responsive dark/light harness matrix exits successfully. Frontend typecheck/build/check and all 128 frontend tests, affected and full Go tests, `go vet ./...`, all 70 Python support tests, the benchmark guard, independent review, and `git diff --check` pass.
+
+## BUG-245: Web Manager hides terminal prompt error details shown by the TUI
+
+- **Status:** Resolved — accepted root prompt diagnostics now appear in the live error notice.
+- **Severity:** Medium
+- **Surface:** Web Manager live conversation error notice
+- **Evidence:** The shared agent event stream emitted the same root `error` diagnostic consumed by the TUI, but `liveRuntime.consumeEvent` dropped `EvError` entirely and failed completion replaced it with only `Prompt failed. Review the saved session before explicitly retrying.` A focused runtime regression failed before the fix with the expected public `Reasona failed: upstream returned 503` detail missing while the private completion error remained correctly hidden.
+- **Fix:** The Web Manager now projects only an accepted current root turn's `EvError.Message`, strips the same internal agent/provider wrapper prefixes as the TUI, removes controls and invalid UTF-8, and bounds the result to 8 KiB. Failed completion preserves that public detail and appends the explicit saved-session/retry guidance. Raw RPC completion errors, worker stderr, child-agent output, provider-private continuity data, and unaccepted/stale/foreign events remain hidden.
+- **Verification:** Focused runtime tests pass for accepted detail, prefix cleanup, bounds, stale/foreign/child rejection, private completion withholding, and definitive completion. Both production live-stream browser workflows pass all 88 assertions and show the Reasona detail plus retry guidance without layout/session-switch regressions. Frontend build/typecheck/check and all 128 frontend tests, repeated race-enabled focused tests, affected Go tests, `go test ./...`, `go vet ./...`, all 70 Python support tests, the benchmark guard, and `git diff --check` pass.
+
+## BUG-244: Clicking the current live workspace remounts the composer
+
+- **Status:** Resolved — the selected live workspace link is now idempotent.
+- **Severity:** Medium
+- **Surface:** Web Manager workspace sidebar navigation
+- **Evidence:** Clicking the selected workspace name while its runtime was already live dispatched a redundant workspace navigation. The navigation replaced `#workspace` and `#live-prompt`, visibly flickering the composer and risking loss of transient browser-owned UI state. The focused production-browser regression failed before the fix with `starts: 1`, `sameWorkspace: false`, and `samePrompt: false` after 87 earlier live-stream assertions passed.
+- **Fix:** Selecting the workspace that already owns the live runtime now closes narrow navigation as needed without fetching or replacing the workspace. Cold workspaces and other projects retain ordinary navigation. The browser regression also avoids returning a DOM node by value through CDP when checking the existing no-op session-selection invariant.
+- **Verification:** The focused live-stream switch/flicker browser workflow passes with no redundant navigation, composer remount, layout flash, empty-history frame, or unintended intermediate owner. Frontend build/typecheck/check and all 128 frontend tests pass; affected Go web/command tests, all 70 Python support tests, the benchmark guard, `go test ./...`, `go vet ./...`, and `git diff --check` pass.
+
+## BUG-243: Permission workflow cannot reactivate after the committed-write worker-loss case
+
+- **Status:** Open — the production-browser permission workflow fails reproducibly during its later recovery sequence.
+- **Severity:** Medium
+- **Surface:** Web Manager explicit recovery after a worker dies after committing a write but before returning its tool result
+- **Evidence:** Two consecutive unmodified runs of `node scripts/tests/browser/permission-workflow/run.mjs` passed the earlier two-project isolation sequence, including project B completing its still-pending approval after project A's worker died, then failed later after the `after-write` unknown-outcome screenshot. Project A closed successfully, but its explicit activation POST returned 409, the runtime snapshot returned 404, and the UI reported that activation could not be confirmed. Additional bounded local diagnostics reproduced the same failed startup and were removed afterward. The runner correctly replaced its report with `status: failed`; focused normal and race-enabled `TestRecoveryFailedWorkerCloseReopenIsIsolated` repetitions remain green.
+- **Remediation:** Identify why reopening the exact saved session fails after the committed-write/no-tool-result boundary. Preserve the unresolved public interruption record, fresh instance authority, no automatic prompt/approval/tool replay, the two-worker limit, and fail-closed cleanup when startup genuinely cannot be verified. Add a focused normal regression for the failing reopen boundary instead of relying only on the browser schedule.
+- **Verification required:** The focused reopen regression, repeated normal and race-enabled worker-isolation tests, the complete real permission browser workflow, `go test ./internal/web ./cmd/snow -count=1`, `go test ./...`, and `go vet ./...` must pass before marking this resolved.
+
 ## BUG-242: Composer completion is inconsistent across TUI and Web Manager
 
 - **Status:** Resolved — both composers now provide bounded command and project-path completion.

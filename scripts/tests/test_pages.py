@@ -316,14 +316,12 @@ class PagesBuildTests(unittest.TestCase):
             encoding="utf-8"
         )
         for provider in (
-            "opencode-zen",
             "opencode-go",
             "chatgpt",
             "openai-compatible",
         ):
             self.assertIn(provider, providers)
         for command in (
-            "snow --provider opencode-zen",
             "snow login opencode-go",
             "snow login chatgpt",
             "snow login openai-compatible",

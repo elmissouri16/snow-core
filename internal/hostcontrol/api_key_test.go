@@ -18,8 +18,8 @@ func TestHostAPIKeyLocalCapabilitiesAndNoInspectionWrites(t *testing.T) {
 	if _, err := service.InspectAPIKey(t.Context(), protocol.HostAPIKeyInspectRequest{ProviderID: "opencode-go"}); !errors.Is(err, ErrUnavailable) {
 		t.Fatal("missing config authorized key capability")
 	}
-	writeHostFile(t, path, `{"providers":{"profile":{"type":"openai-compatible","base_url":"https://endpoint-canary.invalid"}}}`)
-	for _, id := range []string{"opencode-go", "opencode-zen", "openai-compatible", "profile", "chatgpt"} {
+	writeHostFile(t, path, `{"providers":{"profile":{"type":"openai-compatible","base_url":"https://endpoint-canary.invalid"},"opencode-zen":{"type":"openai-compatible","base_url":"https://disabled-canary.invalid"}}}`)
+	for _, id := range []string{"opencode-go", "openai-compatible", "profile", "chatgpt"} {
 		status, err := service.InspectAPIKey(t.Context(), protocol.HostAPIKeyInspectRequest{ProviderID: id})
 		if err != nil {
 			t.Fatal(err)
@@ -28,7 +28,7 @@ func TestHostAPIKeyLocalCapabilitiesAndNoInspectionWrites(t *testing.T) {
 			t.Fatal("unexpected local capability")
 		}
 	}
-	for _, id := range []string{"unconfigured", "UPPER", strings.Repeat("a", 65)} {
+	for _, id := range []string{"opencode-zen", "unconfigured", "UPPER", strings.Repeat("a", 65)} {
 		if _, err := service.InspectAPIKey(t.Context(), protocol.HostAPIKeyInspectRequest{ProviderID: id}); !errors.Is(err, ErrInvalidRequest) {
 			t.Fatal("unknown provider accepted")
 		}

@@ -53,22 +53,22 @@ func stringSet(value string) *protocol.HostStringOperation {
 func TestHostReadNoFilesystemWrites(t *testing.T) {
 	service, dir, _ := hostFixture(t)
 	got := hostGet(t, service, "global", "")
-	if got.AppliesTo != "future_runtime" || got.Global.ProviderModel.Effective.Provider != "opencode-zen" || got.Global.Thinking.Effective != "off" || got.Global.Thinking.Source != "builtin" || got.Global.Thinking.Explicit != nil {
+	if got.AppliesTo != "future_runtime" || got.Global.ProviderModel.Effective.Provider != "opencode-go" || got.Global.Thinking.Effective != "off" || got.Global.Thinking.Source != "builtin" || got.Global.Thinking.Explicit != nil {
 		t.Fatalf("unexpected defaults: %+v", got)
 	}
 	statuses, err := service.ProviderStatus(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(statuses.Providers) != 4 {
+	if len(statuses.Providers) != 3 {
 		t.Fatal("provider list")
 	}
 	for _, status := range statuses.Providers {
 		if !status.CheckedLocally {
 			t.Fatal("not local")
 		}
-		if status.ProviderID == "opencode-zen" && (status.State != "configured" || status.Reason != "anonymous_access") {
-			t.Fatal("missing anonymous Zen")
+		if status.ProviderID == "opencode-go" && (status.State != "unavailable" || status.Reason != "credential_missing") {
+			t.Fatal("missing OpenCode Go credential status")
 		}
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".snow")); !errors.Is(err, os.ErrNotExist) {
@@ -298,7 +298,7 @@ func TestHostGlobalResetRemovesExplicitAllowlistOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if next.Global.ProviderModel.Explicit != nil || next.Global.ProviderModel.Source != "builtin" || next.Global.ProviderModel.Effective.Provider != "opencode-zen" || next.Global.Thinking.Explicit != nil || next.Global.Thinking.Effective != "off" || next.Global.ReasoningSummary.Effective != "auto" || next.Global.TextVerbosity.Effective != "low" {
+	if next.Global.ProviderModel.Explicit != nil || next.Global.ProviderModel.Source != "builtin" || next.Global.ProviderModel.Effective.Provider != "opencode-go" || next.Global.Thinking.Explicit != nil || next.Global.Thinking.Effective != "off" || next.Global.ReasoningSummary.Effective != "auto" || next.Global.TextVerbosity.Effective != "low" {
 		t.Fatal("global reset did not restore inheritance")
 	}
 	data, err := os.ReadFile(path)

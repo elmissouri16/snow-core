@@ -291,7 +291,7 @@ func (c SubagentConfig) ValidateSubagents() error {
 // Default returns the default configuration.
 func Default() Config {
 	return Config{
-		DefaultProvider:           "opencode-zen",
+		DefaultProvider:           "opencode-go",
 		DefaultProjectTrust:       "ask",
 		Thinking:                  "off",
 		ReasoningSummary:          "auto",
@@ -304,7 +304,6 @@ func Default() Config {
 		ProjectSelections:         map[string]ProjectSelection{},
 		Providers: map[string]ProviderConfig{
 			"opencode-go":       {},
-			"opencode-zen":      {},
 			"openai-compatible": {},
 			"chatgpt":           {},
 		},

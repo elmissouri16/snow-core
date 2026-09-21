@@ -580,9 +580,9 @@ conversation, tool schemas and results, and supported attachments to that
 origin. Private/local and plain HTTP endpoints are allowed deliberately, so
 you must evaluate transport and service security.
 
-OpenCode Zen promotional models can have different retention and training
-terms. Read the current notice in Snow's model picker before sending personal,
-confidential, or proprietary data. Availability and terms can change.
+OpenCode Zen is disabled because its models are restricted to OpenCode clients.
+Snow does not register the provider, expose it in model/provider selectors, or
+silently route an existing `opencode-zen` selection elsewhere.
 
 ## Protect credentials and diagnostics
 

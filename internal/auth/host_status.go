@@ -35,7 +35,7 @@ func InspectHostStatus(ctx context.Context, path string, ids []string) (protocol
 	slices.Sort(ids)
 	ids = slices.Compact(ids)
 	for _, id := range ids {
-		if !hostStatusID(id) {
+		if id == "opencode-zen" || !hostStatusID(id) {
 			return response, ErrHostStatusUnavailable
 		}
 	}
@@ -73,7 +73,7 @@ func inspectHostCredential(id string, credential Credential, now time.Time) prot
 	if !credential.Valid() {
 		environment := ""
 		switch id {
-		case "opencode-go", "opencode-zen":
+		case "opencode-go":
 			environment = "OPENCODE_API_KEY"
 		case "openai-compatible":
 			environment = "OPENAI_API_KEY"
@@ -83,10 +83,6 @@ func inspectHostCredential(id string, credential Credential, now time.Time) prot
 		}
 	}
 	if !credential.Valid() {
-		if id == "opencode-zen" {
-			status.State = "configured"
-			status.Reason = "anonymous_access"
-		}
 		return status
 	}
 	if id == "chatgpt" {

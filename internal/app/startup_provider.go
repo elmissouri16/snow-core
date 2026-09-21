@@ -13,7 +13,6 @@ import (
 	"github.com/elmissouri16/snow-core/internal/provider/fake"
 	"github.com/elmissouri16/snow-core/internal/provider/openaicompat"
 	"github.com/elmissouri16/snow-core/internal/provider/opencodego"
-	"github.com/elmissouri16/snow-core/internal/provider/opencodezen"
 )
 
 // startupProvider is the selected provider transport plus the complete module
@@ -29,6 +28,9 @@ func initializeProvider(opts Options, cfg config.Config, authStore auth.Store, a
 	providerID := cfg.DefaultProvider
 	if providerID == "" {
 		providerID = "opencode-go"
+	}
+	if providerID == "opencode-zen" {
+		return startupProvider{}, errors.New("app: provider \"opencode-zen\" is disabled because its models are restricted to OpenCode clients; choose opencode-go, chatgpt, or an OpenAI-compatible provider")
 	}
 	cacheRoot := filepath.Join(config.GlobalDir(), "cache")
 	baseURLOverride := opts.BaseURL
@@ -47,23 +49,6 @@ func initializeProvider(opts Options, cfg config.Config, authStore auth.Store, a
 			return nil, fmt.Errorf("app: opencode-go: %w", err)
 		}
 		return oc, nil
-	}
-
-	newOpenCodeZen := func(pc config.ProviderConfig) (provider.Transport, error) {
-		zenCfg := opencodezen.Config{
-			CacheRoot:         filepath.Join(cacheRoot, "opencode-zen-models"),
-			BaseURL:           pc.BaseURL,
-			DefaultModel:      pc.DefaultModel,
-			StreamIdleTimeout: configuredStreamIdleTimeout(pc.StreamIdleTimeoutMS),
-		}
-		if baseURLOverride != "" && providerID == opencodezen.ProviderID {
-			zenCfg.BaseURL = baseURLOverride
-		}
-		zen, err := opencodezen.New(zenCfg)
-		if err != nil {
-			return nil, fmt.Errorf("app: opencode-zen: %w", err)
-		}
-		return zen, nil
 	}
 
 	newChatGPT := func(pc config.ProviderConfig) *chatgpt.Provider {
@@ -100,15 +85,11 @@ func initializeProvider(opts Options, cfg config.Config, authStore auth.Store, a
 		authFor func(provider.Transport) (auth.Driver, error)
 	}
 	openCodeConfig := cfg.Providers["opencode-go"]
-	zenConfig := cfg.Providers[opencodezen.ProviderID]
 	compatibleConfig := cfg.Providers[openaicompat.ProviderID]
 	chatGPTConfig := cfg.Providers[chatgpt.ProviderID]
 	builtIns := []builtInModule{
 		{id: "opencode-go", order: 10, build: func() (provider.Transport, error) { return newOpenCode(openCodeConfig) }, authFor: func(provider.Transport) (auth.Driver, error) {
 			return auth.NewAPIKeyDriver(auth.APIKeyOptions{ProviderID: "opencode-go", DisplayName: "OpenCode Go", Required: true, Environment: []string{opencodego.EnvAPIKey}}), nil
-		}},
-		{id: opencodezen.ProviderID, order: 15, build: func() (provider.Transport, error) { return newOpenCodeZen(zenConfig) }, authFor: func(provider.Transport) (auth.Driver, error) {
-			return auth.NewAPIKeyDriver(auth.APIKeyOptions{ProviderID: opencodezen.ProviderID, DisplayName: "OpenCode Zen", Required: false, Environment: []string{opencodezen.EnvAPIKey}}), nil
 		}},
 		{id: openaicompat.ProviderID, order: 20, build: func() (provider.Transport, error) {
 			return newOpenAICompatible(openaicompat.ProviderID, compatibleConfig)

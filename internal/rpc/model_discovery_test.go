@@ -33,8 +33,6 @@ func discoveryTestApp(t *testing.T, inactive http.HandlerFunc) (*app.App, *atomi
 		switch r.URL.Path {
 		case "/active/models":
 			_, _ = io.WriteString(w, `{"data":[{"id":"active-model"}]}`)
-		case "/zen/models":
-			_, _ = io.WriteString(w, `{"data":[{"id":"big-pickle"}]}`)
 		case "/inactive/models":
 			calls.Add(1)
 			inactive(w, r)
@@ -44,7 +42,7 @@ func discoveryTestApp(t *testing.T, inactive http.HandlerFunc) (*app.App, *atomi
 	}))
 	t.Cleanup(remote.Close)
 	path := filepath.Join(t.TempDir(), "config.json")
-	config := fmt.Sprintf(`{"providers":{"openai-compatible":{"base_url":%q},"opencode-zen":{"base_url":%q},"opencode-go":{"base_url":%q},"chatgpt":{"base_url":%q},"inactive":{"type":"openai-compatible","base_url":%q}}}`, remote.URL+"/active", remote.URL+"/zen", remote.URL+"/go", remote.URL+"/chatgpt", remote.URL+"/inactive")
+	config := fmt.Sprintf(`{"providers":{"openai-compatible":{"base_url":%q},"opencode-go":{"base_url":%q},"chatgpt":{"base_url":%q},"inactive":{"type":"openai-compatible","base_url":%q}}}`, remote.URL+"/active", remote.URL+"/go", remote.URL+"/chatgpt", remote.URL+"/inactive")
 	if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}

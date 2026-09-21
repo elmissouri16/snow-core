@@ -5,6 +5,12 @@ also include the generated GitHub comparison for the tagged commit.
 
 ## [Unreleased]
 
+### Changed
+
+- Disable the OpenCode Zen provider because its models are restricted to
+  OpenCode clients. Fresh configurations now default to authenticated OpenCode
+  Go; existing Zen selections fail explicitly instead of silently rerouting.
+
 ## [0.1.0-alpha.10] - 2026-09-17
 
 This is Snow's largest alpha update since the initial launch. It adds an

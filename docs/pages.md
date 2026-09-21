@@ -47,7 +47,7 @@ Pages is organized around user tasks:
 
 MCP and Agent Skills pages document how to configure and use those standards
 with Snow. They do not duplicate the standards or Snow's implementation
-internals. The provider guide gives `opencode-zen`, `opencode-go`, `chatgpt`,
+internals. The provider guide gives `opencode-go`, `chatgpt`,
 and OpenAI-compatible profiles equal setup coverage.
 
 Complete RPC, ChatGPT authentication, model-requested

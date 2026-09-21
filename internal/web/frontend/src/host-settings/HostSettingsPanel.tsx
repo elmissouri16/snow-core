@@ -188,6 +188,6 @@ export function HostSettingsPanel({csrf, enabled, projects}: HostSettingsPanelPr
     <ul data-host-providers-list="">{view.providers.map(provider => <li key={provider.provider_id}>{`${provider.provider_id}: ${provider.state} — ${provider.reason === "anonymous_access" ? "anonymous access; " : ""}local check only, not network verified`}</li>)}</ul>
     <h4>Connect providers on the Snow host</h4>
     <p>Do not put passwords or API keys in CLI arguments. In a terminal on the Snow host, run the appropriate interactive login, then check local authentication:</p>
-    <ul className="host-login-instructions">{["snow login opencode-go", "snow login opencode-zen", "snow login chatgpt", "snow login openai-compatible", "snow auth check"].map(command => <li key={command}><code>{command}</code></li>)}</ul>
+    <ul className="host-login-instructions">{["snow login opencode-go", "snow login chatgpt", "snow login openai-compatible", "snow auth check"].map(command => <li key={command}><code>{command}</code></li>)}</ul>
   </section>;
 }

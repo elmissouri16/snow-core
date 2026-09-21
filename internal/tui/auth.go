@@ -412,9 +412,6 @@ func (m *Model) providerStatus(providerID string) string {
 		summary = "no key"
 		if optional {
 			summary = "keyless"
-			if providerID == "opencode-zen" {
-				summary = "anonymous"
-			}
 		}
 		if credential, ok := m.app.Auth.Get(providerID); ok && credential.Valid() {
 			summary = "stored ✓"

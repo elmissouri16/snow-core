@@ -186,6 +186,9 @@ func (p *streamFixtureProvider) Chat(ctx context.Context, request protocol.ChatR
 	if prompt == "cancel before text" {
 		steps[0].gate = fmt.Sprintf("release-%d-first", call)
 	}
+	if prompt == "provider error" {
+		return nil, errors.New("Reasona failed: upstream returned 503")
+	}
 	if prompt == "ask a question" {
 		last := request.Messages[len(request.Messages)-1]
 		if last.Role == protocol.RoleTool {

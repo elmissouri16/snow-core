@@ -93,9 +93,8 @@ are not staged as Pages routes.
 
 ## Provider documentation
 
-`docs/providers.md` owns provider setup. It gives `opencode-zen`,
-`opencode-go`, `chatgpt`, and OpenAI-compatible or named profiles the same
-hierarchy:
+`docs/providers.md` owns provider setup. It gives `opencode-go`, `chatgpt`, and
+OpenAI-compatible or named profiles the same hierarchy:
 
 1. credential requirement;
 2. minimal setup command;

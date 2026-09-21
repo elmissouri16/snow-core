@@ -70,7 +70,7 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.DefaultProvider != "opencode-zen" {
+	if cfg.DefaultProvider != "opencode-go" {
 		t.Fatalf("default provider = %q", cfg.DefaultProvider)
 	}
 	if cfg.ReasoningSummary != "auto" || cfg.TextVerbosity != "low" {

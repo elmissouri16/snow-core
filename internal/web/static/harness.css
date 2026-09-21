@@ -146,6 +146,9 @@ button, .button { padding: 6px 12px; }
 .live-attention, .unknown-outcome { width: min(calc(100% - 48px), var(--chat-width)); margin: 0 auto 12px; border-radius: 14px; padding: 14px 16px; max-height: 40dvh; }
 .unknown-outcome { background: var(--accent-soft); border: 1px solid var(--line); }
 .live-error { width: min(calc(100% - 48px), var(--chat-width)); margin: 6px auto; }
+.live-error-message { display: flex; align-items: flex-start; gap: 12px; }
+.live-error-message > span { flex: 1; white-space: pre-wrap; }
+.live-error-message > .icon-button { flex: none; width: 28px; height: 28px; min-height: 28px; padding: 4px; color: inherit; }
 /* Failure/uncertainty adds real explanatory chrome above the transcript.
  * At short heights that chrome cannot all shrink. Keep it in a bounded outer
  * scroller instead of clipping the last warning or pushing actions offscreen. */

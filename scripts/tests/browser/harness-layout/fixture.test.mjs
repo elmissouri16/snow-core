@@ -79,7 +79,7 @@ for (const snapshot of [null, {project_id: '00000000-0000-4000-8000-000000000001
     assert.equal((await f.fetch('/access/browsers', options())).status, 200);
     const forbidden = [
       ['/operations?offset=0', 'GET'], ['/activity', 'GET'], ['/settings/host', 'GET'],
-      ['/settings/providers', 'GET'], ['/settings/providers/opencode-zen/api-key', 'GET'],
+      ['/settings/providers', 'GET'], ['/settings/providers/opencode-go/api-key', 'GET'],
       ['/access/browsers/browser_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/revoke', 'POST'],
       ['/access/revoke-all', 'POST'], ['/projects/00000000-0000-4000-8000-000000000001/runtime/open', 'POST'],
       ['/operations/create', 'POST'],

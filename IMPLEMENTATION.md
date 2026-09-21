@@ -55,8 +55,7 @@ keeps UI dependencies out of core packages.
 
 - A single Go `snow` binary for macOS and Linux.
 - Streaming text, thinking, tool, usage, error, and lifecycle events.
-- OpenCode Go API-key access, optional-auth OpenCode Zen promotional free
-  models, user-configured OpenAI-compatible Responses or
+- OpenCode Go API-key access, user-configured OpenAI-compatible Responses or
   Chat Completions endpoints, and ChatGPT/Codex-compatible OAuth credentials.
 - Built-in `read`, `write`, `edit`, `bash`, `grep`, `glob`, direct interactive
   `ask_user`, plus deferred public-web `webfetch`.
@@ -107,7 +106,7 @@ keeps UI dependencies out of core packages.
 │   ├── provider/            # Provider interface and adapters
 │   │   ├── fake/            # deterministic scripted provider for tests/demos
 │   │   ├── opencodego/      # OpenCode Go API-key adapter
-│   │   ├── opencodezen/     # Zen optional-auth free-model adapter
+│   │   ├── opencodezen/     # disabled legacy Zen adapter; not runtime-registered
 │   │   ├── openaicompat/    # user-configured Responses/Chat Completions adapter
 │   │   ├── responsesapi/    # shared bounded Responses request/SSE codec
 │   │   └── chatgpt/         # Codex OAuth checks/import and Responses adapter
@@ -394,7 +393,6 @@ and lifecycle.
 | Provider | ID | Credential | Endpoint and behavior |
 |---|---|---|---|
 | OpenCode Go | `opencode-go` | API key | `https://opencode.ai/zen/go/v1`, OpenAI-compatible `/models` and `/chat/completions`, default `kimi-k2.6` |
-| OpenCode Zen | `opencode-zen` | optional API key or anonymous | `https://opencode.ai/zen/v1`; live `/models` plus verified free models.dev metadata; model-specific `/chat/completions` or `/responses`; default `big-pickle` |
 | OpenAI-compatible | `openai-compatible` or named profile | optional API key per profile | one or more user-supplied API roots plus sibling `/models`; Responses preferred with Chat Completions fallback; no built-in endpoint |
 | ChatGPT/Codex | `chatgpt` | OAuth access/refresh token | ChatGPT Codex Responses backend; browser/device login, refresh, authenticated cached catalog |
 | Fake | `fake` | none | deterministic scripted provider for tests and demos |
@@ -534,67 +532,19 @@ selectable thinking levels. Reasoning booleans and a generic
 advertised values the model exposes only Snow's local `off`. Discovery falls
 back to the pinned static default without failing startup or logging keys.
 
-### OpenCode Zen
+### OpenCode Zen (disabled)
 
-`internal/provider/opencodezen` is a separate, optional-auth adapter for Zen's
-promotional free routes. Credential resolution accepts an explicit key, the
-`opencode-zen` Snow auth entry, `OPENCODE_API_KEY`, or an empty anonymous
-credential; keyless requests omit `Authorization` completely. The provider
-intersects live `GET /models` availability with verified models.dev free-model
-metadata and is catalog-authoritative. New IDs require explicit zero input and
-output prices (including cache charges and advertised context tiers), supported
-text/tool capabilities, token limits, and a supported protocol. Paid, unknown,
-and deprecated IDs cannot be selected accidentally. A seven-model bundled
-catalog supplies offline fallback and local privacy/limit overrides;
-`big-pickle` remains the default.
+OpenCode Zen is no longer registered as a runtime or authentication provider
+because its models are restricted to OpenCode clients. The provider is absent
+from CLI/TUI/Web selectors and new default configuration. Existing
+`opencode-zen` selections fail with an actionable error instead of silently
+routing prompts to another provider. The ID remains reserved, and host settings
+can read legacy selections so operators can replace them with `opencode-go`,
+`chatgpt`, or a named OpenAI-compatible profile.
 
-The models.dev provider package selects Responses/SSE (`@ai-sdk/openai`) or
-Chat Completions/SSE (`@ai-sdk/openai-compatible`), inheriting the provider-wide
-package when a model has no override. Snow does not execute these packages.
-Bundled models retain local transport fallback. Both transports attach the same
-stable opaque `X-Opencode-Session` conversation-affinity header and normalize
-into the shared provider event contract. Temporary HTTP 429 responses carry
-structured rate-limit advice and bounded `Retry-After`; the central agent policy
-owns every wait and attempt so provider and goal budgets cannot multiply. HTTP
-402 remains terminal usage limitation. Active keys are redacted from bounded
-errors.
-
-On a canonical-endpoint Zen catalog refresh, the provider concurrently fetches
-live `/models` availability and the public models.dev `opencode` record under
-the bounded discovery context. A custom base URL disables that merge unless the
-internal provider config explicitly supplies a catalog URL. New free models
-appear without a source update, while live pricing and deprecation override
-bundled policy. `reasoning` and
-`reasoning_options[type=effort].values` are normalized into model-level thinking
-metadata; no model-specific effort set is compiled into Snow. Metadata requests
-carry no Zen authorization. The v3 atomic 0600 catalog cache stores the verified
-pricing, protocol, and capability evidence for newly discovered IDs and
-rehydrates policy on load. Older schemas are invalidated so existing installs
-discover the expanded catalog. Successful empty catalogs are persisted to avoid
-reviving withdrawn promotions on an offline restart. A failed metadata refresh
-uses verified cached metadata for IDs still advertised by `/models`; otherwise
-only bundled policy applies. Advertised values serialize as
-`reasoning_effort` for Chat Completions or `reasoning.effort` for Responses.
-Snow's `off` setting omits the override rather than claiming the provider
-disables inherent reasoning.
-
-Zen owns a 15-minute catalog expiry plus a revision counter, forwarded through
-the authenticated provider wrapper. App snapshots consult both, so opening the
-model picker refreshes expired data and observes catalog changes made before an
-inference request. Ctrl+R forces discovery through the same app catalog loader;
-the TUI preserves the filter and any still-available selected row. Browsing
-catalogs does not change the active model. Inference revalidates an expired
-catalog and rejects a selected ID that is no longer approved. Discovery failures
-retain the last verified snapshot and retry on a later lookup after one minute,
-without extending the on-disk snapshot's age.
-
-Big Pickle uses its stricter 160k input limit as the effective context and
-records 200k as its maximum. Successful terminal streams with no text or
-completed tool call are converted to actionable stream errors instead of
-durable blank assistant turns. Model descriptions carry the documented
-retention/training notice shown by the TUI and exposed through existing SDK/RPC
-model metadata. Snow does not import OpenCode credentials, rotate accounts,
-fall back to paid Zen models, or promise continued promotional availability.
+`internal/provider/opencodezen` is retained as disabled legacy implementation
+source, but `internal/app` and `cmd/snow` do not import or register it, so it is
+not linked into ordinary Snow binaries.
 
 ### OpenAI-compatible
 
@@ -2236,7 +2186,7 @@ that is fully covered elsewhere is referenced rather than repeated.
 | Product role | Standalone harness, not an IDE backend |
 | Binary name and module | `snow`, `github.com/elmissouri16/snow-core` |
 | Modularity | In-process Go interfaces and Goja JavaScript; no subprocess plugins or Go `.so` loading |
-| Auth | OpenCode Go API key, optional-key/anonymous OpenCode Zen, user-configured OpenAI-compatible endpoints, and ChatGPT/Codex OAuth |
+| Auth | OpenCode Go API key, user-configured OpenAI-compatible endpoints, and ChatGPT/Codex OAuth |
 | Sessions | Snow-owned pure-Go SQLite tree (schema version 12) |
 | TUI | Charmbracelet Bubble Tea |
 | SDK | `pkg/snowsdk` running the same core as the CLI |

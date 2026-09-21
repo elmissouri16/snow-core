@@ -38,7 +38,7 @@ func (f *hostSettingsFake) UpdateDefaults(_ context.Context, scope, project stri
 }
 func (f *hostSettingsFake) ProviderStatus(context.Context) (protocol.HostProviderStatusResponse, error) {
 	f.statuses++
-	return protocol.HostProviderStatusResponse{CheckedLocally: true, Providers: []protocol.HostProviderStatus{{ProviderID: "opencode-zen", State: "configured", Reason: "anonymous_access", CheckedLocally: true}}}, f.err
+	return protocol.HostProviderStatusResponse{CheckedLocally: true, Providers: []protocol.HostProviderStatus{{ProviderID: "opencode-go", State: "unavailable", Reason: "credential_missing", CheckedLocally: true}}}, f.err
 }
 func TestHostSettingsHTTPReadAndNoAutomaticLoad(t *testing.T) {
 	s, cookie, catalog := projectShell(t)
@@ -54,7 +54,7 @@ func TestHostSettingsHTTPReadAndNoAutomaticLoad(t *testing.T) {
 		if w := request(t, s, "GET", path, nil); w.Code != http.StatusUnauthorized {
 			t.Fatalf("unauth %s = %d", path, w.Code)
 		}
-		if w := request(t, s, "GET", path, nil, cookie); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "\"global\"") && !strings.Contains(w.Body.String(), "anonymous_access") {
+		if w := request(t, s, "GET", path, nil, cookie); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "\"global\"") && !strings.Contains(w.Body.String(), "credential_missing") {
 			t.Fatalf("read %s = %d %s", path, w.Code, w.Body.String())
 		}
 	}

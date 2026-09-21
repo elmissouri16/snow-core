@@ -540,7 +540,7 @@ func TestLoginPickerSupportsPageAndBoundaryNavigation(t *testing.T) {
 
 func TestLoginCardRowsStayBoundedNearMinimumFrame(t *testing.T) {
 	m := modelPickerTestModel(t, 8, 10)
-	m.providers = []string{"opencode-go", "opencode-zen", "openai-compatible", "chatgpt"}
+	m.providers = []string{"opencode-go", "custom-profile", "openai-compatible", "chatgpt"}
 	m.provIndex = 2
 	m.pickProvider = true
 	card := m.renderLoginModal()

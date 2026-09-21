@@ -1145,9 +1145,17 @@ subscription and require explicit review or sign-in. After a control POST,
 mutation controls remain disabled until a fresh bound snapshot synchronizes the
 state; an acknowledgment alone is not proof of current runtime state.
 A canceled turn shows an explicit notice even if it returned no text; the notice
-survives explicit resume and clears when another turn starts. Nothing retries
-automatically. Send and Stop share a position, but the continuation of a pointer
-multi-click on Send cannot cancel the newly started turn; an intentional single
+survives explicit resume and clears when another turn starts. A failed prompt's
+accepted root-agent diagnostic appears in the error notice using the same wrapper
+cleanup as the terminal UI, bounded to 8 KiB and followed by explicit review/retry
+guidance. Raw RPC completion errors, worker stderr, child-agent diagnostics and
+stale or foreign turn events are not shown. Use the notice's **Dismiss error**
+button to hide it locally without changing runtime or recovery state or sending a
+request. Repeated snapshots of that same error stay dismissed; a changed error or
+a later prompt begins a new notice lifecycle, so even an identical new failure is
+shown again. Nothing retries automatically. Send and Stop share a position, but the
+continuation of a pointer multi-click on Send cannot cancel the newly started
+turn; an intentional single
 Stop click or keyboard activation still cancels.
 Drafts stay in browser
 memory per conversation during workspace navigation/switching; they are not

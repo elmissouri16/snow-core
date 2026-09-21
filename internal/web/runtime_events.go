@@ -13,6 +13,7 @@ import (
 
 const runtimeHistoryBytes = 256 << 10
 const runtimeMessageBytes = 64 << 10
+const runtimeErrorBytes = 8 << 10
 const runtimeHistoryCount = 100
 
 // RuntimeMessage is a bounded public timeline segment. The live-only
@@ -97,6 +98,26 @@ func runtimeText(text string, limit int) string {
 		}
 		return r
 	}, text)
+}
+
+func runtimeErrorText(text string) string {
+	text = strings.TrimSpace(runtimeText(text, runtimeErrorBytes))
+	for _, prefix := range []string{"agent: provider stream: ", "agent: provider chat: ", "agent: provider resolve: ", "agent: "} {
+		text = strings.TrimPrefix(text, prefix)
+	}
+	return strings.TrimSpace(text)
+}
+
+func runtimePromptFailureText(detail string) string {
+	const (
+		guidance  = "Prompt failed. Review the saved session before explicitly retrying."
+		separator = "\n\n"
+	)
+	detail = strings.TrimSpace(runtimeText(detail, runtimeErrorBytes-len(separator)-len(guidance)))
+	if detail == "" {
+		return guidance
+	}
+	return detail + separator + guidance
 }
 
 func (r *liveRuntime) addMessage(message RuntimeMessage) {
@@ -320,8 +341,10 @@ func (r *liveRuntime) consumeEvent(event clientrpc.Event) {
 		return
 	}
 	e := event.AgentEvent
-	// Child output, thinking, tool arguments/private previews, provider errors, and
-	// arbitrary future events are never copied to browser-facing state.
+	// Child output, thinking, tool arguments/private previews, raw worker or
+	// completion errors, and arbitrary future events are never copied to
+	// browser-facing state. Accepted root EvError diagnostics are the same public
+	// event stream rendered by the TUI and are projected below after bounding.
 	// Root events normally carry metadata too. A non-nil Agent is not
 	// evidence of a child. Retain support for legacy untagged root events,
 	// but reject children and inconsistent root identities.
@@ -329,6 +352,14 @@ func (r *liveRuntime) consumeEvent(event clientrpc.Event) {
 		return
 	}
 	r.mu.Lock()
+	// A modern prompt error may establish the initial observed epoch, but once a
+	// root is bound it cannot use an otherwise monotonic future epoch to retarget
+	// browser-visible diagnostics. Session/history changes occur while idle and
+	// establish their new epoch through their dedicated transaction.
+	if e.Type == protocol.EvError && e.RootEpoch != 0 && r.rootEpoch != 0 && e.RootEpoch != r.rootEpoch {
+		r.mu.Unlock()
+		return
+	}
 	if e.Type == protocol.EvQueueUpdated && e.QueueControl != nil {
 		if !r.queueSupported {
 			r.mu.Unlock()
@@ -384,6 +415,11 @@ func (r *liveRuntime) consumeEvent(event clientrpc.Event) {
 		}
 	case protocol.EvToolStart, protocol.EvToolEnd:
 		r.projectActivity(*e)
+	case protocol.EvError:
+		if message := runtimeErrorText(e.Message); message != "" {
+			r.snapshot.Error = message
+			r.publishLocked()
+		}
 	case protocol.EvAborted:
 		r.cancelActivities()
 		r.publishLocked()

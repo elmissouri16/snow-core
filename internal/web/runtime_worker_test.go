@@ -157,7 +157,6 @@ func runtimeWorkerFixture() int {
 			}
 			emit(protocol.AgentEvent{Type: protocol.EvThinkingDelta, Text: "SECRET-THINKING"})
 			emit(protocol.AgentEvent{Type: protocol.EvToolEnd, ToolOutput: "SECRET-OUTPUT"})
-			emit(protocol.AgentEvent{Type: protocol.EvError, Message: "SECRET-ERROR"})
 			emit(protocol.AgentEvent{Type: protocol.EvTextDelta, Text: "SECRET-CHILD", Agent: &protocol.AgentRef{ThreadID: "child-thread", ParentThreadID: "root-thread", Path: "/root/child", ParentPath: protocol.RootAgentPath, Depth: 1}})
 
 			// Invalid/child interaction events must not create browser prompts or
@@ -184,6 +183,7 @@ func runtimeWorkerFixture() int {
 			case "hold":
 				emit(protocol.AgentEvent{Type: protocol.EvTurnDone}) // not definitive completion
 			case "fail":
+				emit(protocol.AgentEvent{Type: protocol.EvError, Message: "agent: provider stream: Reasona failed: upstream returned 503"})
 				complete(protocol.RPCPromptFailedStatus)
 			default:
 				emit(protocol.AgentEvent{Type: protocol.EvTextDelta, Text: "public answer"})

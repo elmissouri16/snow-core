@@ -6,7 +6,7 @@ import type {Target} from "./model.ts";
 const globalTarget: Target = {scope: "global", project: ""};
 function defaults(target: Target = globalTarget) {
   const group = {
-    provider_model: {explicit: null, effective: {provider: "opencode-zen", model: ""}, source: "builtin"},
+    provider_model: {explicit: null, effective: {provider: "opencode-go", model: ""}, source: "builtin"},
     thinking: {explicit: null, effective: "off", source: "builtin"},
     ...(target.scope === "global" ? {
       reasoning_summary: {explicit: null, effective: "auto", source: "builtin"},

@@ -5,7 +5,7 @@
     {
       "source": "docs/configuration.md",
       "resource": "docs/configuration.md",
-      "sha256": "e03cb32451f69418a8e40dc8ec61b99618f30977344a3b38f2134e0c7e7760df"
+      "sha256": "fac30f2ac86656358100a26aeba21a4f0f0e1a22fd38094ae8a6e74b31811601"
     },
     {
       "source": "docs/goals.md",
@@ -40,7 +40,7 @@
     {
       "source": "docs/sdk-reference.md",
       "resource": "docs/sdk-reference.md",
-      "sha256": "bbdcdc2728091aca1ddbab9eba9504d054b4279e414dad28cfdc537914b76d3e"
+      "sha256": "676a3a26c455cc0e1562b8b2bfa096049ab740496322d9dd4d42aac5aaafbf9a"
     },
     {
       "source": "docs/sdk.md",
@@ -50,7 +50,7 @@
     {
       "source": "docs/security.md",
       "resource": "docs/security.md",
-      "sha256": "f23bf7e83da7886916eccad5ca32f07c4b8842d68ea9ec1ba3e4440e1d9bcd06"
+      "sha256": "3b0d2fc5805d17f0bf7a6677abd1c8cfd501d026fca0000bc79a98ee61dc7dfc"
     },
     {
       "source": "docs/sessions.md",
@@ -80,7 +80,7 @@
     {
       "source": "examples/plugins/README.md",
       "resource": "examples/plugins/README.md",
-      "sha256": "2a6ef8cd59d29f37bc829cbd79617a0f042c59b1850967b2b643f999a76b2c02"
+      "sha256": "2b5ad53a1df8b172c6808db6d78a619e3e254539378f54102d6078aecde96bf7"
     },
     {
       "source": "examples/plugins/TRY.md",

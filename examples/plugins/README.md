@@ -12,7 +12,7 @@ From the repository root, load all three using your configured provider:
 
 The launcher uses your current directory as the project and loads the packages
 for this launch. It does not change your plugin registrations. You can pass
-normal Snow flags, such as `--provider opencode-zen`. Set `SNOW_BIN` to use a
+normal Snow flags, such as `--provider opencode-go`. Set `SNOW_BIN` to use a
 specific Snow executable.
 
 | Plugin | Tools | Try asking Snow |

@@ -105,7 +105,7 @@ func TestWebHostControlsBrowserFixture(t *testing.T) {
 	t.Setenv("SNOW_HOME", filepath.Join(root, "home", ".snow"))
 	t.Setenv("SNOW_SESSIONS_DIR", filepath.Join(root, "sessions"))
 	cfg := config.Default()
-	cfg.DefaultProvider, cfg.DefaultModel = "opencode-zen", "fake-1"
+	cfg.DefaultProvider, cfg.DefaultModel = "opencode-go", "fake-1"
 	if err := config.Save(filepath.Join(root, "home", ".snow", "config.json"), cfg); err != nil {
 		t.Fatal(err)
 	}

@@ -66,7 +66,11 @@ function Branch({c, project, group, hidden}: {c: ShellController; project: Shell
   return <div className="project-group" data-sidebar-project={project.id} hidden={hidden}>
     <div className="shell-project-row">
       <button ref={toggle} type="button" className="quiet shell-project-action workspace-disclosure" data-workspace-toggle="" aria-label={`Sessions in ${project.name}`} aria-expanded={group.expanded} aria-controls={`workspace-sessions-${project.id}`} onClick={event => { event.stopPropagation(); c.toggle(project.id); }}><Icon name="chevron" /></button>
-      <NavigationLink className={`project-link${selected ? ' selected' : ''}`} href={projectURL(project.id)} navigate={(href, source) => { c.navigation(false); return c.navigate(href, source); }} title={project.path} aria-current={selected ? 'page' : undefined}>
+      <NavigationLink className={`project-link${selected ? ' selected' : ''}`} href={projectURL(project.id)} navigate={(href, source) => {
+        c.navigation(false);
+        if (c.snapshot.live?.project === project.id) return;
+        return c.navigate(href, source);
+      }} title={project.path} aria-current={selected ? 'page' : undefined}>
         <span className="folder-icon" aria-hidden="true"><Icon name="folder" /></span><span className="project-link-text"><strong>{project.name}</strong><span className="project-link-path">{project.path}</span>{!project.available && <span className="unavailable">Folder unavailable</span>}</span>
       </NavigationLink>
       <span className="shell-project-actions"><a className="quiet shell-project-action" data-shell-project-new="" href={projectURL(project.id, {new: '1'})} data-snow-navigation="" aria-label={`New session in ${project.name}`} title={`New session in ${project.name}`}

@@ -35,7 +35,7 @@ func TestHostStatusRedactsAndDoesNotRefresh(t *testing.T) {
 	path := hostAuthPath(t)
 	data := `{"chatgpt":{"type":"oauth","access":"access-canary","refresh":"refresh-canary","expires":1,"accountId":"account-canary","extra":{"email":"email-canary","headers":{"authorization":"header-canary"}}},"opencode-go":{"type":"api_key","key":"key-canary"},"unknown-account-canary":{"type":"api_key","key":"unknown-key-canary"}}`
 	writeHostAuth(t, path, data)
-	response, err := InspectHostStatus(t.Context(), path, []string{"opencode-go", "chatgpt", "opencode-zen", "profile"})
+	response, err := InspectHostStatus(t.Context(), path, []string{"opencode-go", "chatgpt", "profile"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,10 +51,6 @@ func TestHostStatusRedactsAndDoesNotRefresh(t *testing.T) {
 		case "opencode-go":
 			if status.State != "configured" {
 				t.Fatal("key status")
-			}
-		case "opencode-zen":
-			if status.State != "configured" || status.Reason != "anonymous_access" {
-				t.Fatal("anonymous status")
 			}
 		case "profile":
 			if status.State != "unavailable" {
@@ -85,14 +81,14 @@ func TestHostStatusPrecedenceAndEnvironmentIsolation(t *testing.T) {
 	path := hostAuthPath(t)
 	t.Setenv("OPENAI_API_KEY", "environment-canary")
 	t.Setenv("OPENCODE_API_KEY", "environment-canary")
-	writeHostAuth(t, path, `{"opencode-go":{"type":"oauth","access":"wrong-type-valid-token"},"opencode-zen":{"type":"api_key","key":""},"chatgpt":{"type":"api_key","key":"not-subscription-auth"}}`)
-	response, err := InspectHostStatus(t.Context(), path, []string{"openai-compatible", "profile", "opencode-go", "opencode-zen", "chatgpt"})
+	writeHostAuth(t, path, `{"opencode-go":{"type":"oauth","access":"wrong-type-valid-token"},"chatgpt":{"type":"api_key","key":"not-subscription-auth"}}`)
+	response, err := InspectHostStatus(t.Context(), path, []string{"openai-compatible", "profile", "opencode-go", "chatgpt"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, status := range response.Providers {
 		switch status.ProviderID {
-		case "openai-compatible", "opencode-zen":
+		case "openai-compatible":
 			if status.State != "configured" || status.Reason != "credential_present" {
 				t.Fatal("environment fallback missing")
 			}
@@ -119,13 +115,13 @@ func TestHostStatusMissingMalformedAndOversize(t *testing.T) {
 	}
 	for _, data := range []string{`{"secret":"parse-canary",`, "null", "", strings.Repeat(" ", MaxHostAuthFileBytes+1), `{"chatgpt":{},"chatgpt":{}}`} {
 		writeHostAuth(t, path, data)
-		response, err = InspectHostStatus(t.Context(), path, []string{"chatgpt", "opencode-zen"})
+		response, err = InspectHostStatus(t.Context(), path, []string{"chatgpt"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, status := range response.Providers {
 			if status.State != "unavailable" || status.Reason != "auth_store_unavailable" {
-				t.Fatal("corruption concealed as missing/anonymous")
+				t.Fatal("corruption concealed as missing")
 			}
 		}
 	}
@@ -158,7 +154,7 @@ func TestHostStatusExpirySecondsMillisecondsAndJWT(t *testing.T) {
 
 func TestHostStatusIDsBoundedAndSymlinkRefused(t *testing.T) {
 	path := hostAuthPath(t)
-	for _, ids := range [][]string{make([]string, MaxHostStatusProviders+1), {"email@canary"}, {strings.Repeat("a", 65)}, {"UPPER"}} {
+	for _, ids := range [][]string{make([]string, MaxHostStatusProviders+1), {"email@canary"}, {strings.Repeat("a", 65)}, {"UPPER"}, {"opencode-zen"}} {
 		if _, err := InspectHostStatus(t.Context(), path, ids); !errors.Is(err, ErrHostStatusUnavailable) {
 			t.Fatal("invalid IDs accepted")
 		}
