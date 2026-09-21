@@ -20102,7 +20102,7 @@ function Pl({ c: e, project: t, group: n, hidden: r }) {
 	});
 }
 function Fl({ controller: e, view: t }) {
-	let n = (0, l.useRef)(null), r = t.bootstrap, i = (0, l.useRef)(!1);
+	let n = (0, l.useRef)(null), r = t.bootstrap, i = (0, l.useRef)(t.searchOpen);
 	if ((0, l.useLayoutEffect)(() => {
 		e.restoreSidebar();
 	}, [e]), (0, l.useLayoutEffect)(() => {

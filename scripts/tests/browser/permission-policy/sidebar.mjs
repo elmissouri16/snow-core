@@ -1,5 +1,5 @@
 // Native workspace navigation over exported production markup. No worker or provider.
-export async function sidebarChecks({state, evaluate, wait, click, key, navigate}) {
+export async function sidebarChecks({state, evaluate, wait, click, key, navigate, insert}) {
   const results = [], failures = [];
   const check = (value, label) => { results.push(label); if (!value) failures.push(label); };
   try {
@@ -19,7 +19,9 @@ export async function sidebarChecks({state, evaluate, wait, click, key, navigate
     await evaluate(`window.SnowNavigation.visit('/?fixture=sidebar',{history:'none'})`);
     await wait(`document.querySelectorAll('[data-sidebar-project]').length===100`, 'long sidebar mounted');
     await click('[data-sidebar-search-toggle]');
-    await evaluate(`document.querySelector('[data-sidebar-search]').value='Workspace';document.querySelector('[data-sidebar-search]').dispatchEvent(new Event('input',{bubbles:true}));const a=document.querySelector('[data-sidebar-project="00000000-0000-4000-8000-000000000150"] .project-link');a.scrollIntoView({block:'center'});a.focus({preventScroll:true});window.sidebarScroll=document.querySelector('.project-tree').scrollTop;window.sidebarSwaps=0;window.sidebarSettles=0;document.addEventListener('snow:navigation-after-swap',e=>{if(e.detail.target?.id==='workspace')sidebarSwaps++});document.addEventListener('snow:navigation-end',e=>{if(e.detail.target?.id==='workspace')sidebarSettles++})`);
+    await insert('Workspace');
+    await wait(`window.SnowShell.snapshot.query==='Workspace'`, 'sidebar search input accepted');
+    await evaluate(`const a=document.querySelector('[data-sidebar-project="00000000-0000-4000-8000-000000000150"] .project-link');a.scrollIntoView({block:'center'});a.focus({preventScroll:true});window.sidebarScroll=document.querySelector('.project-tree').scrollTop;window.sidebarSwaps=0;window.sidebarSettles=0;document.addEventListener('snow:navigation-after-swap',e=>{if(e.detail.target?.id==='workspace')sidebarSwaps++});document.addEventListener('snow:navigation-end',e=>{if(e.detail.target?.id==='workspace')sidebarSettles++})`);
     await click('[data-sidebar-project="00000000-0000-4000-8000-000000000150"] .project-link');
     await wait('sidebarSwaps===1 && sidebarSettles>=1', 'sidebar navigation completed');
     check(await evaluate(`document.activeElement.closest('[data-sidebar-project]')?.dataset.sidebarProject==='00000000-0000-4000-8000-000000000150'`), 'Desktop sidebar navigation keeps focus on the corresponding destination row');

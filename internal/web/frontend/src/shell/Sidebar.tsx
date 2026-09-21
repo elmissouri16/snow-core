@@ -86,7 +86,7 @@ function Branch({c, project, group, hidden}: {c: ShellController; project: Shell
 }
 export function Sidebar({controller: c, view}: {controller: ShellController; view: ViewState}) {
   const input = useRef<HTMLInputElement>(null), data = view.bootstrap;
-  const wasSearchOpen = useRef(false);
+  const wasSearchOpen = useRef(view.searchOpen);
   useLayoutEffect(() => { c.restoreSidebar(); }, [c]);
   useLayoutEffect(() => {
     if (view.searchOpen && !wasSearchOpen.current) input.current?.focus();
