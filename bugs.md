@@ -65,12 +65,12 @@
 
 ## BUG-235: Concurrent race packages exhaust catalog query deadline
 
-- **Status:** Fix implemented; serialized local race gate passes, exact replacement CI pending.
+- **Status:** Resolved — the serialized exact-SHA Linux race gate passes.
 - **Severity:** Low
 - **Surface:** Linux race-detector release gate
 - **Evidence:** Exact-release CI run 35241456905 failed `TestCatalogToolHistoryBoundsRowsAndDecodeBytes` only in the whole-suite race job. The greater-than-8-MiB byte-budget cells took about 6.5 seconds and returned fail-closed query/read errors after the production five-second catalog deadline. The job ran race-instrumented package binaries concurrently; reported package durations totaled roughly 983 seconds, while the focused fixture passed 10 race-enabled repetitions in about 33 seconds and emitted no data-race warning.
 - **Fix:** Run the unchanged full internal/SDK race package set with Go's package concurrency set to one (`-p 1`). This removes hosted-runner oversubscription while preserving every race-tested package, the exact aggregate/per-record byte fixtures, and the production five-second query, SQLite cancellation, privacy, row, and decode bounds.
-- **Verification:** Ten focused race-enabled repetitions and `go test -race -p 1 ./internal/... ./pkg/snowsdk -count=1` pass; all 70 support-script tests pass. Replacement exact-SHA CI and Documentation workflows remain required before tagging.
+- **Verification:** Ten focused race-enabled repetitions and `go test -race -p 1 ./internal/... ./pkg/snowsdk -count=1` pass; all 70 support-script tests pass. Replacement exact-SHA CI run 35604306770 and Documentation run 35604306692 pass at `02868fc`.
 
 ## BUG-234: Host-clone timeout fixture expires before descendant admission
 
@@ -83,12 +83,12 @@
 
 ## BUG-233: Repetitive Git overflow fixture fails before its output bound
 
-- **Status:** Fix implemented; local verification passes, replacement Linux CI pending.
+- **Status:** Resolved — the replacement exact-SHA Linux fixture passes with Git 2.55.
 - **Severity:** Low
 - **Surface:** Raw Git inspection bounds/cancellation integration fixture
 - **Evidence:** Exact-release Linux CI run 35236181242 failed `TestInspectionGitBoundsCancellationAndCleanup` because Git 2.55 returned a nonzero status during the repetitive wholesale-replacement diff before the patch writer observed overflow. `InspectDiff` failed closed with the documented unsupported-layout reason, empty text, and no availability rather than the output-bound reason the fixture expected. Apple Git 2.50.1 passed 100 focused repetitions, indicating a version-sensitive fixture workload rather than exposed or partial content.
 - **Fix:** Preserve the original tracked prefix and append the same 6,000 large lines. The resulting patch remains well above `InspectionPreviewLimit`, but its membership preflight is an unambiguous single appended hunk before the bounded patch command. Production Git arguments, trusted executable, snapshot validation, output limiter, cancellation, and fail-closed behavior remain unchanged.
-- **Verification:** The bounds/cancellation fixture passes 100 normal and 100 race-enabled repetitions; `go test ./internal/web -count=1`, `go test ./... -count=1`, and `go vet ./...` pass. Replacement exact-SHA Linux CI with Git 2.55 remains required before marking this resolved or tagging.
+- **Verification:** The bounds/cancellation fixture passes 100 normal and 100 race-enabled repetitions; `go test ./internal/web -count=1`, `go test ./... -count=1`, and `go vet ./...` pass. Replacement exact-SHA CI run 35604306770 and Documentation run 35604306692 pass at `02868fc`, including the Ubuntu Git 2.55 fixture.
 
 ## BUG-232: Plugin reload fixture races its own delivery notification
 
