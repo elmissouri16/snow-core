@@ -37,12 +37,16 @@ func (m *Model) renderInfoPicker() string {
 
 func (m *Model) sessionCard() selectionCard {
 	card := selectionCard{title: fmt.Sprintf("sessions (%d)", len(m.sessions)), selected: m.sessionIndex,
-		footer: "↑/↓ choose · Enter resume · Esc cancel\nr rename · d delete · PgUp/PgDn scroll"}
+		footer:        fmt.Sprintf("%s choose · %s resume · %s cancel\n%s rename · %s delete · PgUp/PgDn scroll", m.keys.PickerDown.Help().Key, m.keys.Accept.Help().Key, m.keys.Close.Help().Key, m.keys.BranchRename.Help().Key, m.keys.BranchDelete.Help().Key),
+		compactFooter: fmt.Sprintf("%s · %s · %s\n%s rename · %s delete", m.keys.PickerDown.Help().Key, m.keys.Accept.Help().Key, m.keys.Close.Help().Key, m.keys.BranchRename.Help().Key, m.keys.BranchDelete.Help().Key)}
 	if m.sessionLoading {
 		card.loading = "loading sessions…"
+		card.footer = m.keys.Close.Help().Key + " cancel"
+		card.compactFooter = card.footer
 		if m.sessionDeleteInFlight {
 			card.loading = "deleting session and subagent histories…"
 			card.footer = "Deleting; please wait"
+			card.compactFooter = card.footer
 		}
 	}
 	active := currentSessionID(m.app)
@@ -52,6 +56,7 @@ func (m *Model) sessionCard() selectionCard {
 	if m.sessionRenaming {
 		card.input = "Rename session: " + m.sessionRenameInput + "_"
 		card.footer = "Enter save · Esc cancel"
+		card.compactFooter = card.footer
 	}
 	if m.sessionDeleting && m.sessionIndex >= 0 && m.sessionIndex < len(m.sessions) {
 		name := m.sessions[m.sessionIndex].Name
@@ -79,9 +84,12 @@ func (m *Model) renderSessionPicker() string {
 
 func (m *Model) treeCard() selectionCard {
 	card := selectionCard{title: fmt.Sprintf("branches (%d)", len(m.branches)), selected: m.branchIndex,
-		footer: fmt.Sprintf("%s choose · %s switch · %s cancel\n%s fork · %s rename · %s delete", m.keys.PickerDown.Help().Key, m.keys.Accept.Help().Key, m.keys.Close.Help().Key, m.keys.BranchFork.Help().Key, m.keys.BranchRename.Help().Key, m.keys.BranchDelete.Help().Key)}
+		footer:        fmt.Sprintf("%s choose · %s switch · %s cancel\n%s fork · %s rename · %s delete", m.keys.PickerDown.Help().Key, m.keys.Accept.Help().Key, m.keys.Close.Help().Key, m.keys.BranchFork.Help().Key, m.keys.BranchRename.Help().Key, m.keys.BranchDelete.Help().Key),
+		compactFooter: fmt.Sprintf("%s · %s · %s\n%s fork · %s rename · %s delete", m.keys.PickerDown.Help().Key, m.keys.Accept.Help().Key, m.keys.Close.Help().Key, m.keys.BranchFork.Help().Key, m.keys.BranchRename.Help().Key, m.keys.BranchDelete.Help().Key)}
 	if m.treeLoading {
 		card.loading = "loading branches…"
+		card.footer = m.keys.Close.Help().Key + " cancel"
+		card.compactFooter = card.footer
 	}
 	parents := branchParents(m.branches)
 	for _, branch := range m.branches {
@@ -107,9 +115,11 @@ func (m *Model) treeCard() selectionCard {
 	case "fork":
 		card.input = "Fork name (blank = automatic): " + m.branchInput + "_"
 		card.footer = "Enter create · Esc cancel"
+		card.compactFooter = card.footer
 	case "rename":
 		card.input = "Rename: " + m.branchInput + "_"
 		card.footer = "Enter save · Esc cancel"
+		card.compactFooter = card.footer
 	case "delete":
 		card.title = "Delete selected leaf branch?"
 		card.footer = m.keys.Confirm.Help().Key + " confirm · " + m.keys.Close.Help().Key + " cancel"

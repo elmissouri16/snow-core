@@ -13655,8 +13655,13 @@ var Mr = () => window.SnowMenus, Nr = null, Pr = 0, Fr = class {
 	paintMenu = () => {
 		let e = this.menu;
 		if (!e || !this.current()) return;
-		let t = e.panel.contains(document.activeElement), n = document.activeElement instanceof HTMLElement ? document.activeElement : null, r = n?.dataset.menuKey, i = n?.matches("[data-model-search]");
-		if (e.panel.setAttribute("aria-busy", String(e.kind !== "telemetry" && this.loading)), (0, u.flushSync)(() => e.root.render(/* @__PURE__ */ (0, O.jsx)(jr, {
+		let t = e.panel.contains(document.activeElement), n = document.activeElement instanceof HTMLElement ? document.activeElement : null, r = n?.dataset.menuKey, i = n?.matches("[data-model-search]"), a = String(e.kind !== "telemetry" && this.loading);
+		if (e.panel.getAttribute("aria-busy") !== a && e.panel.setAttribute("aria-busy", a), e.kind === "telemetry") {
+			let t = JSON.stringify([e.pane, hr(this.snapshot)]);
+			if (e.signature === t) return;
+			e.signature = t;
+		}
+		if ((0, u.flushSync)(() => e.root.render(/* @__PURE__ */ (0, O.jsx)(jr, {
 			c: this,
 			menu: e
 		}))), t && (!e.panel.contains(document.activeElement) || document.activeElement instanceof HTMLButtonElement && document.activeElement.disabled)) {

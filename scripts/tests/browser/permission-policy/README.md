@@ -20,9 +20,10 @@ public snapshots and validates the actual browser POSTs (method, project,
 instance/session identity, CSRF, policy, and Allow-only acknowledgement). The
 additional mode checks use the real bounded native JSON transport and production
 SSE parser against a local stream. `fetch`, `SnowNavigation`, DOM markup, and CSS
-are not replaced. Telemetry checks wrap the
-production menu/render entry points to count calls while executing the original
-functions unchanged. The two-second polling delay is shortened to keep checks bounded.
+are not replaced. Telemetry checks observe the production panel and wrap only
+the public conversation render entry point to identify snapshot settlement; they
+assert retained node identity and exact DOM mutations rather than renderer calls.
+The two-second polling delay is shortened to keep checks bounded.
 
 The runner also exports the production `many-home` catalog for desktop sidebar
 checks. Native workspace reads exercise preserved search/scroll/focus,
@@ -74,12 +75,9 @@ The 1280×740 dark/light cases additionally run the long-sidebar scenarios:
 - Compact telemetry rows, Details/Back/Escape, unknown versus verified-zero cost,
   invalid currencies, tiny/large amounts and missing context windows. Native DOM
   measurements compare compact height against reconstructed inspector spacing
-  and expanded notes at the same viewport. Instrumentation is intended to verify
-  zero DOM mutations for unchanged metrics and unrelated settings, text-only
-  updates in retained nodes for changed values, and no extra requests. The current
-  React conversation owner regresses the no-op attribute write and the probe still
-  counts a retired vanilla renderer; those two known failures are tracked as
-  BUG-175 rather than attributed to first-party workspace navigation.
+  and expanded notes at the same viewport. Instrumentation verifies zero DOM
+  mutations for unchanged metrics and unrelated settings, exactly one text
+  mutation in retained nodes for changed values, and no extra requests.
 
 `SNOW_BROWSER_QUICK=1` runs only 1280×740 dark for local debugging; it is not a
 substitute for the full eight-case matrix.

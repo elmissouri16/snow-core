@@ -28,20 +28,19 @@ export async function telemetryChecks({state, evaluate, wait, click, key, naviga
   check(height < 300 || geometry.compact < geometry.before, `Compact popup reduces default height: ${geometry.before}px → ${geometry.compact}px (viewport height ${height})`);
   await evaluate(`(() => {
     const panel=document.querySelector('.telemetry-menu');
-    window.telemetryProbe={panel,values:[...panel.querySelectorAll('dd')],mutations:[],renders:0,revision:0};
+    window.telemetryProbe={panel,values:[...panel.querySelectorAll('dd')],mutations:[],revision:0};
     telemetryProbe.observer=new MutationObserver(records=>telemetryProbe.mutations.push(...records));
     telemetryProbe.observer.observe(panel,{subtree:true,childList:true,attributes:true,characterData:true});
-    const menus=window.SnowMenus;window.SnowMenus={...menus,reconcile(...args){telemetryProbe.renders++;return menus.reconcile(...args)}};
     const conversation=window.SnowConversation;window.SnowConversation={...conversation,render(snapshot,...args){const result=conversation.render(snapshot,...args);telemetryProbe.revision=snapshot?.revision;return result}};
   })()`);
   for (const fields of [{}, {session_name: 'Unrelated title update'}, {mode: 'plan'}]) {
     state.update(fields); state.push();
     await wait(`telemetryProbe.revision === ${state.snapshot.revision}`);
   }
-  await assert('telemetryProbe.renders===0 && telemetryProbe.mutations.length===0', 'Identical telemetry and unrelated settings updates cause zero menu reconciliations or DOM mutations');
+  await assert('telemetryProbe.values.every((n,i)=>n===document.querySelectorAll(".telemetry-menu dd")[i]) && telemetryProbe.mutations.length===0', 'Identical telemetry and unrelated settings updates retain value nodes with zero DOM mutations');
   state.update({telemetry: {...telemetry, context_tokens: 3620}}); state.push();
   await wait('document.querySelector("[data-workflow-context]").textContent.startsWith("3,620")');
-  await assert('telemetryProbe.renders===1 && telemetryProbe.values.every((n,i)=>n===document.querySelectorAll(".telemetry-menu dd")[i]) && !telemetryProbe.mutations.some(m=>m.type==="childList")', 'Changed metric patches text in retained value nodes without rebuilding rows');
+  await assert('telemetryProbe.values.every((n,i)=>n===document.querySelectorAll(".telemetry-menu dd")[i]) && telemetryProbe.mutations.length===1 && telemetryProbe.mutations[0].type==="characterData" && !!telemetryProbe.mutations[0].target.parentElement.closest("[data-workflow-context]")', 'Changed metric performs one text mutation in retained context value nodes');
   await evaluate('telemetryProbe.observer.disconnect()');
   await click('[data-menu-key=telemetry-details]');
   await assert('document.querySelector(".telemetry-menu").textContent.includes("not a billing charge") && document.querySelector(".telemetry-menu").textContent.includes("Unknown values are not zero") && !!document.querySelector("[data-menu-key=back]")', 'Details retains accounting and estimate qualifications with a Back action');

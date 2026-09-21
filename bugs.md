@@ -489,10 +489,12 @@
 
 ## BUG-180: Sidebar navigation and row controls lose focus and list state
 
-- **Status:** Resolved — navigation, row-focus and unchanged-update regressions verified.
+- **Status:** Open — the current React navigation owner regresses three verified sidebar state/focus assertions.
+- **Regression evidence:** The permission-policy fixture's native workspace extraction attempted `.match` directly on a `Buffer`, so the desktop sidebar matrix stopped before exercising navigation. After converting the bounded exported document to text for extraction, the current production bundle consistently fails destination-row focus, preservation of open search/filter state, and the no-focus-pullback assertion after the user leaves the sidebar. The other seven sidebar checks pass, including scroll preservation, latest-selection cancellation, late-response rejection, failed-navigation live-state retention and content fallback focus.
+- **Required follow-up:** Trace the React shell/navigation lifecycle against the retained sidebar owner, restore the three established focus/search invariants without reviving whole-sidebar replacement, and keep the corrected fixture transport. Re-run all eight permission-policy reports before resolving this entry again.
 - **Evidence:** The user reports erratic workspace/session-list focus. Whole-workspace HTMX swaps replace the sidebar, resetting list scroll and search, while `app.js` unconditionally focuses content. Sidebar links have independent request lifetimes, allowing older reads to finish after a newer selection. `syncNewSession` rewrites unchanged current-row text/attributes on runtime updates. Sidebar Rename launches through an intermediate header menu, so its dialog returns focus to that header instead of the row. Before-swap cleanup also retires live state when HTMX explicitly declines a failed response swap.
 - **Remediation:** Synchronize sidebar reads with latest-selection-wins semantics; preserve list/search state and actual desktop sidebar focus across successful swaps; avoid unchanged row mutations; reuse the conversation owner's rename admission with the original row launcher; skip teardown for rejected swaps. Retain mobile content focus, native focus indication, explicit activation and runtime identity/admission checks.
-- **Verification:** Native HTMX/SSE matrix passes 1,686 assertions across eight viewport/theme reports; final focused source recheck passes 219 assertions. New coverage verifies no unchanged sidebar mutations, row-specific Rename focus return, search/scroll/focus preservation, cancellation of older reads, no late response/history overwrite, no focus pullback after leaving the sidebar, and a still-live composer/subscription after a rejected navigation. Existing conversation workflow checks pass 1,736 assertions, mobile layout smoke passes 2,612 across 147 reports, frontend units pass 109 tests, and affected Go/syntax/resource/diff checks pass. Test iterations corrected an invalid DOM revision observation and waited for real HTMX settlement before exercising newly inserted links; earlier failed/timed-out logs remain under `/tmp/snow-sidebar-*`.
+- **Historical verification:** Before the React navigation migration, the native HTMX/SSE matrix passed 1,686 assertions across eight viewport/theme reports and a focused source recheck passed 219 assertions. That evidence covered unchanged sidebar mutations, row-specific Rename focus return, search/scroll/focus preservation, cancellation of older reads, no late response/history overwrite, no focus pullback after leaving the sidebar, and a still-live composer/subscription after a rejected navigation; it no longer establishes the three regressed invariants above.
 
 ## BUG-179: Collapsed desktop rail clips Settings in very short windows
 
@@ -524,12 +526,12 @@
 
 ## BUG-175: Context popup wastes space on inspector padding and repeated explanations
 
-- **Status:** Open — the compact presentation remains fixed, but the later React conversation owner regressed the verified no-op refresh behavior.
-- **Regression evidence:** The current permission-policy browser matrix consistently fails only the two no-op reconciliation assertions. Its probe observes three redundant `aria-busy="false"` attribute writes for identical/unrelated snapshots; a changed context value retains every `<dd>` and performs only the expected text mutation plus another redundant attribute write. `conversation/controller.tsx` unconditionally writes `aria-busy` and calls the React root render for every snapshot, while the stale probe still counts the former `SnowMenus.reconcile` path and therefore reports zero renders even for the legitimate keyed text patch. Neither file is part of the first-party navigation migration.
-- **Required follow-up:** Restore the displayed-telemetry signature/no-op guard in the React owner, conditionally write `aria-busy`, and make the browser probe assert retained node identity and exact DOM mutations rather than calls to the superseded vanilla renderer.
-- **Evidence:** The user's screenshot highlights an oversized unavailable-cost block and clipped explanatory footer. `telemetryContent` always renders two explanation blocks; global `dl > div` padding (14px per side) and borders accumulate with the popup's own 12px grid gap. Its refresh signature also includes unrelated session settings and model inventories.
-- **Remediation:** Use compact label/value rows, explicit Unknown rather than invented zero, and a Details/Back pane for accounting and approximation qualifications. Reset inherited spacing only within telemetry. Compare displayed telemetry independently of mutation state/inventories before reconciling; retain the shared menu lifetime and keyed DOM updates.
-- **Verification:** Native HTTP/SSE/browser matrix passes **1,664 assertions** across 320/1280 widths, 740/240 heights and dark/light. The screenshot's data produces a **182px desktop / 200px narrow** summary; short viewports retain bounded scrolling. Unchanged metrics and unrelated settings produce zero popup reconciliations or observed DOM mutations; changed values update text in retained nodes. Details/Back/Escape, unavailable versus verified-zero cost, tiny/large values, invalid currency, missing telemetry/window and no extra requests all pass. Conversation workflows pass **1,736 assertions**, layout smoke passes **2,612** (after BUG-176 fixture correction), 69 cost/frontend tests and 67 Python tests pass, and `go test ./...`, `go vet ./...`, benchmark guard, syntax/resource/diff checks pass. Initial telemetry-test setup incorrectly passed an unsupported helper option; changed it to deliver the fixture snapshot through SSE, then reran the full matrix. No general CPU/latency improvement is claimed beyond measured avoidance of menu work.
+- **Status:** Resolved — unchanged displayed telemetry no longer renders or mutates the open React menu.
+- **Regression evidence:** The permission-policy browser matrix failed the two no-op reconciliation assertions. Its probe observed three redundant `aria-busy="false"` attribute writes for identical/unrelated snapshots; a changed context value retained every `<dd>` and performed only the expected text mutation plus another redundant attribute write. `conversation/controller.tsx` unconditionally wrote `aria-busy` and called the React root render for every snapshot, while the stale probe still counted the former `SnowMenus.reconcile` path and therefore reported zero renders even for the legitimate keyed text patch.
+- **Fix:** The React conversation owner now compares a signature containing only the open telemetry pane and its displayed projection, skips unchanged menu renders and repositioning, and writes `aria-busy` only when the serialized state changes. The browser probe observes retained value-node identity and exact DOM mutations instead of instrumenting the retired vanilla renderer.
+- **Historical evidence:** The user's screenshot highlighted an oversized unavailable-cost block and clipped explanatory footer. The former `telemetryContent` owner rendered two explanation blocks; global `dl > div` padding (14px per side) and borders accumulated with the popup's own 12px grid gap. Its refresh signature also included unrelated session settings and model inventories.
+- **Original remediation:** Use compact label/value rows, explicit Unknown rather than invented zero, and a Details/Back pane for accounting and approximation qualifications. Reset inherited spacing only within telemetry. Compare displayed telemetry independently of mutation state/inventories before reconciling; retain the shared menu lifetime and keyed DOM updates. The current React owner preserves that presentation and now restores the no-op boundary described above.
+- **Verification:** The current production-fixture core matrix passes **1,664 assertions** across 320/1280 widths, 740/240 heights and dark/light. Unchanged metrics and unrelated settings retain every value node with zero observed DOM mutations; one changed metric performs exactly one character-data mutation in its retained context value. Details/Back/Escape, unavailable versus verified-zero cost, tiny/large values, invalid currency, missing telemetry/window and no extra requests all pass. Frontend typecheck, all **128** unit tests, production build and generated-asset reproducibility pass. The repaired desktop-sidebar fixture proceeds past its previously invalid Buffer match and independently exposes the three reopened BUG-180 assertions; those do not affect the telemetry matrix. No general CPU/latency improvement is claimed beyond measured avoidance of menu work.
 
 ## BUG-174: Idle settings and data refreshes flash labels, menus and panel content
 
@@ -3793,7 +3795,7 @@ check are documented with their successful reruns in the fix report.
 
 ## BUG-086: Compact session and branch panels hide management action hints
 
-- **Status:** Open; identified by source/handler audit, not yet fixed.
+- **Status:** Resolved — compact browsing retains configured management-action hints.
 - **Severity:** Medium (P2).
 - **Surface:** TUI `/sessions` and `/tree` browsing at narrow/short sizes.
 - **Reproduction:** Open either populated panel in a 40×12 terminal. The
@@ -3804,14 +3806,16 @@ check are documented with their successful reruns in the fix report.
   hints only in the normal session/tree browsing footers;
   `internal/tui/selection_card.go` replaces them with generic compact controls.
   `handleSessionPick` and `handleTreePick` retain the management actions.
-- **Expected/remediation:** Provide action-preserving compact browsing footers
-  using the existing selection-card layout and configured branch keys. Preserve
-  frame bounds and selection; keep deletion confirmation and approval safety
-  behavior unchanged.
-- **Verification needed:** Responsive full-frame tests asserting management
-  hints remain visible in both transcript modes, plus selection/draft and
-  existing action tests. The audit's `go test ./internal/tui -count=1` passed,
-  but existing responsive tests do not assert these management hints.
+- **Fix:** Session and branch browsing provide concise two-line compact footers
+  from the configured picker and branch bindings. Rename, fork, confirmation and
+  delete-progress states replace those browsing hints with their active controls;
+  the existing handlers and deletion safeguards are unchanged.
+- **Verification:** Responsive full-frame tests at 40×12 use non-default branch
+  bindings and verify session rename/delete plus branch fork/rename/delete hints
+  in both transcript modes while preserving the selected row, centered bounds and
+  composer draft. Compact editing, delete-progress and confirmation tests verify
+  that inactive browsing actions are not advertised. The focused selection suite
+  and `go test ./internal/tui -count=1` pass.
 
 ## BUG-087: Process and subagent fleet inspectors bypass centered panels
 

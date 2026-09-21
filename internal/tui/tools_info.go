@@ -448,7 +448,7 @@ func (m *Model) startTreePick() (tea.Model, tea.Cmd) {
 
 func (m *Model) handleTreePick(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.treeLoading {
-		if msg.Code == tea.KeyEscape {
+		if keyMatches(msg, m.keys.Close) {
 			m.pickTree = false
 			m.treeLoading = false
 			m.pickerGeneration++

@@ -1,7 +1,7 @@
 import {createRoot} from 'react-dom/client';
 import type {Root} from 'react-dom/client';
 import {flushSync} from 'react-dom';
-import {activeTurn, choices, isPolicy, record, sessionChoices, validName} from './model';
+import {activeTurn, choices, isPolicy, record, sessionChoices, telemetryView, validName} from './model';
 import type {Choices, Controls, Hooks, SessionChoice, Snapshot} from './model';
 import {Heading, Leading, Trailing, Dialogs} from './Surfaces';
 import {Menu} from './Menu';
@@ -15,7 +15,7 @@ type MenuHost = {
 };
 // The legacy host owns geometry, focus and the external panel lifetime only.
 const menus = () => (window as Window & {SnowMenus?: MenuHost}).SnowMenus;
-type Popup = {kind: MenuKind; pane: string; query: string; trigger: HTMLElement; panel: HTMLDivElement; root: Root};
+type Popup = {kind: MenuKind; pane: string; query: string; trigger: HTMLElement; panel: HTMLDivElement; root: Root; signature?: string};
 let state: Controller | null = null;
 let menuSequence = 0;
 export class Controller {
@@ -77,7 +77,13 @@ export class Controller {
     const focused = menu.panel.contains(document.activeElement);
     const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const key = active?.dataset.menuKey, search = active?.matches('[data-model-search]');
-    menu.panel.setAttribute('aria-busy', String(menu.kind !== 'telemetry' && this.loading));
+    const busy = String(menu.kind !== 'telemetry' && this.loading);
+    if (menu.panel.getAttribute('aria-busy') !== busy) menu.panel.setAttribute('aria-busy', busy);
+    if (menu.kind === 'telemetry') {
+      const signature = JSON.stringify([menu.pane, telemetryView(this.snapshot)]);
+      if (menu.signature === signature) return;
+      menu.signature = signature;
+    }
     flushSync(() => menu.root.render(<Menu c={this} menu={menu} />));
     if (focused && (!menu.panel.contains(document.activeElement) || (document.activeElement instanceof HTMLButtonElement && document.activeElement.disabled))) {
       const buttons = [...menu.panel.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];

@@ -68,6 +68,13 @@ func TestNativeSelectionCardsResizeWithoutChangingTranscript(t *testing.T) {
 		for _, name := range []string{"info", "sessions", "tree", "fork", "permissions", "plan", "goal"} {
 			t.Run(fmt.Sprintf("inline=%v/%s", inline, name), func(t *testing.T) {
 				m := modelPickerTestModel(t, 120, 30)
+				keys, err := applyKeybindingOverrides(m.keys, map[string][]string{
+					"branch_fork": {"1"}, "branch_rename": {"2"}, "branch_delete": {"3"},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				m.keys = keys
 				m.inlineTranscript = inline
 				m.editor.SetValue("keep this draft")
 				m.layout()
@@ -90,6 +97,20 @@ func TestNativeSelectionCardsResizeWithoutChangingTranscript(t *testing.T) {
 					}
 					if name == "info" && !strings.Contains(plain, "server-29") {
 						t.Fatalf("last selected server not visible:\n%s", card)
+					}
+					if size[0] == 40 && size[1] == 12 {
+						var management []string
+						switch name {
+						case "sessions":
+							management = []string{"2 rename", "3 delete"}
+						case "tree":
+							management = []string{"1 fork", "2 rename", "3 delete"}
+						}
+						for _, want := range management {
+							if !strings.Contains(plain, want) {
+								t.Fatalf("%s compact footer omitted configured action %q:\n%s", name, want, card)
+							}
+						}
 					}
 					if m.editor.Value() != "keep this draft" {
 						t.Fatal("resize changed draft")
@@ -145,6 +166,13 @@ func TestNativeSelectionCardLoadingEditingAndEmptyStates(t *testing.T) {
 	}
 	m.closeInfoPicker()
 	openSelectionTestCard(m, "sessions")
+	m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
+	m.sessionLoading = true
+	card := stripANSI(m.renderSessionPicker())
+	if !strings.Contains(card, "loading sessions") || !strings.Contains(strings.ToLower(card), "esc cancel") || strings.Contains(card, "rename") {
+		t.Fatalf("compact session loading advertised unavailable actions:\n%s", card)
+	}
+	m.sessionLoading = false
 	m.sessionRenaming = true
 	m.sessionRenameInput = strings.Repeat("界", 40)
 	m.Update(tea.PasteMsg{Content: "tail"})
@@ -152,21 +180,62 @@ func TestNativeSelectionCardLoadingEditingAndEmptyStates(t *testing.T) {
 		m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 		card := m.renderSessionPicker()
 		assertCenteredSelectionCard(t, m, card)
-		if !strings.Contains(stripANSI(card), "tail_") {
+		plain := stripANSI(card)
+		if !strings.Contains(plain, "tail_") {
 			t.Fatalf("rename cursor hidden at %v:\n%s", size, card)
+		}
+		if size[0] == 40 && size[1] == 12 && (!strings.Contains(plain, "Enter save") || !strings.Contains(plain, "Esc cancel") || strings.Contains(plain, "delete")) {
+			t.Fatalf("compact rename footer advertised the wrong actions:\n%s", card)
 		}
 	}
 	m.sessionRenaming, m.sessionDeleting = false, true
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	card := stripANSI(m.renderSessionPicker())
+	card = stripANSI(m.renderSessionPicker())
 	for _, want := range []string{"Permanently delete", "cannot be undone", "Enter confirm", "Esc cancel"} {
 		if !strings.Contains(card, want) {
 			t.Fatalf("delete confirmation omitted %q:\n%s", want, card)
 		}
 	}
 	m.sessionDeleting, m.sessionLoading, m.sessionDeleteInFlight = false, true, true
-	if !strings.Contains(stripANSI(m.renderSessionPicker()), "deleting session") {
-		t.Fatal("delete progress missing")
+	m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
+	card = stripANSI(m.renderSessionPicker())
+	if !strings.Contains(card, "deleting session") || !strings.Contains(card, "Deleting; please wait") || strings.Contains(card, "rename") {
+		t.Fatalf("compact delete progress advertised the wrong actions:\n%s", card)
+	}
+}
+
+func TestCompactBranchEditingControlsReplaceBrowsingActions(t *testing.T) {
+	loading := modelPickerTestModel(t, 40, 12)
+	keys, err := applyKeybindingOverrides(loading.keys, map[string][]string{"close": {"q"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loading.keys = keys
+	openSelectionTestCard(loading, "tree")
+	loading.treeLoading = true
+	card := stripANSI(loading.renderTreePicker())
+	if !strings.Contains(card, "loading branches") || !strings.Contains(strings.ToLower(card), "q cancel") || strings.Contains(card, " fork") {
+		t.Fatalf("compact tree loading advertised unavailable actions:\n%s", card)
+	}
+	_, _ = loading.handleTreePick(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	if loading.pickTree || loading.treeLoading {
+		t.Fatal("configured compact tree loading close key was inert")
+	}
+
+	for _, action := range []string{"fork", "rename"} {
+		t.Run(action, func(t *testing.T) {
+			m := modelPickerTestModel(t, 40, 12)
+			openSelectionTestCard(m, "tree")
+			m.branchAction = action
+			card := stripANSI(m.renderTreePicker())
+			want := "Enter create"
+			if action == "rename" {
+				want = "Enter save"
+			}
+			if !strings.Contains(card, want) || !strings.Contains(card, "Esc cancel") || strings.Contains(card, " delete") {
+				t.Fatalf("compact %s footer advertised the wrong actions:\n%s", action, card)
+			}
+		})
 	}
 }
 

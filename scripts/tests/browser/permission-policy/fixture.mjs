@@ -31,7 +31,7 @@ export function transport(files, fixture) {
         response.on("close", () => { entry.aborted = !response.writableEnded; });
         // Exported documents include the shell; mirror production's workspace-only native response.
         const page = url.searchParams.get("fixture") === "sidebar" ? files.get("/sidebar.html") : body;
-        const workspace = page?.match(/<div id="workspace"[\s\S]*<\/div>\s*<\/body>/)?.[0].replace(/\s*<\/body>$/, "") || page;
+        const workspace = page?.toString().match(/<div id="workspace"[\s\S]*<\/div>\s*<\/body>/)?.[0].replace(/\s*<\/body>$/, "") || page;
         const reply = (status = 200) => { response.writeHead(status, {"Content-Type": "text/html", "Cache-Control": "no-store"}); response.end(entry.native ? workspace : page); };
         if (state.holdNavigation) { state.holdNavigation = false; state.releaseNavigation = reply; }
         else reply();
