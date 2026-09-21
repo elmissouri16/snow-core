@@ -9,8 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
+	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/auth"
@@ -86,18 +88,71 @@ func TestCommandRegistryIsCanonical(t *testing.T) {
 
 func TestIsCommandPrefix(t *testing.T) {
 	cases := map[string]bool{
-		"/":         true,
-		"/model":    true,
-		"/per":      true,
-		"/model x":  false,
-		"/model x ": false,
-		"model":     false,
-		"hello":     false,
+		"/":             true,
+		"/model":        true,
+		"/per":          true,
+		"/model x":      false,
+		"/model\tx":     false,
+		"/model\nx":     false,
+		"/model\u2003x": false,
+		"/model x ":     false,
+		"model":         false,
+		"hello":         false,
 	}
 	for in, want := range cases {
 		if got := isCommandPrefix(in); got != want {
 			t.Errorf("isCommandPrefix(%q) = %v, want %v", in, got, want)
 		}
+	}
+}
+
+func TestCommandPaletteUnmatchedEnterDispatchesOnce(t *testing.T) {
+	m := newModel(context.Background(), app.Options{})
+	buildAppForTest(t, m)
+	m.editor.SetValue("/not-a-command")
+	m.refreshPalette()
+	if !m.compVisible || len(m.compMatches) != 0 {
+		t.Fatalf("unmatched palette = visible %v matches %v", m.compVisible, m.compMatches)
+	}
+	_, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if len(m.lines) == 0 || !strings.Contains(stripANSI(m.lines[len(m.lines)-1]), "unknown command") {
+		t.Fatalf("unmatched Enter did not dispatch once: %v", m.lines)
+	}
+	if m.editor.Value() != "" || m.compVisible {
+		t.Fatalf("unmatched command remained in composer: %q visible=%v", m.editor.Value(), m.compVisible)
+	}
+}
+
+func TestCommandPaletteTruncationPreservesUTF8AndWidth(t *testing.T) {
+	extra := commandSpec{name: "/unicode", desc: "configure 日本語 behavior"}
+	for width := 1; width < 30; width++ {
+		for name, got := range map[string]string{
+			"match":    renderCompletions([]string{"/unicode"}, 0, width, extra),
+			"no-match": renderCompletions(nil, 0, width),
+		} {
+			if !utf8.ValidString(got) {
+				t.Fatalf("%s width %d produced invalid UTF-8: %q", name, width, got)
+			}
+			if cells := xansi.StringWidth(got); cells > width {
+				t.Fatalf("%s rendered width = %d, want at most %d: %q", name, cells, width, got)
+			}
+		}
+	}
+}
+
+func TestCommandPaletteSanitizesPluginMetadataAndTruncatesByDisplayWidth(t *testing.T) {
+	extra := commandSpec{
+		name:    "/plugin",
+		desc:    "界界\x1b]2;spoofed\a\ninjected",
+		argHint: "\twide 界界",
+	}
+	const width = 18
+	rendered := renderCompletions([]string{"/plugin"}, 0, width, extra)
+	if strings.Contains(rendered, "\x1b]2;") || strings.ContainsAny(rendered, "\a\n") {
+		t.Fatalf("palette retained terminal or row controls: %q", rendered)
+	}
+	if cells := xansi.StringWidth(rendered); cells > width {
+		t.Fatalf("palette width = %d, want at most %d: %q", cells, width, rendered)
 	}
 }
 

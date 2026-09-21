@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {base64, bytes, imageType, previewDimensionsSafe, previewURL, releasePreview, validText} from './model.ts';
+import {base64, bytes, composerCommands, imageType, matchingCommands, previewDimensionsSafe, previewURL, releasePreview, validText} from './model.ts';
 import type {Item} from './types.ts';
 
 const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=', 'base64'));
@@ -10,6 +10,16 @@ function header(width: number, height: number) {
 }
 const image = (data = png): Item => ({id: 1, version: 1, label: 'https://not-a-source.test/💠.png', size: data.length,
   state: 'ready', kind: 'image', mime: 'image/png', data: base64(data)});
+
+test('web command completion is bounded to native controls and ranks exact, prefix, then fuzzy matches', () => {
+  assert.deepEqual(matchingCommands('model').map(command => command.name), ['/model']);
+  assert.deepEqual(matchingCommands('mod').map(command => command.name), ['/model']);
+  assert.deepEqual(matchingCommands('cmp').map(command => command.name), ['/compact']);
+  assert.equal(matchingCommands('login').length, 0);
+  assert.equal(matchingCommands('').length, composerCommands.length);
+  assert.equal(new Set(composerCommands.map(command => command.name)).size, composerCommands.length);
+  assert.ok(composerCommands.every(command => command.name.startsWith('/') && command.description));
+});
 
 test('valid text rejects NUL and either unpaired surrogate without discarding supplementary Unicode', () => {
   for (const invalid of [null, undefined, 2, '\0', '\ud800', '\udfff', 'x\ud800y', '\udc00\ud800']) assert.equal(validText(invalid), false);

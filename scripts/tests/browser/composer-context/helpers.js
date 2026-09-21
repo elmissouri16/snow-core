@@ -57,7 +57,9 @@
   const update = fields => Object.assign(fixture.snapshot, fields, {revision: fixture.snapshot.revision + 1});
   const ready = () => wait(() => $("#live-connection")?.textContent === "Live", "live connection");
   const swap = async fields => { update(fields || {}); await window.testNavigate(); await ready(); await tick(); };
-  const send = () => $("#live-composer").requestSubmit();
+  // Exercise the real focus transition: clicking Send blurs the prompt before
+  // the form's submit event, unlike requestSubmit().
+  const send = () => $("#live-send").click();
   const accept = async action => { update({status: "idle"}); latest(action).resolve(fixture.snapshot); await ready(); await tick(); };
   const files = (path = ".", entries = [
     {name: "src", path: "src", kind: "directory"},

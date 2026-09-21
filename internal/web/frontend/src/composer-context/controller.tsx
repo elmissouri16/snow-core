@@ -4,7 +4,7 @@ import {createPortal, flushSync} from 'react-dom';
 import {createRoot} from 'react-dom/client';
 import {ContextPanel, ContextTools} from './Panel.tsx';
 import type {Actions, Presentation, Refs} from './Panel.tsx';
-import {TEXT_LIMIT, PROMPT_LIMIT, IMAGE_LIMIT, bytes, validText, imageType, base64, labelText, privacyNotice, releasePreview, previewURL} from './model.ts';
+import {TEXT_LIMIT, PROMPT_LIMIT, IMAGE_LIMIT, bytes, validText, imageType, base64, labelText, privacyNotice, releasePreview, previewURL, matchingCommands} from './model.ts';
 import type {API, Authority, Choice, Controller, Directory, Draft, FileResponse, Item, ListingResponse, Query, SkillsResponse, Snapshot} from './types.ts';
 // Canonical synchronous state remains outside React. Retained drafts never leave tab memory.
 const drafts = new Map<string, Draft>();
@@ -23,7 +23,7 @@ export function forget(key: string) {
   const draft = drafts.get(key); if (draft) retire(draft);
   drafts.delete(key);
 }
-export function init({root, key, instance, request, changed = () => {}, error = () => {}, replaceText, focusPrompt = () => {}, suggestions = () => {}}: API): Controller {
+export function init({root, key, instance, request, changed = () => {}, error = () => {}, replaceText, focusPrompt = () => {}, suggestions = () => {}, command}: API): Controller {
   active?.dispose(); active = null;
   const find = (selector: string) => root.querySelector<HTMLElement>(selector);
   const promptNode = root.querySelector<HTMLTextAreaElement>("#live-prompt");
@@ -190,6 +190,8 @@ export function init({root, key, instance, request, changed = () => {}, error = 
   function token(): Query | null {
     if (prompt.selectionStart !== prompt.selectionEnd) return null;
     const caret = prompt.selectionStart, before = prompt.value.slice(0, caret);
+    const slash = /^\/([^\s/]*)$/.exec(before);
+    if (slash && !prompt.value.slice(caret).trim()) return {marker: "/", value: slash[1], revision: 0, path: ".", filter: "", start: 0, end: caret, text: prompt.value, caret};
     const match = /(?:^|\s)([@$])(?:"([^"\n]*)|([^\s"@$]*))$/.exec(before);
     if (!match) return null;
     const marker = match[1], rawValue = match[2] ?? match[3];
@@ -250,9 +252,23 @@ export function init({root, key, instance, request, changed = () => {}, error = 
   function validPath(path: unknown): path is string {
     return typeof path === "string" && bytes(path) <= 4096 && validText(path) && !/[\x00-\x1f\x7f\\:]/.test(path) && path.split("/").every(part => part && part !== "." && part !== "..");
   }
+  function commandChoices(current: Query) {
+    const choices: Choice[] = matchingCommands(current.value).map(item => ({
+      label: item.name, description: item.description, command: item.name,
+      choose: () => {
+        if (!validQuery(current) || !replace(current, "")) return;
+        if (!command?.(item.name)) report(`${item.name} is unavailable in this Web Manager state.`);
+      }
+    }));
+    show(current, choices, choices.length ? "Web Manager commands" : "No matching Web Manager commands.", choices.length > 0);
+  }
+  function matchingFileEntries(current: Query, listing: Directory) {
+    const filter = current.filter.toLocaleLowerCase();
+    return listing.entries.filter(entry => entry.name.toLocaleLowerCase().includes(filter));
+  }
   function fileChoices(current: Query, listing: Directory) {
     if (!validQuery(current)) return;
-    const choices: Choice[] = listing.entries.filter(entry => entry.name.toLocaleLowerCase().includes(current.filter.toLocaleLowerCase())).map(entry => ({
+    const choices: Choice[] = matchingFileEntries(current, listing).map(entry => ({
       label: entry.name, title: entry.path, folder: entry.kind === "directory",
       choose: () => {
         if (entry.kind === "directory") replace(current, `@${JSON.stringify(entry.path + "/").replaceAll("$", "\\u0024").slice(0, -1)}`, true);
@@ -264,15 +280,21 @@ export function init({root, key, instance, request, changed = () => {}, error = 
   }
   async function loadFiles(current: Query, offset = 0, previous: Directory | null = null) {
     if (!validQuery(current) || current.loading) return;
-    current.loading = true; discoveries++; changed(); show(current, [], "Loading files…");
+    current.loading = true; discoveries++; changed(); show(current, [], current.filter ? "Searching this folder…" : "Loading files…");
     try {
-      const response = (await request("files", {path: current.path, offset})) as ListingResponse;
-      if (!validQuery(current)) return;
-      if (!response || response.path !== current.path || !Array.isArray(response.entries) || response.entries.length > 256) throw new Error("Invalid directory listing.");
-      const entries = response.entries.filter(entry => entry && ["file", "directory"].includes(entry.kind) && validPath(entry.path) && typeof entry.name === "string" && entry.name === entry.path.split("/").at(-1) && !entry.path.includes('"') && (current.path === "." ? !entry.path.includes("/") : entry.path.slice(0, entry.path.lastIndexOf("/")) === current.path));
-      const merged = [...(previous?.entries || []), ...entries].slice(0, 4096);
-      directory = {path: current.path, entries: merged, offset: response.next_offset, hasMore: response.has_more === true && Number.isSafeInteger(response.next_offset) && response.next_offset > offset, limited: response.limited === true || merged.length >= 4096};
-      fileChoices(current, directory);
+      let listing = previous, nextOffset = offset;
+      for (;;) {
+        const response = (await request("files", {path: current.path, offset: nextOffset})) as ListingResponse;
+        if (!validQuery(current)) return;
+        if (!response || response.path !== current.path || !Array.isArray(response.entries) || response.entries.length > 256) throw new Error("Invalid directory listing.");
+        const entries = response.entries.filter(entry => entry && ["file", "directory"].includes(entry.kind) && validPath(entry.path) && typeof entry.name === "string" && entry.name === entry.path.split("/").at(-1) && !entry.path.includes('"') && (current.path === "." ? !entry.path.includes("/") : entry.path.slice(0, entry.path.lastIndexOf("/")) === current.path));
+        const merged = [...(listing?.entries || []), ...entries].slice(0, 4096);
+        listing = {path: current.path, entries: merged, offset: response.next_offset, hasMore: response.has_more === true && Number.isSafeInteger(response.next_offset) && response.next_offset > nextOffset, limited: response.limited === true || merged.length >= 4096};
+        directory = listing;
+        if (!current.filter || matchingFileEntries(current, listing).length || !listing.hasMore || listing.entries.length >= 4096) break;
+        nextOffset = listing.offset;
+      }
+      if (listing) fileChoices(current, listing);
     } catch (_) { if (validQuery(current)) show(current, [], "Could not list this folder. Edit the @path to try again."); }
     finally { current.loading = false; discoveries--; if (alive()) changed(); }
   }
@@ -329,12 +351,17 @@ export function init({root, key, instance, request, changed = () => {}, error = 
     if (!canRead() || composing) return;
     const current = token(); if (!current) return;
     current.revision = queryRevision; query = current;
+    if (current.marker === "/") { commandChoices(current); return; }
     if (current.marker === "$") { loadSkills(current); return; }
     const slash = current.value.lastIndexOf("/");
     current.path = slash < 0 ? "." : current.value.slice(0, slash);
     current.filter = current.value.slice(slash + 1);
     if (current.path !== "." && !validPath(current.path)) { close(); return; }
-    if (directory?.path === current.path) fileChoices(current, directory); else loadFiles(current);
+    if (directory?.path !== current.path) { loadFiles(current); return; }
+    if (current.filter && !matchingFileEntries(current, directory).length && directory.hasMore && directory.offset < 4096 && directory.entries.length < 4096) {
+      loadFiles(current, directory.offset, directory); return;
+    }
+    fileChoices(current, directory);
   }
   function insertMarker(marker: string) {
     if (!canRead()) return;
@@ -382,16 +409,36 @@ export function init({root, key, instance, request, changed = () => {}, error = 
   prompt.addEventListener("blur", close, options);
   prompt.addEventListener("keyup", () => { if (query && !validQuery(query)) close(); }, options);
   prompt.addEventListener("keydown", event => {
-    if (event.isComposing || composing || event.ctrlKey || event.metaKey || event.altKey || !popupVisible) return;
+    if (event.isComposing || composing || !popupVisible) return;
     if (!validQuery(query)) { close(); return; }
+    const modified = event.ctrlKey || event.metaKey || event.altKey || event.shiftKey;
+    if (modified && !(event.key === "Enter" && query.marker === "/")) return;
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
     else if (["ArrowDown", "ArrowUp"].includes(event.key) && rows.length) {
       event.preventDefault(); event.stopPropagation(); select((selected + (event.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length);
     } else if (event.key === "Enter" && rows.length) {
       event.preventDefault(); event.stopPropagation(); if (!rows[selected].disabled) rows[selected].choose();
+    } else if (event.key === "Tab" && rows.length && !rows[selected].disabled) {
+      event.preventDefault(); event.stopPropagation(); rows[selected].choose();
     } else if (event.key === "Tab") close();
   }, options);
   const composer = find("#live-composer") || root;
+  composer.addEventListener("submit", event => {
+    if (!prompt.value.startsWith("/")) return;
+    event.preventDefault(); event.stopPropagation();
+    const slashDraft = prompt.value.trim();
+    const slash = /^\/([^\s/]*)$/.exec(slashDraft);
+    const exact = slash?.[1] === undefined ? undefined : matchingCommands(slash[1]).find(item => item.name.toLocaleLowerCase() === `/${slash[1].toLocaleLowerCase()}`);
+    if (exact) {
+      if (!replaceText?.("", 0, prompt.value.length)) { report(`${exact.name} is unavailable in this Web Manager state.`); return; }
+      close(); focusPrompt();
+      if (!command?.(exact.name)) report(`${exact.name} is unavailable in this Web Manager state.`);
+      return;
+    }
+    inspectToken();
+    if (query?.marker === "/" && validQuery(query)) show(query, rows, "Choose a Web Manager command before sending.");
+    else report("Choose a Web Manager command before sending.");
+  }, {...options, capture: true});
   composer.addEventListener("dragover", event => {
     if ([...(event.dataTransfer?.types || [])].includes("Files")) { event.preventDefault(); event.dataTransfer!.dropEffect = canAdd() ? "copy" : "none"; }
   }, options);

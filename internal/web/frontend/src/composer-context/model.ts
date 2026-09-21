@@ -2,6 +2,37 @@ import type {Item} from "./types.ts";
 export const TEXT_LIMIT = 64 * 1024, PROMPT_LIMIT = 128 * 1024, IMAGE_LIMIT = 2 * 1024 * 1024;
 const encoder = new TextEncoder();
 export const bytes = (text: string) => encoder.encode(text).length;
+
+export type ComposerCommand = Readonly<{name: string; description: string}>;
+export const composerCommands: readonly ComposerCommand[] = Object.freeze([
+  {name: "/compact", description: "Compact older conversation context"},
+  {name: "/context", description: "Open context and usage"},
+  {name: "/default", description: "Switch to Default mode"},
+  {name: "/goal", description: "Compose a persistent Thread Goal"},
+  {name: "/model", description: "Choose a model"},
+  {name: "/permissions", description: "Choose the session permission mode"},
+  {name: "/plan", description: "Switch to Plan Mode"},
+  {name: "/processes", description: "Open managed processes"},
+  {name: "/sessions", description: "Open conversation actions"},
+  {name: "/settings", description: "Open Web Manager settings"},
+  {name: "/thinking", description: "Open thinking and response controls"},
+  {name: "/tree", description: "Open conversation versions and branches"},
+]);
+function subsequence(value: string, query: string) {
+  let index = 0;
+  for (const character of value) if (character === query[index]) index++;
+  return index === query.length;
+}
+export function matchingCommands(query: string): ComposerCommand[] {
+  const normalized = query.toLocaleLowerCase().replace(/^\//, "");
+  const exact: ComposerCommand[] = [], prefixes: ComposerCommand[] = [], fuzzy: ComposerCommand[] = [];
+  for (const command of composerCommands) {
+    const name = command.name.slice(1).toLocaleLowerCase();
+    if (!normalized || name.startsWith(normalized)) (name === normalized ? exact : prefixes).push(command);
+    else if (normalized.length >= 3 && subsequence(name, normalized)) fuzzy.push(command);
+  }
+  return [...exact, ...prefixes, ...fuzzy];
+}
 export function validText(text: unknown): text is string {
   if (typeof text !== "string" || text.includes("\0")) return false;
   for (let i = 0; i < text.length; i++) {

@@ -1,6 +1,6 @@
 window.testComposerMentions = async assert => {
   "use strict";
-  const {openContext, $, tick, wait, posts, latest, visible, draft, nativeInsert, key, chips, clear, status, rows, choose, files, skills, send, accept, swap, reading} = contextTest;
+  const {openContext, $, tick, wait, posts, latest, visible, draft, nativeInsert, key, chips, clear, status, rows, choose, files, skills, send, accept, swap, reading, update} = contextTest;
   const before = posts().length;
   draft("literal name@example.com"); await tick();
   assert(posts().length === before && !visible($("[data-composer-mentions]")), "embedded at-sign does not browse files");
@@ -28,7 +28,9 @@ window.testComposerMentions = async assert => {
   await wait(() => chips().length === 1 && !reading());
   assert($("#live-prompt").value === 'Read @"notes.txt"  afterwards', "file choice replaces only caret token, preserving surrounding native text");
   assert(posts("prompt-content").length === 1, "inspected file stays local until Send");
-  await clear(); draft("@"); await tick(); choose("src/");
+  await clear(); draft("@"); await tick();
+  const folderTab = key("Tab");
+  assert(folderTab.defaultPrevented, "plain Tab accepts the selected folder instead of leaving the composer");
   await wait(() => posts("files").length === listCalls + 1, "directory drill-down");
   assert(latest("files").fields.path === "src" && posts("file").length === 1, "folder choice drills listing without reading a file");
   latest("files").resolve(files("src", [{name: "main.go", path: "src/main.go", kind: "file"}])); await wait(() => rows().length === 1);
@@ -38,6 +40,22 @@ window.testComposerMentions = async assert => {
   assert(/truncated|partial/i.test(status()) && !$("#live-prompt").value.includes('main.go"'), "truncated preview is explicitly rejected without inserting completed mention");
   const priorSend = posts("prompt-content").length; send(); await tick();
   assert(posts("prompt-content").length === priorSend, "failed file cannot be silently omitted from a rich Send");
+  await clear();
+
+  const pagedBefore = posts("files").length;
+  draft("@"); await wait(() => posts("files").length === pagedBefore + 1, "unfiltered paged root listing");
+  latest("files").resolve({path: ".", entries: [{name: "first.txt", path: "first.txt", kind: "file"}], next_offset: 256, has_more: true, limited: false});
+  await wait(() => rows().some(row => row.textContent.includes("More files")), "cached first page with more entries");
+  draft("@later");
+  await wait(() => posts("files").length === pagedBefore + 2, "automatic bounded cached next-page search");
+  assert(latest("files").fields.offset === "256", "nonempty @ filter searches past a cached unmatched page without More files");
+  latest("files").resolve(files(".", [{name: "later.txt", path: "later.txt", kind: "file"}]));
+  await wait(() => rows().length === 1 && rows()[0].textContent.includes("later.txt"), "later-page exact file suggestion");
+  const fileTab = key("Tab");
+  assert(fileTab.defaultPrevented, "plain Tab accepts the selected file");
+  await wait(() => !!latest("file") && latest("file").fields.path === "later.txt", "Tab-selected file read");
+  latest("file").resolve({path: "later.txt", text: "later page", size: 10, truncated: false});
+  await wait(() => chips().length === 1 && !reading(), "Tab-selected file attachment");
   await clear();
 
   await openContext("skills"); await wait(() => !!latest("skills"), "explicit installed skills discovery");
@@ -57,8 +75,8 @@ window.testComposerMentions = async assert => {
   assert(input.value === "$rev" && chips().length === 0, "single skill result never auto-inserts or attaches context");
   key("ArrowDown");
   assert(input.getAttribute("aria-activedescendant") === rows()[0].id, "keyboard selection has a valid active-descendant");
-  key("Enter");
-  assert(input.value === "$review " && input.selectionStart === input.value.length && !visible($("[data-composer-mentions]")), "Enter inserts exact skill token plus trailing space, with caret after token");
+  const skillTab = key("Tab");
+  assert(skillTab.defaultPrevented && input.value === "$review " && input.selectionStart === input.value.length && !visible($("[data-composer-mentions]")), "plain Tab inserts the exact skill token plus trailing space");
   assert(posts("prompt").length === 1 && posts("prompt-content").length === priorSend, "skill selection never executes automatically");
   send(); await wait(() => posts("prompt").length === 2);
   assert(latest("prompt").fields.text === "$review " && !Object.hasOwn(latest("prompt").fields, "content"), "selected skill activates only through explicit legacy text Send");
@@ -68,5 +86,27 @@ window.testComposerMentions = async assert => {
   assert(rows().length === 0 && /Settings → Workspaces/i.test($("[data-composer-mentions]").textContent), "disabled runtime skills direct the user to the saved workspace setting without stale rows");
   key("Enter");
   assert(posts("prompt").length === 2 && $("#live-prompt").value === "$", "unavailable skill picker cannot auto-execute");
+  await clear();
+
+  const promptsBeforeCommands = posts("prompt").length;
+  draft("/con"); await wait(() => rows().length === 1 && rows()[0].textContent.includes("/context"), "Web command prefix completion");
+  assert(rows()[0].querySelector('.composer-mention-icon')?.getAttribute('data-kind') === 'command', "slash suggestions use the command presentation");
+  const commandTab = key("Tab");
+  await wait(() => $("[data-telemetry-menu]").getAttribute("aria-expanded") === "true", "Tab-selected context command");
+  assert(commandTab.defaultPrevented && $("#live-prompt").value === "" && posts("prompt").length === promptsBeforeCommands, "command selection clears its token and never sends a provider prompt");
+  key("Escape");
+
+  draft("/login"); await tick();
+  assert(rows().length === 0 && /No matching Web Manager commands/.test($("[data-composer-mentions]").textContent), "TUI-only provider login is not advertised in the Web command catalog");
+  send(); await tick();
+  assert(posts("prompt").length === promptsBeforeCommands && $("#live-prompt").value === "/login", "unsupported slash text is blocked from accidental provider submission while command completion is open");
+  draft("/login now"); send(); await tick();
+  assert(posts("prompt").length === promptsBeforeCommands && $("#live-prompt").value === "/login now", "argument-bearing unsupported slash text remains command-only instead of becoming a provider prompt");
+  draft(""); await tick();
+
+  draft("/plan"); await wait(() => rows().length === 1, "exact Plan command");
+  send(); await wait(() => !!latest("mode"), "Send-click Plan command dispatch after prompt blur");
+  assert(latest("mode").fields.mode === "plan" && posts("prompt").length === promptsBeforeCommands, "Send-click slash command delegates to the existing typed mode owner, not prompt transport");
+  update({mode: "plan"}); latest("mode").resolve(fixture.snapshot); await tick();
   await clear();
 };

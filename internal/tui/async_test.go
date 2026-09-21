@@ -21,12 +21,17 @@ func TestMentionDiscoveryIsAsyncAndIgnoresStaleEditorState(t *testing.T) {
 	m.asyncIO = true
 	m.editor.SetValue("read @no")
 	cmd := m.refreshInputCompletions()
-	if cmd == nil || !m.mentionLoading {
-		t.Fatalf("mention discovery cmd=%v loading=%v", cmd != nil, m.mentionLoading)
+	if cmd == nil || !m.mentionLoading || !strings.Contains(stripANSI(m.renderMentionPicker()), "searching project files") {
+		t.Fatalf("mention discovery cmd=%v loading=%v picker=%q", cmd != nil, m.mentionLoading, m.renderMentionPicker())
 	}
-	// The user removed the token before the walk completed. The response is
-	// still useful for the cache, but must not reopen the picker.
+	// The user removed the token before the walk completed. Loading remains
+	// active for the reusable cache, but its stale presentation disappears.
 	m.editor.SetValue("read ")
+	m.refreshInputCompletions()
+	if got := m.renderMentionPicker(); got != "" {
+		t.Fatalf("stale loading picker remained after deleting @ token: %q", got)
+	}
+	// The response is still useful for the cache, but must not reopen the picker.
 	m.Update(cmd())
 	if m.mentionLoading || m.mentionVisible {
 		t.Fatalf("stale mention result reopened picker: loading=%v visible=%v", m.mentionLoading, m.mentionVisible)

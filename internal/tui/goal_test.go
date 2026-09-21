@@ -8,6 +8,24 @@ import (
 	"testing"
 )
 
+func TestBusyGoalControlAcceptsUnicodeWhitespace(t *testing.T) {
+	testHome(t)
+	m := newModel(context.Background(), app.Options{})
+	a, err := app.New(t.Context(), app.Options{Provider: "fake", Permission: "allow", CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.app = a
+	defer a.Close()
+	m.runCommand("/goal objective")
+	m.busy = true
+	m.editor.SetValue("/goal\u2003pause")
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd != nil || m.goal == nil || m.goal.Status != protocol.GoalPaused || m.editor.Value() != "" {
+		t.Fatalf("busy Unicode goal control: cmd=%v goal=%+v editor=%q", cmd != nil, m.goal, m.editor.Value())
+	}
+}
+
 func TestTUIGoalCommandsAndReplacementConfirmation(t *testing.T) {
 	testHome(t)
 	m := newModel(context.Background(), app.Options{})

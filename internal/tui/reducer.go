@@ -527,7 +527,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.layout()
 		}
 	case mentionFilesMsg:
-		if msg.generation != m.mentionGeneration || m.app == nil || msg.cwd != m.app.CWD() {
+		if msg.generation != m.mentionGeneration || m.app == nil || msg.cwd != m.app.ProjectInputRoot {
 			return m, nil
 		}
 		m.mentionLoading = false

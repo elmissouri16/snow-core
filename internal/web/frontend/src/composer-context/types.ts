@@ -9,6 +9,7 @@ export type API = {
   replaceText?(value: string, start: number, end: number): boolean;
   focusPrompt?(): void;
   suggestions?(state: Suggestions): void;
+  command?(name: string): boolean;
 };
 export type Item = {
   id: number; version: number; label: string; state: 'pending' | 'ready' | 'error'; size: number;
@@ -30,7 +31,7 @@ export type Query = {
 };
 export type Choice = {
   id?: string; label: string; title?: string; folder?: boolean; description?: string;
-  fullDescription?: string; disabled?: boolean; retrySkills?: boolean; choose(): void;
+  fullDescription?: string; disabled?: boolean; retrySkills?: boolean; command?: string; choose(): void;
 };
 export type Entry = {kind: string; path: string; name: string};
 export type Directory = {path: string; entries: Entry[]; offset: number; hasMore: boolean; limited: boolean};

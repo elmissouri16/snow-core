@@ -1,5 +1,14 @@
 # Known bugs
 
+## BUG-242: Composer completion is inconsistent across TUI and Web Manager
+
+- **Status:** Resolved — both composers now provide bounded command and project-path completion.
+- **Severity:** Medium
+- **Surface:** TUI and Web Manager slash-command and `@` path completion
+- **Evidence:** The Web Manager tokenizer recognized only `@` and `$`, so a leading slash command had no completion and ordinary Send forwarded it to the provider as user text. Its paged `@` picker filtered only already-loaded directory entries, hiding exact files or folders on later pages until **More files…** was selected repeatedly, and Tab dismissed instead of accepting a result. The TUI recursively cached only regular files, so bare `@` produced a flat repository-wide list and directories could not be selected to browse; its command palette also consumed the first Enter on an unmatched command, recognized only ASCII space as an argument boundary, and truncated plugin command descriptions by bytes.
+- **Fix:** The Web composer now exposes only its browser-native typed controls as slash commands, executes exact commands without provider submission, blocks unsupported/incomplete/argument-bearing slash drafts across keyboard and real Send-button focus transitions, auto-pages bounded `@` searches, and accepts enabled rows with plain Tab or Enter. The TUI now browses bounded breadth-first file/folder results, handles caret-local quoted paths and Unicode whitespace, safely renders untrusted metadata, and expands up to eight distinct UTF-8 text attachments within per-file and aggregate limits through a canonical, pinned project root. Symlinks, namespace replacements, invalid-byte names, duplicate/failing reads, control content, and stale asynchronous picker state fail closed or receive explicit omission markers; palette output remains width-bounded down to one terminal cell.
+- **Verification:** `go test ./...` and `go vet ./...` pass after the final review fixes. The focused completion/mention race suite passes in 3.273s; full-package race attempts exceeded the 120-second command limit and have no pass/fail result. The frontend build/typecheck/check pass, all 128 frontend tests pass, and the production browser suite passes 109 functional, 29 visual and 32 thumbnail assertions with zero failures. All 70 support-script tests and the configured benchmark regression guard pass.
+
 ## BUG-241: Trusted saved-conversation selection stops at a redundant Resume form
 
 - **Status:** Resolved — deliberate trusted selection now resumes directly.

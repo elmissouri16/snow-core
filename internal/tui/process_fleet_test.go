@@ -67,13 +67,23 @@ func TestProcessesCommandOpensFleet(t *testing.T) {
 }
 
 func TestProcessesCommandOpensDuringActiveTurn(t *testing.T) {
-	m := processFleetTestModel(t)
-	m.closeProcessFleet()
-	m.busy = true
-	m.editor.SetValue("/processes")
-	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !m.processFleetOpen || cmd == nil {
-		t.Fatalf("busy process command: open=%v cmd=%v", m.processFleetOpen, cmd != nil)
+	for _, tc := range []struct {
+		name, input, target string
+	}{
+		{name: "no argument", input: "/processes"},
+		{name: "tab", input: "/processes\tdev-server", target: "dev-server"},
+		{name: "Unicode whitespace", input: "/processes\u2003dev-server", target: "dev-server"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := processFleetTestModel(t)
+			m.closeProcessFleet()
+			m.busy = true
+			m.editor.SetValue(tc.input)
+			_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+			if !m.processFleetOpen || m.processFleetRequested != tc.target || cmd == nil {
+				t.Fatalf("busy process command: open=%v target=%q cmd=%v", m.processFleetOpen, m.processFleetRequested, cmd != nil)
+			}
+		})
 	}
 }
 

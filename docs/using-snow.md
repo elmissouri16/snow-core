@@ -191,10 +191,18 @@ in-memory process. Development builds can check but never replace themselves.
 
 ## Use composer completions
 
-Type `@` to find project files. Enter or Tab inserts the selected path without
-submitting the prompt. Whitespace-delimited `@path` tokens use the active theme's
-accent color while you type, so referenced files and folder paths stand apart
-from ordinary prompt text.
+Type `@` to browse project files and folders. A bare `@` shows direct children;
+selecting a folder keeps the picker open at that path, while Enter or Tab on a
+file inserts the selected reference without submitting the prompt. Completion
+follows the caret, so an earlier reference can be edited without losing later
+prose. Paths containing whitespace are inserted as quoted `@"path name"`
+references. Submitted regular text-file references are resolved through a
+pinned, confined project root rather than trusting the bounded suggestion cache;
+symlinks, path replacement races, nonregular files, invalid UTF-8, and NUL
+content fail closed. Snow attaches at most eight distinct files and 1 MiB of
+file text per prompt, with a 256 KiB per-file limit and an explicit truncation
+or omission marker. Empty text files remain valid attachments. `@path` tokens
+use the active theme's accent color while you type.
 
 Type `$` after whitespace to find enabled Agent Skills. Enter or Tab inserts
 the selected `$skill-name`. An exact whitespace-delimited skill token in a
@@ -1019,19 +1027,33 @@ file rows are compact, and skill summaries stay on one line (hover for the full
 description). Idle keyboard guidance remains available to assistive technology;
 connection, request-outcome, and in-progress notices remain visible.
 
+- **`/` Web commands:** start an otherwise empty draft with `/` to search the
+  browser-native command palette. It exposes only capabilities with an existing
+  typed Web owner—context/compaction, Default or Plan mode, goals, model,
+  permissions, processes, conversations, settings, thinking, and versions. A
+  selected command invokes that owner and is never sent as a provider prompt;
+  TUI-only commands such as `/login`, `/plugins`, `/mcp`, and `/agent` are not
+  advertised. A draft that starts with `/` remains command-only: sending an
+  incomplete, unsupported, or argument-bearing Web command asks you to choose
+  instead of forwarding slash text to the provider, including after Send moves
+  focus away from the composer.
 - **`@` project files:** type `@` or choose **Add context → Project files**, filter the current folder and
   select a directory to browse deeper. Selecting a file reads and attaches its
   complete bounded text, and inserts a quoted project-relative reference.
   Simply typing a path does not read it. The existing Files inspector's
   protected-path, symlink and identity checks apply; truncated previews cannot
-  be attached. Listings scan 256 entries per page with a 4,096-entry cap.
+  be attached. Listings scan 256 entries per page with a 4,096-entry cap. A
+  nonempty filter automatically consumes additional bounded pages until it
+  finds a match, exhausts the directory, or reaches that cap; unfiltered
+  browsing retains the explicit **More files…** row.
 - **`$` skills:** type `$` or choose **Add context → Installed skills** to search installed skill names.
   Select a suggestion to insert an exact `$name ` token; selection alone does
   not activate the skill or send a message. Disabled entries cannot be selected.
   A disabled runtime explains how to enable skills at its next explicit start.
-- **Keyboard:** arrows move through suggestions, Enter picks a result, Escape
-  dismisses them, and Ctrl/⌘+Enter retains explicit Send. Native text editing and
-  IME composition are preserved.
+- **Keyboard:** arrows move through suggestions; plain Enter or Tab picks an
+  enabled result; Escape dismisses the popup. Modified Tab, native text editing,
+  and IME composition retain browser behavior. Ctrl/⌘+Enter remains explicit
+  Send except while choosing an open slash command.
 
 Attachments stay in tab memory, independently for each project/conversation;
 there are no disk uploads or automatic sends. Sending forwards their contents

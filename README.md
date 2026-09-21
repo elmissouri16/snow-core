@@ -90,8 +90,9 @@ Host-backed model choices, conversation creation/renaming/switching,
 authoritative Plan Mode controls and usage/context indicators share that worker.
 Click the model selector to load a searchable, provider-grouped list directly;
 filter by name, model ID or provider without a separate loading step.
-The composer accepts bounded text/image attachments, `@` project-file selection
-and `$` installed-skill suggestions. Skills require explicit per-start opt-in;
+The composer accepts bounded text/image attachments, browser-native `/` command
+shortcuts, hierarchical `@` project file/folder selection, and `$` installed-skill
+suggestions. Installed skills follow the workspace's saved next-start policy;
 file contents are sent only with your prompt, not when merely browsing choices.
 A read-only Files / Changes inspector shows bounded host file previews and Git
 diffs without activating an agent. Browser pairing survives restarts; reconnects

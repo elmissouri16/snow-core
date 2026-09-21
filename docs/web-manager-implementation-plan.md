@@ -187,8 +187,15 @@ and dimensions are checked without pixel decompression. File labels stay in
 content blocks, never in explicit skill-mention input. Public snapshots omit
 image bytes. Queue/edit/reuse remain text-only and cannot silently drop context.
 `@` suggestions reuse the existing authenticated Files inspection POSTs, folder
-pagination and pinned-root protections; explicit selection captures complete
-bounded UTF-8 content, rejecting truncated previews. `$` uses an instance-bound
+pagination and pinned-root protections; a nonempty filter advances through
+bounded pages until a match, exhaustion or the existing 4,096-entry scan cap.
+Explicit selection captures complete bounded UTF-8 content, rejecting truncated
+previews. Plain Tab and Enter accept enabled `/`, `@`, and `$` rows while modified
+Tab and IME retain native behavior. The `/` catalog contains only Web-native
+commands and delegates to their existing typed controls. Drafts beginning with
+`/` stay command-only across keyboard submission and the Send button's focus
+transition, so selected, incomplete, unsupported, and argument-bearing slash
+text never becomes a provider prompt; TUI-only commands remain absent. `$` uses an instance-bound
 100-entry metadata projection from RPC `skills` and inserts exact tokens without
 activation. The workspace's saved next-start policy admits three lifecycle tools;
 Settings → Workspaces changes future starts without a repeated activation checkbox.

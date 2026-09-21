@@ -101,8 +101,10 @@ func (m *Model) updateComposerEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	textMayChange := composerEditorKeyMayChange(msg, m.editor.KeyMap)
 	previous := m.editor.Value()
+	previousLine, previousColumn := m.editor.Line(), m.editor.Column()
 	cmd := m.updateEditor(msg)
 	current := m.editor.Value()
+	cursorMoved := previousLine != m.editor.Line() || previousColumn != m.editor.Column()
 	if current != previous {
 		m.resetInputHistoryNavigation()
 		m.prunePastedTextAttachments(current)
@@ -112,7 +114,7 @@ func (m *Model) updateComposerEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	var mentionCmd tea.Cmd
-	if textMayChange {
+	if textMayChange || cursorMoved {
 		mentionCmd = m.refreshInputCompletionsFor(current)
 	}
 	if msg.Code == 'v' && msg.Mod.Contains(tea.ModCtrl) {
@@ -246,12 +248,14 @@ func (m *Model) refreshMentionsFor(text string) tea.Cmd {
 	if m.app == nil {
 		return nil
 	}
-	query, _, ok := mentionQuery(text)
+	caret := composerCaretByteOffset(text, m.editor.Line(), m.editor.Column())
+	token, ok := mentionQueryAt(text, caret)
 	if !ok {
 		return nil
 	}
-	cwd := m.app.CWD()
-	if !m.mentionFilesLoaded || m.mentionFilesCWD != cwd {
+	root := m.app.ProjectInputRoot
+	m.mentionVisible = true
+	if !m.mentionFilesLoaded || m.mentionFilesCWD != root {
 		if m.mentionLoading {
 			return nil
 		}
@@ -260,29 +264,29 @@ func (m *Model) refreshMentionsFor(text string) tea.Cmd {
 		generation := m.mentionGeneration
 		return func() tea.Msg {
 			return mentionFilesMsg{
-				cwd: cwd, generation: generation,
-				files: discoverMentionFiles(cwd),
+				cwd: root, generation: generation,
+				files: discoverMentionFiles(root),
 			}
 		}
 	}
-	m.mentionMatches = matchMentionFiles(m.mentionFiles, query)
-	m.mentionVisible = len(m.mentionMatches) > 0
+	m.mentionMatches = matchMentionFiles(m.mentionFiles, token.query)
 	return nil
 }
 
 func (m *Model) insertMention(path string) (tea.Model, tea.Cmd) {
 	m.resetInputHistoryNavigation()
 	text := m.editor.Value()
-	_, start, ok := mentionQuery(text)
+	caret := composerCaretByteOffset(text, m.editor.Line(), m.editor.Column())
+	token, ok := mentionQueryAt(text, caret)
 	if !ok {
 		return m, nil
 	}
-	m.editor.SetValue(replaceMentionToken(text, start, path))
-	m.editor.CursorEnd()
+	next, nextCaret := replaceMentionToken(text, token.start, token.end, path)
+	m.editor.SetValue(next)
+	setComposerCaret(&m.editor, next, nextCaret)
 	m.mentionVisible = false
 	m.mentionMatches = nil
-	m.refreshInputCompletions()
-	return m, nil
+	return m, m.refreshInputCompletions()
 }
 
 func (m *Model) handleLoginProfileKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -554,7 +558,7 @@ func (m *Model) expandedPrompt(text string) string {
 	if m.app == nil {
 		return text
 	}
-	return expandMentionPrompt(text, m.app.CWD(), m.mentionFiles)
+	return expandMentionPrompt(text, m.app.ProjectInputRoot)
 }
 
 func (m *Model) submitQueuedInput(text, fullText string, kind protocol.QueuedInputKind) tea.Cmd {

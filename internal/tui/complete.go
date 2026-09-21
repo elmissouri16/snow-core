@@ -3,6 +3,7 @@ package tui
 import (
 	"slices"
 	"strings"
+	"unicode"
 )
 
 // commandSpec describes one slash command for the completion palette.
@@ -98,7 +99,7 @@ func isCommandPrefix(text string) bool {
 	if !strings.HasPrefix(text, "/") {
 		return false
 	}
-	return !strings.Contains(text, " ")
+	return strings.IndexFunc(text, unicode.IsSpace) < 0
 }
 
 // commandByExact returns the command spec for an exact command name match.
@@ -125,13 +126,13 @@ func formatCommandListWithKeys(keys tuiKeyMap, extra ...commandSpec) string {
 	b.WriteString("Commands\n")
 	for _, c := range combinedCommands(extra) {
 		b.WriteString("  ")
-		b.WriteString(c.name)
+		b.WriteString(sanitizeTerminalLine(c.name))
 		if c.argHint != "" {
 			b.WriteString(" ")
-			b.WriteString(c.argHint)
+			b.WriteString(sanitizeTerminalLine(c.argHint))
 		}
 		b.WriteString(" — ")
-		b.WriteString(c.desc)
+		b.WriteString(sanitizeTerminalLine(c.desc))
 		b.WriteByte('\n')
 	}
 	b.WriteString("\nComposer\n")
@@ -157,26 +158,25 @@ func renderCompletions(matches []string, selected int, width int, extra ...comma
 		return ""
 	}
 	if len(matches) == 0 {
-		return styleCompletion.Render("  no matching commands")
+		return styleCompletion.Render(truncateDisplayText("  no matching commands", width))
 	}
 	var b strings.Builder
 	for i, name := range matches {
 		spec, ok := commandByExact(name, extra...)
-		line := name
+		line := sanitizeTerminalLine(name)
 		if ok {
-			line = name + "  " + spec.desc
+			line += "  " + sanitizeTerminalLine(spec.desc)
 			if spec.argHint != "" {
-				line += "  (" + spec.argHint + ")"
+				line += "  (" + sanitizeTerminalLine(spec.argHint) + ")"
 			}
 		}
-		if width > 2 && len(line) > width-2 {
-			line = line[:width-3] + "…"
-		}
+		prefix := "  "
+		style := styleCompletion
 		if i == selected {
-			b.WriteString(styleCompletionSelected.Render("› " + line))
-		} else {
-			b.WriteString(styleCompletion.Render("  " + line))
+			prefix = "› "
+			style = styleCompletionSelected
 		}
+		b.WriteString(style.Render(truncateDisplayText(prefix+line, width)))
 		b.WriteString("\n")
 	}
 	return strings.TrimSuffix(b.String(), "\n")

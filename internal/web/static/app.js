@@ -916,6 +916,27 @@
       },
       focusPrompt: () => { if (valid()) $("#live-prompt")?.focus({preventScroll: true}); },
       suggestions: state => { if (valid()) window.SnowLiveView?.updateSuggestions(state); },
+      command: name => {
+        if (!valid() || !mutationSafe() || current.status !== "idle") return false;
+        const activate = selector => {
+          if (!selector) return false;
+          const button = document.querySelector(selector);
+          if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+          button.click(); return true;
+        };
+        if (name === "/plan" || name === "/default") {
+          if (!activate("[data-mode-menu]")) return false;
+          return activate(`[data-menu-key="${name.slice(1)}"]`);
+        }
+        const selectors = {
+          "/compact": "[data-compaction-open]", "/context": "[data-telemetry-menu]",
+          "/goal": "[data-goal-toggle]", "/model": "[data-model-menu]",
+          "/permissions": "[data-permission-policy-menu]", "/processes": "[data-processes-open]",
+          "/sessions": "[data-session-menu]", "/settings": "[data-settings-open]",
+          "/thinking": "[data-reasoning-open]", "/tree": "[data-versions-open]"
+        };
+        return activate(selectors[name]);
+      },
       changed: () => { if (valid()) { saveDraft(); updateControls(); window.SnowScroll?.afterUpdate(); } },
       error: message => { if (valid()) liveError(message); },
       request: async (kind, fields) => {

@@ -4,7 +4,7 @@ import type {Choice, Item} from './types.ts';
 export function MentionIcon({kind}: {kind: string}) {
   return <span className="composer-mention-icon" aria-hidden="true" data-kind={kind}>
     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-      {kind === 'skill' ? <path d="m9 5 2 5 5 2-5 2-2 5-2-5-5-2 5-2 2-5Z M19 2l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3Z" /> : kind === 'folder' ? <path d="M3 6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /> : <><rect x="5" y="3" width="14" height="18" rx="3" /><path d="M8 8h8M8 12h6" /></>}
+      {kind === 'skill' ? <path d="m9 5 2 5 5 2-5 2-2 5-2-5-5-2 5-2 2-5Z M19 2l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3Z" /> : kind === 'command' ? <path d="m5 7 4 5-4 5M11 17h8" /> : kind === 'folder' ? <path d="M3 6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /> : <><rect x="5" y="3" width="14" height="18" rx="3" /><path d="M8 8h8M8 12h6" /></>}
     </svg>
   </span>;
 }
@@ -31,11 +31,11 @@ export function ContextPanel({state: s, actions: a, refs}: {state: Presentation;
       </div>)}
     </div>
     <div className={`composer-context-status${s.error ? ' is-error' : ''}`} data-composer-context-status role="status" aria-live="polite" hidden={!s.notice} title={s.privacy}>{s.notice}</div>
-    <div id="composer-mentions" className="composer-mentions" data-composer-mentions role="listbox" aria-label="Files and installed skills" hidden={!s.popupVisible} ref={refs.popup} style={s.popupStyle}>
+    <div id="composer-mentions" className="composer-mentions" data-composer-mentions role="listbox" aria-label="Commands, files, folders, and installed skills" hidden={!s.popupVisible} ref={refs.popup} style={s.popupStyle}>
       {s.message && <div className={s.heading ? 'composer-mention-heading' : 'composer-mention-note'}>{s.message}</div>}
       {s.rows.map((choice, index) => <div key={choice.id} id={choice.id} className="composer-mention-option" role="option" aria-selected={index === s.selected} aria-disabled={choice.disabled || undefined} data-composer-skills-retry={choice.retrySkills ? '' : undefined}
         title={[choice.title || choice.label, choice.fullDescription ?? choice.description].filter(Boolean).join(' — ')} onMouseDown={event => event.preventDefault()} onClick={() => a.choose(choice)}>
-        <MentionIcon kind={choice.folder ? 'folder' : s.marker === '$' ? 'skill' : 'file'} />
+        <MentionIcon kind={choice.folder ? 'folder' : s.marker === '$' ? 'skill' : s.marker === '/' ? 'command' : 'file'} />
         <span className="composer-mention-main"><span className="composer-mention-name" title={choice.label}>{choice.label}</span>
           {choice.description && <span className="composer-mention-description" title={choice.fullDescription ?? choice.description}>{choice.description}</span>}
         </span>

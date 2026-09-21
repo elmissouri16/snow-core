@@ -716,7 +716,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case msg.Code == tea.KeyEnter:
 			if len(m.compMatches) == 0 {
 				m.compVisible = false
-				return m, nil
+				return m.runCommand(m.editor.Value())
 			}
 			return m.pickCompletion(m.compMatches[m.compIndex])
 		}
@@ -836,10 +836,15 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.lastStatus = "waiting for openai-compatible model discovery"
 		return m, nil
 	}
-	goalControl := m.busy && (strings.HasPrefix(trimmed, "/goal pause") || strings.HasPrefix(trimmed, "/goal clear") || strings.HasPrefix(trimmed, "/goal edit"))
-	initControl := m.busy && (trimmed == "/init" || strings.HasPrefix(trimmed, "/init "))
-	keybindingsControl := m.busy && (trimmed == "/keybindings" || strings.HasPrefix(trimmed, "/keybindings "))
-	processInspectorControl := m.busy && (trimmed == "/processes" || strings.HasPrefix(trimmed, "/processes "))
+	fields := strings.Fields(trimmed)
+	command := ""
+	if len(fields) > 0 {
+		command = fields[0]
+	}
+	goalControl := m.busy && command == "/goal" && len(fields) > 1 && (fields[1] == "pause" || fields[1] == "clear" || fields[1] == "edit")
+	initControl := m.busy && command == "/init"
+	keybindingsControl := m.busy && command == "/keybindings"
+	processInspectorControl := m.busy && command == "/processes"
 	busyControl := goalControl || initControl || keybindingsControl || processInspectorControl
 	if abortKey && m.busy {
 		m.requestAbort()
