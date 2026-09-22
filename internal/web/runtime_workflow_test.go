@@ -85,6 +85,46 @@ func TestRuntimeWorkflowChoicesModelModeRenameAndPlan(t *testing.T) {
 	}
 }
 
+func TestRuntimeWorkflowRejectsSwitchWithIdleChildPermission(t *testing.T) {
+	m, projects, log := runtimeTestManager(t, "workflow")
+	p := projects[0]
+	snapshot, err := m.Open(t.Context(), p, "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := m.runtime(p.ID, snapshot.InstanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.mu.Lock()
+	r.busy = false
+	r.snapshot.Status = "permission"
+	r.snapshot.Permission = &RuntimePermission{ID: "child-permission", AgentPath: "/root/child", Tool: "bash"}
+	r.permissionAgent = &protocol.AgentRef{ThreadID: "child-thread", ParentThreadID: "root-thread", Path: "/root/child", ParentPath: protocol.RootAgentPath, Depth: 1}
+	r.mu.Unlock()
+	before, _ := os.ReadFile(log)
+	if _, err := m.Switch(t.Context(), p.ID, snapshot.InstanceID, "saved", true); !errors.Is(err, ErrRuntimeBusy) {
+		t.Fatalf("switch with child permission = %v", err)
+	}
+	after, _ := os.ReadFile(log)
+	if string(before) != string(after) {
+		t.Fatal("blocked child-permission switch reached RPC")
+	}
+
+	r.mu.Lock()
+	r.clearPermissionLocked()
+	r.snapshot.Status = "idle"
+	r.activeChildren = map[string]protocol.AgentStatus{"child-thread": protocol.AgentRunning}
+	r.mu.Unlock()
+	if _, err := m.Switch(t.Context(), p.ID, snapshot.InstanceID, "saved", false); !errors.Is(err, ErrRuntimeBusy) {
+		t.Fatalf("switch with running child = %v", err)
+	}
+	afterActive, _ := os.ReadFile(log)
+	if string(after) != string(afterActive) {
+		t.Fatal("blocked running-child switch reached RPC")
+	}
+}
+
 func TestRuntimeWorkflowSwitchConfirmationRotationAndStaleControls(t *testing.T) {
 	m, projects, log := runtimeTestManager(t, "workflow")
 	p := projects[0]

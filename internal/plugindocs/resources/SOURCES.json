@@ -10,7 +10,7 @@
     {
       "source": "docs/goals.md",
       "resource": "docs/goals.md",
-      "sha256": "ed2ba206d342fd4ba768f41c3369c28802e82e8a2785ece21b5e43d905ff99db"
+      "sha256": "cae7020a1813ce4b2c9955e5cf55b6093bb676206c94a352a730e2a20ed80dec"
     },
     {
       "source": "docs/plan-mode.md",
@@ -35,7 +35,7 @@
     {
       "source": "docs/rpc.md",
       "resource": "docs/rpc.md",
-      "sha256": "890c3cb4bb1c175f2ab9925c67115490f3535a7e1c700dcb38ffebccb51ceeef"
+      "sha256": "849073532647aa1dfb6156cf4717121a87108b2bb713df4528f15705a8d9bfc0"
     },
     {
       "source": "docs/sdk-reference.md",
@@ -50,7 +50,7 @@
     {
       "source": "docs/security.md",
       "resource": "docs/security.md",
-      "sha256": "3b0d2fc5805d17f0bf7a6677abd1c8cfd501d026fca0000bc79a98ee61dc7dfc"
+      "sha256": "c479ac7535198016e90b9dce1945a5b4db4ee5e3862683b0400a58870f7b11cd"
     },
     {
       "source": "docs/sessions.md",
@@ -65,7 +65,7 @@
     {
       "source": "docs/subagents.md",
       "resource": "docs/subagents.md",
-      "sha256": "a7cba963ded5abc45d073c1fafa7054375b2289a9e0ea7593375afa34611f5d1"
+      "sha256": "2592aa39523b46f84199b41506050cd0e0555ad6ce6e5c317a864a4540856f55"
     },
     {
       "source": "docs/tool-routing.md",

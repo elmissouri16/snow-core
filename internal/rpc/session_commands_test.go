@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/elmissouri16/snow-core/internal/app"
+	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
@@ -43,6 +44,10 @@ func TestRPCIndependentSessionManagementByID(t *testing.T) {
 		ID: "rename-created", Type: "session_rename",
 		Params: jsonv1.RawMessage(`{"name":"created"}`),
 	})
+	metadata := a.Session.(session.MetadataStore)
+	if err := metadata.SetMetadata(sessionModelMetadataKey, `{"version":1,"provider":"fake","model":"fake-1"}`); err != nil {
+		t.Fatal(err)
+	}
 
 	listed := handleSessionRequest(t, srv, &output, Request{ID: "list", Type: "sessions_list"})
 	sessions, ok := listed["sessions"].([]any)
@@ -69,6 +74,13 @@ func TestRPCIndependentSessionManagementByID(t *testing.T) {
 	})
 	if opened["session_id"] != originalID || opened["active"] != true || a.Session.ID() != originalID {
 		t.Fatalf("session_open data = %+v, active = %q", opened, a.Session.ID())
+	}
+	err = srv.handle(t.Context(), Request{
+		ID: "open-malformed", Type: "session_open",
+		Params: jsonv1.RawMessage(`{"session_id":"` + createdID + `"}`),
+	})
+	if err == nil || rpcErrorCode(err) != "invalid" || a.Session.ID() != originalID {
+		t.Fatalf("malformed selection changed active session: err=%v code=%q active=%q", err, rpcErrorCode(err), a.Session.ID())
 	}
 	renamed := handleSessionRequest(t, srv, &output, Request{
 		ID: "rename-inactive", Type: "session_rename",

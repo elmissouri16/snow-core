@@ -42,7 +42,7 @@ func runMessageEditFixtureWorker(directory string) int {
 		return 91
 	}
 	opts, err := policyFixtureOptions(os.Args[1:])
-	if err != nil || opts.Provider != "fake" || opts.Model != "fake-1" || !opts.NoSession || !opts.NoPlugins || !opts.NoMCP || !opts.NoSkills || opts.Subagents == nil || *opts.Subagents {
+	if err != nil || opts.Provider != "fake" || opts.Model != "fake-1" || !opts.NoSession || !opts.NoPlugins || opts.NoMCP || !opts.NoSkills || opts.Subagents == nil || !*opts.Subagents {
 		return 92
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)

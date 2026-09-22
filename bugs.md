@@ -1,5 +1,14 @@
 # Known bugs
 
+## BUG-248: Web conversations forget their selected model after restart
+
+- **Status:** Resolved — explicit reopen restores the conversation-owned model selection.
+- **Severity:** Medium
+- **Surface:** Web Manager conversation model selection and explicit session reopen
+- **Evidence:** `session_set_model` previously changed only the worker's in-memory provider/model transaction. It deliberately avoided operator configuration but wrote no conversation-owned state, so restarting the manager and explicitly reopening the same saved session started with the host/project default model instead.
+- **Fix:** `session_set_model` now writes the exact catalog-backed provider/model/compatible-effort tuple as bounded, provider-excluded session metadata without rewriting host defaults. `session_open` preflights and resolves that metadata before committing the switch, reapplies fresh catalog capabilities, safely adapts withdrawn effort levels, and rolls back a preapplied model if the session switch fails. Malformed or unavailable selections fail without changing the active session; a metadata-write failure restores the prior live model.
+- **Verification:** Existing RPC selection coverage now verifies metadata persistence without operator-config writes, fresh metadata reapplication and safe effort restoration. Focused durable-session coverage closes and reconstructs the app, explicitly reopens the saved session and observes its selected model; malformed metadata is also verified not to change the active session. Affected and full Go tests, race-enabled app/RPC tests, `go vet ./...`, all 70 Python support tests, plugin-resource synchronization, the benchmark guard, independent review and `git diff --check` pass.
+
 ## BUG-247: OpenCode Zen models reject non-OpenCode clients
 
 - **Status:** Resolved — OpenCode Zen is disabled in Snow.

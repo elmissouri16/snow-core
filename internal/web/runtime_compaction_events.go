@@ -170,8 +170,15 @@ func (r *liveRuntime) finishCompactionLocked() {
 	}
 	r.compaction.active = false
 	r.busy, r.transitioning = false, false
-	r.snapshot.Status = "idle"
-	r.snapshot.Permission, r.snapshot.Input = nil, nil
+	if r.permissionAgent == nil {
+		r.clearPermissionLocked()
+	}
+	r.snapshot.Input = nil
+	if r.snapshot.Permission != nil {
+		r.snapshot.Status = "permission"
+	} else {
+		r.snapshot.Status = "idle"
+	}
 	r.clearTurnCancelLocked()
 	out := r.snapshot.Compaction
 	out.State, out.SummarizedMessages, out.RetainedMessages, out.UsedFallback = c.Status, c.SummarizedMessages, c.RetainedMessages, c.UsedFallback

@@ -48,6 +48,35 @@ func assertProjectTrust(t *testing.T, r *Registry, id string, remembered, truste
 	t.Fatal("project missing from list")
 }
 
+func TestRegistryTrustRevokedWhenRuntimeAuthorityExpands(t *testing.T) {
+	r, p, manager := trustTestProject(t)
+	if err := r.RememberProjectTrust(t.Context(), p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.ExecContext(t.Context(), `DELETE FROM runtime_profile_consent`); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r = registryTestOpen(t, manager)
+	assertProjectTrust(t, r, p.ID, false, false)
+	var version int
+	if err := r.db.QueryRowContext(t.Context(), `SELECT version FROM runtime_profile_consent WHERE singleton=1`).Scan(&version); err != nil || version != runtimeProfileConsentVersion {
+		t.Fatalf("runtime profile consent version = %d, err=%v", version, err)
+	}
+	// Simulate an older binary writing trust without per-row profile consent
+	// while the database-level marker remains from a newer run.
+	if _, err := r.db.ExecContext(t.Context(), `INSERT INTO project_trust(project_id,path,device,inode) VALUES(?,?,?,?)`, p.ID, p.Path, p.device, p.inode); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r = registryTestOpen(t, manager)
+	assertProjectTrust(t, r, p.ID, false, false)
+}
+
 func TestRegistryTrustPersistsExplicitly(t *testing.T) {
 	r, p, manager := trustTestProject(t)
 	if p.Trusted || p.TrustRemembered {

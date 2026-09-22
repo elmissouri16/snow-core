@@ -47,7 +47,7 @@ func managerExecutionOptions(args []string) (app.Options, string, error) {
 	for _, name := range []string{"mode", "rpc-startup", "permission", "provider", "model"} {
 		cmd.Flags().String(name, "", "")
 	}
-	for _, name := range []string{"no-session", "no-plugins", "no-mcp", "no-skills", "no-subagents", "no-debug", "managed-explicit-goals"} {
+	for _, name := range []string{"no-session", "no-plugins", "no-mcp", "no-skills", "subagents", "no-subagents", "no-debug", "managed-explicit-goals"} {
 		cmd.Flags().Bool(name, false, "")
 	}
 	cmd.Flags().StringSlice("tools", nil, "")
@@ -86,7 +86,7 @@ func managerExecutionWorker(directory string) int {
 		}
 		return 0
 	}
-	if startup != "eager" || opts.Provider != "fake" || opts.Model != "fake-1" || !opts.ManagedExplicitGoals || !opts.NoSession || !opts.NoPlugins || !opts.NoMCP || !opts.NoSkills || opts.Subagents == nil || *opts.Subagents || opts.Debug == nil || *opts.Debug {
+	if startup != "eager" || opts.Provider != "fake" || opts.Model != "fake-1" || !opts.ManagedExplicitGoals || !opts.NoSession || !opts.NoPlugins || opts.NoMCP || !opts.NoSkills || opts.Subagents == nil || !*opts.Subagents || opts.Debug == nil || *opts.Debug {
 		return 95
 	}
 	for _, name := range []string{"get_goal", "create_goal", "update_goal", "process_start", "process_status", "process_logs", "process_stop", "process_list"} {

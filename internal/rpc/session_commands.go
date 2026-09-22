@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"context"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -18,7 +19,7 @@ func isSessionManagementCommand(command string) bool {
 	}
 }
 
-func (s *Server) handleSessionManagementCommand(req Request) error {
+func (s *Server) handleSessionManagementCommand(ctx context.Context, req Request) error {
 	switch req.Type {
 	case "sessions_list":
 		infos, err := s.app.ListSessions()
@@ -45,8 +46,25 @@ func (s *Server) handleSessionManagementCommand(req Request) error {
 		if err != nil {
 			return err
 		}
+		prepared, err := s.prepareSessionModel(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		beforeProvider, beforeModel, _ := s.app.ActiveModelsSnapshot()
+		beforeThinking := s.app.Agent.Thinking()
+		if err := s.applySessionModel(ctx, prepared); err != nil {
+			return err
+		}
 		info, err := s.app.OpenSession(sessionID)
 		if err != nil {
+			if prepared != nil {
+				rollbackCtx, cancel := context.WithTimeout(context.Background(), modelDiscoveryTimeout)
+				rollbackErr := s.app.SetProviderModelThinkingContext(rollbackCtx, beforeProvider, beforeModel, beforeThinking)
+				cancel()
+				if rollbackErr != nil {
+					return errors.Join(err, errors.New("session model rollback failed"))
+				}
+			}
 			return err
 		}
 		return s.write(Response{ID: req.ID, Type: "response", Command: req.Type, Success: true, Data: rpcSessionSummary(info, true)})

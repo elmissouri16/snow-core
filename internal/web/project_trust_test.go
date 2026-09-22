@@ -32,7 +32,7 @@ func TestProjectTrustActivationAndRevocation(t *testing.T) {
 	if !strings.Contains(body, `name="confirm" type="checkbox"`) || !strings.Contains(body, `name="remember_trust" value="project"`) || len(backend.calls) != 0 {
 		t.Fatal("first visit must request explicit remembered consent without activation")
 	}
-	for _, disclosure := range []string{"configuration and instructions", "host account’s privileges, not in a sandbox", "Browsing does not start an agent", "Trust does not grant tools Allow permissions", "New sessions start in Ask"} {
+	for _, disclosure := range []string{"configuration and instructions", "connects enabled MCP servers", "model-directed subagents", "host account’s privileges, not in a sandbox", "Browsing does not start an agent or MCP server", "Trust does not grant tools Allow permissions", "New sessions start in Ask"} {
 		if !strings.Contains(body, disclosure) {
 			t.Fatalf("first-start disclosure missing: %q", disclosure)
 		}

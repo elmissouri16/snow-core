@@ -67,6 +67,85 @@ func runtimeActivityEmit(t *testing.T, peer net.Conn, value any) {
 	}
 }
 
+func TestRuntimeChildPermissionRemainsResolvableAfterRootCompletion(t *testing.T) {
+	m, r, peer := runtimeActivityStream(t)
+	r.mu.Lock()
+	r.compaction.pending = true // Child interactions bypass operation-event buffers.
+	r.mu.Unlock()
+	child := &protocol.AgentRef{
+		ThreadID: "child-thread", ParentThreadID: "root-thread",
+		Path: "/root/investigator", ParentPath: protocol.RootAgentPath,
+		Role: "explorer", Depth: 1,
+	}
+	runtimeActivityEmit(t, peer, protocol.AgentEvent{
+		Type: protocol.EvPermissionRequest, Agent: child,
+		Permission: &protocol.Permission{Request: protocol.PermissionRequest{
+			ID: "child-permission", Tool: "bash", Risk: "high", Reason: "inspect repository", ScopeLabel: "shell process",
+		}},
+	})
+	snapshot := runtimeWait(t, m, "project", func(s RuntimeSnapshot) bool {
+		return s.Permission != nil && s.Permission.ID == "child-permission"
+	})
+	if snapshot.Status != "permission" || snapshot.Permission.AgentPath != "/root/investigator" || snapshot.Permission.AgentRole != "explorer" || snapshot.Permission.ScopeLabel != "shell process" {
+		t.Fatalf("child permission projection = status:%q permission:%+v", snapshot.Status, snapshot.Permission)
+	}
+	r.mu.Lock()
+	r.compaction.pending = false
+	r.mu.Unlock()
+
+	runtimeActivityEmit(t, peer, protocol.RPCPromptCompleted{
+		Type: protocol.RPCTypePromptCompleted, RequestID: "prompt", Status: protocol.RPCPromptCompletedStatus,
+	})
+	snapshot = runtimeWait(t, m, "project", func(RuntimeSnapshot) bool {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return !r.busy
+	})
+	if snapshot.Status != "permission" || snapshot.Permission == nil || snapshot.Permission.ID != "child-permission" {
+		t.Fatalf("root completion discarded child permission: %+v", snapshot)
+	}
+}
+
+func TestRuntimeChildPermissionCancellationAcceptsQueuedReplacement(t *testing.T) {
+	m, _, peer := runtimeActivityStream(t)
+	first := &protocol.AgentRef{ThreadID: "first-thread", ParentThreadID: "root-thread", Path: "/root/first", ParentPath: protocol.RootAgentPath, Role: "general", Depth: 1}
+	second := &protocol.AgentRef{ThreadID: "second-thread", ParentThreadID: "root-thread", Path: "/root/second", ParentPath: protocol.RootAgentPath, Role: "general", Depth: 1}
+	emitPermission := func(id string, agent *protocol.AgentRef) {
+		runtimeActivityEmit(t, peer, protocol.AgentEvent{Type: protocol.EvPermissionRequest, Agent: agent, Permission: &protocol.Permission{Request: protocol.PermissionRequest{ID: id, Tool: "bash"}}})
+	}
+	emitStatus := func(agent *protocol.AgentRef) {
+		runtimeActivityEmit(t, peer, protocol.AgentEvent{Type: protocol.EvSubagentStatus, Agent: agent, Subagent: &protocol.SubagentState{Agent: *agent, Status: protocol.AgentInterrupted}})
+	}
+	emitPermission("permission-first", first)
+	runtimeWait(t, m, "project", func(s RuntimeSnapshot) bool { return s.Permission != nil && s.Permission.ID == "permission-first" })
+	emitPermission("permission-second", second)
+	runtimeWait(t, m, "project", func(s RuntimeSnapshot) bool { return s.Permission != nil && s.Permission.ID == "permission-second" })
+	emitStatus(first)
+	emitStatus(second)
+	snapshot := runtimeWait(t, m, "project", func(s RuntimeSnapshot) bool { return s.Permission == nil })
+	if snapshot.Status != "running" {
+		t.Fatalf("terminal child permission status = %q, want running", snapshot.Status)
+	}
+}
+
+func TestRuntimeMalformedChildInteractionsFailClosed(t *testing.T) {
+	child := &protocol.AgentRef{ThreadID: "child-thread", ParentThreadID: "root-thread", Path: "/root/child", ParentPath: protocol.RootAgentPath, Role: "general", Depth: 1}
+	invalidChild := child.Clone()
+	invalidChild.Depth = 0
+	for name, event := range map[string]protocol.AgentEvent{
+		"missing permission":       {Type: protocol.EvPermissionRequest, Agent: child},
+		"invalid status":           {Type: protocol.EvSubagentStatus, Agent: child, Subagent: &protocol.SubagentState{Agent: *child}},
+		"invalid permission agent": {Type: protocol.EvPermissionRequest, Agent: invalidChild, Permission: &protocol.Permission{Request: protocol.PermissionRequest{ID: "permission", Tool: "bash"}}},
+		"invalid status agent":     {Type: protocol.EvSubagentStatus, Agent: invalidChild, Subagent: &protocol.SubagentState{Agent: *invalidChild, Status: protocol.AgentRunning}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m, _, peer := runtimeActivityStream(t)
+			runtimeActivityEmit(t, peer, event)
+			runtimeWait(t, m, "project", func(s RuntimeSnapshot) bool { return s.Status == "failed" })
+		})
+	}
+}
+
 func TestRuntimeActivityRootStreamProjection(t *testing.T) {
 	for _, tagged := range []bool{false, true} {
 		name := "legacy"

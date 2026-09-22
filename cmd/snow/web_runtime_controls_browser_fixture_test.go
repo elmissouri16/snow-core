@@ -65,7 +65,7 @@ func runtimeControlsBrowserWorker(directory string) int {
 	}
 	// Native activation may omit provider/model: only this private HOME supplies
 	// fake defaults. Reject explicit nonfixture provider overrides.
-	if startup != "eager" || opts.Provider != "" && opts.Provider != "fake" || opts.Model != "" && opts.Model != "fake-1" || !opts.ManagedExplicitGoals || !opts.NoSession || !opts.NoPlugins || !opts.NoMCP || !opts.NoSkills || opts.Subagents == nil || *opts.Subagents {
+	if startup != "eager" || opts.Provider != "" && opts.Provider != "fake" || opts.Model != "" && opts.Model != "fake-1" || !opts.ManagedExplicitGoals || !opts.NoSession || !opts.NoPlugins || opts.NoMCP || !opts.NoSkills || opts.Subagents == nil || !*opts.Subagents {
 		return 95
 	}
 	a, err := app.New(ctx, opts)

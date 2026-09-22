@@ -247,7 +247,7 @@ func (s *Server) handle(ctx context.Context, req Request) error {
 		return s.handleSubagentCommand(ctx, req)
 	}
 	if isSessionManagementCommand(req.Type) {
-		return s.handleSessionManagementCommand(req)
+		return s.handleSessionManagementCommand(ctx, req)
 	}
 	if isRuntimeParityCommand(req.Type) {
 		return s.handleRuntimeParityCommand(ctx, req)

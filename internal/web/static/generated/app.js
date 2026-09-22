@@ -18288,12 +18288,14 @@ function dc(e, t, n) {
 }
 function fc(e) {
 	if (!oc(e) || !cc(e.id) || e.truncated) return !0;
-	for (let t of [
-		"tool",
-		"risk",
-		"reason",
-		"scope_label"
-	]) if (e[t] != null && !sc(e[t], 8192)) return !0;
+	for (let [t, n] of [
+		["agent_path", 512],
+		["agent_role", 64],
+		["tool", 8192],
+		["risk", 8192],
+		["reason", 8192],
+		["scope_label", 8192]
+	]) if (e[t] != null && !sc(e[t], n)) return !0;
 	for (let t of ["paths", "capabilities"]) {
 		let n = e[t];
 		if (n != null && (!Array.isArray(n) || n.length > 64 || !n.every((e) => sc(e, 8192)))) return !0;
@@ -18324,6 +18326,8 @@ function pc(e, t, n = "") {
 		n,
 		e,
 		t.id,
+		t.agent_path,
+		t.agent_role,
 		t.tool,
 		t.risk,
 		t.reason,
@@ -18387,6 +18391,15 @@ function gc({ pending: e, state: t, onGuard: n }) {
 							o(r.risk) || "unspecified risk"
 						]
 					}),
+					r.agent_path && /* @__PURE__ */ (0, D.jsxs)("p", { children: [
+						"Requested by subagent ",
+						/* @__PURE__ */ (0, D.jsx)("code", { children: o(r.agent_path) }),
+						r.agent_role && /* @__PURE__ */ (0, D.jsxs)(D.Fragment, { children: [
+							" (",
+							o(r.agent_role),
+							")"
+						] })
+					] }),
 					r.reason && /* @__PURE__ */ (0, D.jsx)("p", { children: o(r.reason) }),
 					r.scope_label && /* @__PURE__ */ (0, D.jsx)("p", { children: o(r.scope_label) }),
 					s(r.paths).map((e, t) => /* @__PURE__ */ (0, D.jsx)("pre", { children: o(e) }, t)),
@@ -22809,15 +22822,15 @@ function Vu({ project: e, csrf: t, sessionID: n }) {
 							", then review and send."
 						]
 					}),
+					/* @__PURE__ */ (0, D.jsx)("p", {
+						className: "activation-boundary",
+						children: "Starting loads this workspace’s configuration and instructions, connects enabled MCP servers, and allows model-directed subagents. Tools, local MCP servers, and child agents run with your host account’s privileges, not in a sandbox. Browsing does not start an agent or MCP server."
+					}),
 					e.trusted ? /* @__PURE__ */ (0, D.jsx)("input", {
 						type: "hidden",
 						name: "confirm",
 						value: "trusted"
 					}) : /* @__PURE__ */ (0, D.jsxs)(D.Fragment, { children: [
-						/* @__PURE__ */ (0, D.jsx)("p", {
-							className: "activation-boundary",
-							children: "Starting loads this workspace’s configuration and instructions. Tools run with your host account’s privileges, not in a sandbox. Browsing does not start an agent."
-						}),
 						/* @__PURE__ */ (0, D.jsx)("input", {
 							type: "hidden",
 							name: "remember_trust",

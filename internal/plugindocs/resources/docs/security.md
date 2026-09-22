@@ -63,9 +63,15 @@ perform provider discovery. With remembered workspace trust, deliberately
 selecting a saved conversation in the same tab is that activation action and
 resumes the exact selected session. Direct URLs, reloads, project-level
 navigation, modified link clicks and inactive-catalog expansion remain passive. At most two live projects are admitted. The fixed
-`managed-explicit-goals` worker profile starts new sessions with `ask` permissions
-and disables plugins, MCP, subagents and debug capture. Installed skills are
-enabled by default for new project registrations. The per-project next-start
+`managed-explicit-goals` worker profile starts new sessions with `ask`
+permissions, enables configured MCP servers and bounded subagents, and disables
+plugins and debug capture. Global MCP declarations load normally; project MCP
+declarations require separate CLI extension trust. MCP servers and children run
+with the Snow host user's OS privileges, and shell-capable child operations flow
+through the same permission broker and browser approval cards. Trust remembered
+before this authority expansion is revoked once so the next activation requires
+an explicit review of the new disclosure. Installed skills
+are enabled by default for new project registrations. The per-project next-start
 policy is saved in the manager registry and shared by its paired browsers; users
 can opt out through **Settings → Workspaces → Installed skills**. Activation forms
 inherit that saved policy and do not repeat a checkbox. Changing Settings does not
@@ -73,8 +79,8 @@ affect a live worker. Archiving/removing the registration clears an explicit
 opt-out and returns a restored or re-registered project to the enabled default.
 Existing saved preferences are preserved during upgrade. Enabling skills adds only
 skill discovery and the activate/deactivate/resource tools to that worker. It does not
-change tool permission policy, write CLI extension trust, enable plugins/MCP/subagents,
-or derive authority from remembered manager trust.
+change tool permission policy, write CLI extension trust, enable plugins, change
+MCP or subagent policy, or derive authority from remembered manager trust.
 Personal/configured skills and already-CLI-trusted project skills follow the
 worker's normal catalog policy; metadata can enter provider context and the
 model can activate applicable skills. Changing this profile requires closing
@@ -138,8 +144,11 @@ Browser disconnects leave admitted work running; manager shutdown closes workers
 Typed workflow controls additionally permit explicit host-model discovery,
 conversation-scoped model selection, rename, create/open and authoritative
 Default/Plan Mode changes through the same activated worker. Model choices are
-validated against discovered pairs; session-only selection does not persist host
-configuration or the operator-owned project selection. Discovery is bounded and
+validated against discovered pairs; session-only selection persists only its
+bounded provider/model/compatible-effort tuple as provider-excluded conversation
+metadata, not host configuration or the operator-owned project selection. An
+explicit reopen resolves current catalog metadata before restoring it and fails
+closed if the saved pair is malformed or unavailable. Discovery is bounded and
 never runs from passive snapshots or stream subscriptions. Telemetry projects
 counts and explicitly labeled recorded-cost estimates, not context category text,
 account inventory or provider-private metadata. Mixed/invalid currency estimates

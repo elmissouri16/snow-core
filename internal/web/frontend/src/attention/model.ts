@@ -3,7 +3,7 @@ export interface Option {label: string; description?: string}
 export interface Question {id: string; header?: string; question: string; options?: Option[]; choices_only?: boolean}
 export interface InputRequest {id: string; questions: Question[]}
 export interface Effect {type?: string; capability?: string; operation?: string; resource?: string; command?: string; reason?: string}
-export interface PermissionRequest {id?: string; tool?: string; risk?: string; reason?: string; scope_label?: string; paths?: string[]; capabilities?: string[]; effects?: Effect[]; unknown?: boolean; truncated?: boolean}
+export interface PermissionRequest {id?: string; agent_path?: string; agent_role?: string; tool?: string; risk?: string; reason?: string; scope_label?: string; paths?: string[]; capabilities?: string[]; effects?: Effect[]; unknown?: boolean; truncated?: boolean}
 export interface Snapshot {project_id?: string; session_id?: string; instance_id?: string; cancel_token?: string; permission?: unknown; input?: unknown}
 export interface State {safe?: boolean; busy?: boolean; canStop?: boolean; stopping?: boolean}
 export interface Answer {selected: number | 'custom' | null; custom: string}
@@ -47,7 +47,8 @@ export function invalidAnswer(questions: Question[], draft: Draft, all: boolean)
 }
 export function permissionBlocked(value: unknown): boolean {
   if (!record(value) || !identifier(value.id) || value.truncated) return true;
-  for (const name of ['tool', 'risk', 'reason', 'scope_label']) if (value[name] != null && !text(value[name], 8192)) return true;
+  for (const [name, max] of [['agent_path', 512], ['agent_role', 64], ['tool', 8192], ['risk', 8192], ['reason', 8192], ['scope_label', 8192]] as const)
+    if (value[name] != null && !text(value[name], max)) return true;
   for (const name of ['paths', 'capabilities']) {
     const list = value[name];
     if (list != null && (!Array.isArray(list) || list.length > 64 || !list.every(item => text(item, 8192)))) return true;
@@ -60,7 +61,7 @@ export function permissionBlocked(value: unknown): boolean {
 export function requestKey(kind: 'input' | 'permission', pending: unknown, turn = ''): string {
   if (kind === 'input' && validInput(pending)) return JSON.stringify([turn, kind, pending.id,
     pending.questions.map(q => [q.id, q.header || '', q.question, !!q.choices_only, (q.options || []).map(o => [o.label, o.description || ''])])]);
-  if (kind === 'permission' && record(pending)) return JSON.stringify([turn, kind, pending.id, pending.tool, pending.risk, pending.reason,
+  if (kind === 'permission' && record(pending)) return JSON.stringify([turn, kind, pending.id, pending.agent_path, pending.agent_role, pending.tool, pending.risk, pending.reason,
     pending.scope_label, pending.paths, pending.capabilities, pending.unknown, pending.truncated,
     Array.isArray(pending.effects) ? pending.effects.map(e => record(e) ? [e.type, e.capability, e.operation, e.resource, e.command, e.reason] : null) : null]);
   return JSON.stringify([turn, kind, record(pending) ? pending.id : null, 'invalid']);

@@ -112,7 +112,9 @@ func (r *liveRuntime) consumeGoalEvent(event clientrpc.Event) bool {
 		}
 		r.goal.completion = &protocol.RPCGoalRunCompleted{RequestID: c.RequestID, GoalRunID: c.GoalRunID, GoalID: c.GoalID, Status: c.Status, GoalStatus: c.GoalStatus}
 		r.goal.revision++
-		r.snapshot.Permission = nil
+		if r.permissionAgent == nil {
+			r.clearPermissionLocked()
+		}
 		r.snapshot.Input = nil
 		r.cancelActivities()
 		r.finishGoalRunLocked()
@@ -177,9 +179,15 @@ func (r *liveRuntime) consumeGoalEvent(event clientrpc.Event) bool {
 		r.pendingUserID, r.pendingRegenerateReplyID = "", ""
 		r.activityPrompt++
 		r.activityCanceled = false
-		r.snapshot.Permission = nil
+		if r.permissionAgent == nil {
+			r.clearPermissionLocked()
+		}
 		r.snapshot.Input = nil
-		r.snapshot.Status = "running"
+		if r.snapshot.Permission != nil {
+			r.snapshot.Status = "permission"
+		} else {
+			r.snapshot.Status = "running"
+		}
 	}
 	r.mu.Unlock()
 	return false
@@ -237,9 +245,15 @@ func (r *liveRuntime) finishGoalRunLocked() {
 	r.goal.active = false
 	r.busy = false
 	r.clearTurnCancelLocked()
-	r.snapshot.Status = "idle"
-	r.snapshot.Permission = nil
+	if r.permissionAgent == nil {
+		r.clearPermissionLocked()
+	}
 	r.snapshot.Input = nil
+	if r.snapshot.Permission != nil {
+		r.snapshot.Status = "permission"
+	} else {
+		r.snapshot.Status = "idle"
+	}
 	r.assistant, r.plan = -1, -1
 	r.assistantHasPlan = false
 	status := protocol.RPCPromptCompletedStatus

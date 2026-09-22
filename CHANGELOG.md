@@ -5,6 +5,20 @@ also include the generated GitHub comparison for the tagged commit.
 
 ## [Unreleased]
 
+### Added
+
+- Enable configured MCP servers and bounded model-directed subagents in
+  explicitly activated Web Manager conversations. MCP and shell-capable child
+  operations use the existing session permission broker and browser approval
+  cards; plugins and browser-side MCP/subagent configuration remain disabled.
+  Existing remembered Web workspace trust is revoked once so the expanded
+  OS-privileged activation disclosure must be reviewed explicitly.
+
+### Fixed
+
+- Restore each Web Manager conversation's selected provider/model after an
+  explicit reopen or manager restart without changing operator host defaults.
+
 ### Changed
 
 - Disable the OpenCode Zen provider because its models are restricted to

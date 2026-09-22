@@ -175,7 +175,7 @@ func (r *liveRuntime) publishMessageEdit(requestID string, committed protocol.RP
 	r.snapshot.Messages = nil
 	r.snapshot.Activities = nil
 	r.snapshot.ActivitiesTruncated = false
-	r.snapshot.Permission = nil
+	r.clearPermissionLocked()
 	r.snapshot.Input = nil
 	if !terminal {
 		r.snapshot.Error = ""

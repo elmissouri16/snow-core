@@ -49,7 +49,7 @@ func (r *liveRuntime) fail() {
 		r.uncertainCompactionLocked()
 		r.unknownActivitiesLocked()
 		r.snapshot.Error = "Worker connection failed. Close and explicitly reopen this project."
-		r.snapshot.Permission = nil
+		r.clearPermissionLocked()
 		r.snapshot.Input = nil
 		r.publishLocked()
 	}
@@ -206,7 +206,7 @@ func (r *liveRuntime) promptAcknowledged(response protocol.RPCResponse, previous
 		r.busy = false
 		r.clearTurnCancelLocked()
 		r.unknownActivitiesLocked()
-		r.snapshot.Permission = nil
+		r.clearPermissionLocked()
 		r.snapshot.Input = nil
 		r.snapshot.Status = "idle"
 		r.snapshot.Error = "Prompt was not accepted. No retry was queued."
@@ -243,7 +243,9 @@ func (m *RuntimeManager) Abort(ctx context.Context, projectID, instanceID string
 	}
 	r.mu.Lock()
 	r.cancelActivities()
-	r.snapshot.Permission = nil
+	if r.permissionAgent == nil {
+		r.clearPermissionLocked()
+	}
 	r.snapshot.Input = nil
 	r.publishLocked()
 	r.mu.Unlock()
@@ -280,9 +282,11 @@ func (m *RuntimeManager) ReplyPermission(ctx context.Context, projectID, instanc
 	}
 	r.mu.Lock()
 	if r.snapshot.Permission != nil && r.snapshot.Permission.ID == requestID {
-		r.snapshot.Permission = nil
+		r.clearPermissionLocked()
 		if r.busy {
 			r.snapshot.Status = "running"
+		} else {
+			r.snapshot.Status = "idle"
 		}
 		r.publishLocked()
 	}

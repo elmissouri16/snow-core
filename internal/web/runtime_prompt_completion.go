@@ -48,11 +48,17 @@ func (r *liveRuntime) consumePromptCompletion(completed protocol.RPCPromptComple
 	}
 	refresh := binding.session != "" && r.worker != nil && r.worker.Client != nil && r.supports("goal_run")
 	if refresh {
-		// Attention belongs to the finished native prompt, but running/busy remains
-		// authoritative until the new durable tip and goal state are available.
-		r.snapshot.Permission = nil
+		// Root attention belongs to the finished prompt. A child permission request
+		// is independent and must remain resolvable after the root turn completes.
+		if r.permissionAgent == nil {
+			r.clearPermissionLocked()
+		}
 		r.snapshot.Input = nil
-		r.snapshot.Status = "running"
+		if r.snapshot.Permission != nil {
+			r.snapshot.Status = "permission"
+		} else {
+			r.snapshot.Status = "running"
+		}
 		r.publishLocked()
 	}
 	r.mu.Unlock()
@@ -93,9 +99,15 @@ func (r *liveRuntime) consumePromptCompletion(completed protocol.RPCPromptComple
 	r.cancelActivities()
 	r.assistant = -1
 	r.pendingUserID = ""
-	r.snapshot.Status = "idle"
-	r.snapshot.Permission = nil
+	if r.permissionAgent == nil {
+		r.clearPermissionLocked()
+	}
 	r.snapshot.Input = nil
+	if r.snapshot.Permission != nil {
+		r.snapshot.Status = "permission"
+	} else {
+		r.snapshot.Status = "idle"
+	}
 	if completed.Status == protocol.RPCPromptFailedStatus {
 		r.snapshot.Error = runtimePromptFailureText(r.snapshot.Error)
 	}

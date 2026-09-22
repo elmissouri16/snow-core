@@ -131,6 +131,14 @@ Use `--project` with `enable`, `disable`, or `remove` to change the current
 project's declaration. Add `--json` to inspection and mutation commands when
 another program needs structured output.
 
+Explicitly activated Web Manager conversations load the same configured MCP
+servers. Configure and check them on the Snow host with these CLI commands;
+the browser does not edit MCP declarations. Merely starting or browsing the
+manager starts no MCP server. Global declarations load normally when a
+conversation is activated, while project declarations require the same separate
+CLI extension trust used by the TUI. MCP permission requests are shown through
+the Web approval card.
+
 ## Current limitations
 
 - Snow supports local stdio and remote Streamable HTTP servers.

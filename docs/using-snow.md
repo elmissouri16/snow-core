@@ -937,9 +937,15 @@ provider-grouped model picker rather than typing identities. Activation starts a
 Snow RPC worker, loads host configuration and applicable trusted project
 instructions, may discover provider models, and **defers any saved goal**. It
 does not send a prompt. New sessions start with permission mode `ask`; explicitly
-resuming a saved session can restore its saved policy. The live profile disables
-plugins, MCP, subagents and debug capture. Installed skills follow the workspace's
-saved next-start policy and are enabled by default for newly registered projects.
+resuming a saved session can restore its saved policy. The live profile disables plugins and debug capture, while enabling configured
+MCP servers and bounded subagents. Global MCP declarations load normally;
+project MCP declarations still require the same separate CLI extension trust as
+the TUI. MCP tools and shell-capable child agents use the saved session
+permission policy, including browser approval cards in `ask`. The first start
+after upgrading to this expanded worker profile revokes older remembered
+workspace trust and requires reviewing the new activation disclosure. Installed skills
+follow the workspace's saved next-start policy and are enabled by default for
+newly registered projects.
 Disable or re-enable them under **Settings → Workspaces → Installed skills**;
 Start and Resume repeat no checkbox. Enabling adds only the three skill lifecycle
 tools and retains separate CLI extension trust. Its fixed
@@ -1112,10 +1118,12 @@ Models are grouped by provider. Search keeps keyboard focus as choices arrive;
 Arrow Down enters the results, Arrow Up from the first result returns to search,
 and Escape closes the picker and returns focus to the model selector. Choosing a model applies that exact host pair
 while idle—there is no separate Provider field or Apply form. Selecting the
-current pair merely closes the menu. Selection affects the current conversation
-without rewriting host configuration or the operator-owned project selection;
-the effective thinking level appears in the separate context/usage panel. Menus
-support keyboard navigation, Escape/back, click-away dismissal, and focus return.
+current pair merely closes the menu. Selection is saved with the current
+conversation and restored when that conversation is explicitly resumed after a
+worker or manager restart. It does not rewrite host configuration or the
+operator-owned project selection; the effective thinking level appears in the
+separate context/usage panel. Menus support keyboard navigation, Escape/back,
+click-away dismissal, and focus return.
 Snow does not advertise unsupported Harness agent presets. Reasoning selection
 is a separate explicit, capability-gated current-session control, not part of
 model discovery or a promise of provider support.
@@ -1260,9 +1268,12 @@ and private network addressing do not expand network or browser authority.
 The web package uses public process/RPC clients, not runtime/session internals or
 a second agent loop. Shutdown reaps direct workers, not arbitrary detached tool
 descendants. See the [implementation plan](https://github.com/elmissouri16/snow-core/blob/main/docs/web-manager-implementation-plan.md)
-for remaining phases. Worktree forks, remote access, browser OAuth, extension
-enablement, general Git writes (commit/push/reset), a file editor, PTY, preview
-fleet and plugin/MCP/skill/subagent controls remain out of scope. The local
+for remaining phases. Worktree forks, remote access, browser OAuth, plugin
+enablement, browser-side MCP configuration, general Git writes
+(commit/push/reset), a file editor, PTY, preview fleet and direct subagent
+management controls remain out of scope. Configured MCP capabilities and
+model-directed subagent tools are available inside explicitly activated
+conversations. The local
 additions above describe source behavior with focused verification; full new
 end-to-end acceptance is still pending. They do not claim the installed/running
 manager has been updated.

@@ -161,6 +161,12 @@ func (m *RuntimeManager) Switch(ctx context.Context, projectID, instanceID, targ
 	if targetSessionID == old.SessionID {
 		return old, nil
 	}
+	r.mu.Lock()
+	activeChildren := len(r.activeChildren)
+	r.mu.Unlock()
+	if !busy && (old.Status != "idle" || old.Permission != nil || old.Input != nil || activeChildren != 0) {
+		return RuntimeSnapshot{}, ErrRuntimeBusy
+	}
 	if old.Queue != nil && len(old.Queue.Items) != 0 {
 		return RuntimeSnapshot{}, ErrRuntimeQueueReview
 	}
@@ -193,6 +199,10 @@ func (m *RuntimeManager) Switch(ctx context.Context, projectID, instanceID, targ
 	if r.snapshot.Queue != nil && len(r.snapshot.Queue.Items) != 0 {
 		r.mu.Unlock()
 		return RuntimeSnapshot{}, ErrRuntimeQueueReview
+	}
+	if r.busy || r.snapshot.Status != "idle" || r.snapshot.Permission != nil || r.snapshot.Input != nil || len(r.activeChildren) != 0 {
+		r.mu.Unlock()
+		return RuntimeSnapshot{}, ErrRuntimeBusy
 	}
 	r.retiredEpoch = max(r.retiredEpoch, r.rootEpoch)
 	r.transitioning = true
@@ -236,6 +246,8 @@ func (m *RuntimeManager) Switch(ctx context.Context, projectID, instanceID, targ
 	r.activityCanceled = false
 	r.turnID = ""
 	r.pendingUserID = ""
+	r.permissionAgent = nil
+	r.activeChildren = nil
 	r.pendingRegenerateReplyID = ""
 	r.queue = runtimeQueueState{}
 	r.snapshot.Queue = nil

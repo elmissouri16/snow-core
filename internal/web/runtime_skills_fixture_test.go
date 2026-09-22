@@ -17,12 +17,12 @@ func init() {
 }
 
 func runtimeSkillsFixture() int {
-	for _, flag := range []string{"--no-session", "--managed-explicit-goals", "--no-plugins", "--no-mcp", "--no-subagents", "--no-debug"} {
+	for _, flag := range []string{"--no-session", "--managed-explicit-goals", "--no-plugins", "--subagents", "--no-debug"} {
 		if !slices.Contains(os.Args, flag) {
 			return 10
 		}
 	}
-	if slices.Contains(os.Args, "--no-skills") || slices.Contains(os.Args, "--permission") || slices.Contains(os.Args, "--trust-project") {
+	if slices.Contains(os.Args, "--no-mcp") || slices.Contains(os.Args, "--no-subagents") || slices.Contains(os.Args, "--no-skills") || slices.Contains(os.Args, "--permission") || slices.Contains(os.Args, "--trust-project") {
 		return 11
 	}
 	tools := "read,glob,grep,write,edit,bash,ask_user,get_goal,create_goal,update_goal,process_start,process_status,process_logs,process_stop,process_list,activate_skill,deactivate_skill,read_skill_resource"

@@ -109,9 +109,11 @@ whole-run Stop and optional token budgets (not billing caps). A **Processes**
 inspector lists managed handles, bounded logs and permission-gated Stop. Runtime
 panels open from the header’s conversation-actions menu, with persistent Close
 controls and internally scrolling bodies; Activity/Organize retain icon controls
-in collapsed navigation. Process tools are enabled in the fixed worker profile;
-plugins, MCP and subagents remain disabled. Skills are disabled unless explicitly
-enabled when starting that worker. Historical **Edit & resend**, **Regenerate** and ordinary **Queue next**
+in collapsed navigation. Process tools, configured MCP servers and subagents are enabled in the fixed
+worker profile; plugins remain disabled. MCP declarations follow the normal
+global and CLI-trusted project configuration, and MCP or child-agent operations
+remain subject to the session’s permission policy. Skills are disabled unless
+explicitly enabled when starting that worker. Historical **Edit & resend**, **Regenerate** and ordinary **Queue next**
 remain available under their admission rules; Queue next is disabled during goal
 runs. Project activation trust can be explicitly remembered across manager
 restarts; later visits show compact Start/Resume controls, never auto-start.

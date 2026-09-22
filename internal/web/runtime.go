@@ -30,6 +30,8 @@ var (
 // summaries are untrusted text, not markup or a promise of process containment.
 type RuntimePermission struct {
 	ID           string                      `json:"id"`
+	AgentPath    string                      `json:"agent_path,omitempty"`
+	AgentRole    string                      `json:"agent_role,omitempty"`
 	Tool         string                      `json:"tool"`
 	Risk         string                      `json:"risk"`
 	Reason       string                      `json:"reason"`
@@ -135,6 +137,8 @@ type liveRuntime struct {
 	messageSequence                       uint64
 	imageReads                            int // Independent bounded reads never hold the mutation/Stop gate.
 	pendingUserID                         string
+	permissionAgent                       *protocol.AgentRef // Non-nil only for a child request projected into the shared attention card.
+	activeChildren                        map[string]protocol.AgentStatus
 	pendingRegenerateReplyID              string
 	assistantHasPlan                      bool
 	messageEdit                           runtimeMessageEditState
@@ -232,8 +236,10 @@ func (m *RuntimeManager) start(r *liveRuntime, sessionID, provider, model string
 	// --interactive-* flags. No-session is bootstrap only, never the live store.
 	// Omit --permission: app defaults fresh sessions to Ask independently of
 	// configuration. An explicit override would suppress saved session policies
-	// on every session_open, including switches and worker restarts.
-	args := []string{"--mode", "rpc", "--rpc-startup", "eager", "--no-session", "--managed-explicit-goals", "--no-plugins", "--no-mcp"}
+	// on every session_open, including switches and worker restarts. Configured
+	// MCP servers and bounded subagents intentionally match their TUI runtimes;
+	// plugins and debug remain outside the managed Web profile.
+	args := []string{"--mode", "rpc", "--rpc-startup", "eager", "--no-session", "--managed-explicit-goals", "--no-plugins", "--subagents"}
 	if !r.skillsEnabled {
 		args = append(args, "--no-skills")
 	}
@@ -241,7 +247,7 @@ func (m *RuntimeManager) start(r *liveRuntime, sessionID, provider, model string
 	if r.skillsEnabled {
 		tools += ",activate_skill,deactivate_skill,read_skill_resource"
 	}
-	args = append(args, "--no-subagents", "--no-debug", "--tools", tools)
+	args = append(args, "--no-debug", "--tools", tools)
 	if provider != "" {
 		args = append(args, "--provider", provider)
 	}
@@ -399,7 +405,7 @@ func (r *liveRuntime) stop() {
 	r.snapshot.Status = "closing"
 	r.uncertainCompactionLocked()
 	r.unknownActivitiesLocked()
-	r.snapshot.Permission = nil
+	r.clearPermissionLocked()
 	r.snapshot.Input = nil
 	r.publishLocked()
 	r.mu.Unlock()

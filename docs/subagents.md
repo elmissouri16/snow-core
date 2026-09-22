@@ -39,6 +39,13 @@ Use `--no-subagents` to override enabled configuration. Enabling subagents does
 not enable recursion or file mutation, and every delegated turn remains subject
 to the root permission mode.
 
+Explicitly activated Web Manager conversations enable the same bounded subagent
+runtime automatically. The model can use the normal lifecycle tools; there is no
+separate browser child-management panel. Child results return through the root
+conversation, while shell-capable child permission requests use the browser's
+FIFO approval card and identify the requesting child path. Configured limits,
+roles, mutation policy and separate provider usage still apply.
+
 ## Choose roles and models
 
 Snow provides these built-in roles:

@@ -883,11 +883,15 @@ The `session_model_selection` capability advertises model selection for the
 current conversation without rewriting host configuration or the operator-owned
 project selection. Supply an exact provider/model pair from an available cached
 catalog; call `models_discover` first to populate inactive-provider choices.
-Selection uses the existing admitted provider/model/effort transaction and is
-rejected while work is active or the pair is unavailable. Read `session_info`
-afterward for the effective model and compatible thinking level. Catalog startup
-rejects this mutation. The legacy `set_model` command below retains its durable
-project-selection behavior.
+Selection uses the existing admitted provider/model/effort transaction, records
+the effective pair as provider-excluded conversation metadata, and is rejected
+while work is active or the pair is unavailable. An explicit `session_open`
+restores that saved pair after a worker or manager restart, resolving fresh
+catalog metadata and safely adapting effort if capabilities changed. Missing or
+malformed saved models fail closed instead of silently loading the host default.
+Read `session_info` afterward for the effective model and compatible thinking
+level. Catalog startup rejects this mutation. The legacy `set_model` command
+below retains its durable project-selection behavior.
 
 ### `set_model`
 

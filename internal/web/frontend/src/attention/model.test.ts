@@ -57,11 +57,13 @@ test('permission rejects incomplete summaries and never transfers request/tool s
   assert.equal(permissionBlocked(permission), false);
   // Unknown effects stay visibly warned, as before; truncation is the hard approval block.
   assert.equal(permissionBlocked({...permission, unknown: true}), false);
-  for (const value of [null, {...permission, id: ''}, {...permission, truncated: true}, {...permission, paths: Array(65).fill('file')},
+  assert.equal(permissionBlocked({...permission, agent_path: '/root/investigator', agent_role: 'explorer'}), false);
+  for (const value of [null, {...permission, id: ''}, {...permission, truncated: true}, {...permission, agent_path: 'x'.repeat(513)}, {...permission, paths: Array(65).fill('file')},
     {...permission, effects: Array(65).fill({})}, {...permission, effects: [{resource: {private: 'not public text'}}]}, {...permission, paths: 'not an array'}]) assert.equal(permissionBlocked(value), true);
   const key = requestKey('permission', permission, 'turn');
   assert.equal(requestKey('permission', {...permission, effects: [{resource: 'README.md', type: 'filesystem'}]}, 'turn'), key);
   assert.notEqual(requestKey('permission', {...permission, tool: 'bash'}, 'turn'), key);
+  assert.notEqual(requestKey('permission', {...permission, agent_path: '/root/investigator'}, 'turn'), key);
   assert.notEqual(requestKey('permission', {...permission, id: 'permission-2'}, 'turn'), key);
   assert.notEqual(requestKey('permission', permission, 'other-turn'), key);
 });

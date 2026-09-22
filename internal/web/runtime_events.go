@@ -300,10 +300,107 @@ func projectInput(request *protocol.UserInputRequest) (*protocol.UserInputReques
 	return result, true
 }
 
+func runtimeRootAgent(ref *protocol.AgentRef) bool {
+	return ref == nil || ref.Path == protocol.RootAgentPath && ref.Depth == 0 && ref.ParentPath == "" && ref.ParentThreadID == "" && ref.Validate() == nil
+}
+
+func runtimeChildAgent(ref *protocol.AgentRef) bool {
+	return ref != nil && ref.Path != protocol.RootAgentPath && ref.Depth > 0 && ref.Validate() == nil
+}
+
+func (r *liveRuntime) clearPermissionLocked() {
+	r.snapshot.Permission = nil
+	r.permissionAgent = nil
+}
+
+// consumeChildPermission is the one child event projected independently of a
+// root prompt. The shared permission broker emits one FIFO request at a time,
+// so the browser's single attention card cannot overwrite another request.
+func (r *liveRuntime) consumeChildPermission(e protocol.AgentEvent) {
+	permission, ok := projectPermission(e.Permission.Request)
+	if !ok {
+		r.fail()
+		return
+	}
+	permission.AgentPath = runtimeText(string(e.Agent.Path), protocol.MaxAgentPathBytes)
+	permission.AgentRole = runtimeText(e.Agent.Role, 64)
+
+	r.mu.Lock()
+	if r.ctx.Err() != nil || r.transitioning || r.snapshot.Status == "closing" || r.snapshot.Status == "failed" {
+		r.mu.Unlock()
+		return
+	}
+	// The shared broker publishes only its current FIFO head. A different ID is
+	// therefore authoritative replacement after the prior request was resolved
+	// or canceled, even if its terminal child event has not drained yet.
+	r.snapshot.Permission = permission
+	r.permissionAgent = e.Agent.Clone()
+	r.snapshot.Status = "permission"
+	r.publishLocked()
+	r.mu.Unlock()
+}
+
+func sameRuntimeAgent(a, b *protocol.AgentRef) bool {
+	return a != nil && b != nil && a.ThreadID == b.ThreadID && a.Path == b.Path
+}
+
+func (r *liveRuntime) consumeChildStatus(e protocol.AgentEvent) {
+	r.mu.Lock()
+	if e.Subagent.Status.Terminal() {
+		delete(r.activeChildren, e.Agent.ThreadID)
+	} else {
+		if r.activeChildren == nil {
+			r.activeChildren = make(map[string]protocol.AgentStatus)
+		}
+		r.activeChildren[e.Agent.ThreadID] = e.Subagent.Status
+	}
+	if e.Subagent.Status.Terminal() && sameRuntimeAgent(r.permissionAgent, e.Agent) {
+		r.clearPermissionLocked()
+		if r.busy {
+			r.snapshot.Status = "running"
+		} else {
+			r.snapshot.Status = "idle"
+		}
+		r.publishLocked()
+	}
+	r.mu.Unlock()
+}
+
+func (r *liveRuntime) consumeChildInteraction(e *protocol.AgentEvent) bool {
+	if e == nil {
+		return false
+	}
+	switch e.Type {
+	case protocol.EvPermissionRequest:
+		if runtimeRootAgent(e.Agent) {
+			return false
+		}
+		if !runtimeChildAgent(e.Agent) || e.Permission == nil {
+			r.fail()
+			return true
+		}
+		r.consumeChildPermission(*e)
+		return true
+	case protocol.EvSubagentStarted, protocol.EvSubagentStatus:
+		if !runtimeChildAgent(e.Agent) || e.Subagent == nil || e.Subagent.Validate() != nil || !sameRuntimeAgent(e.Agent, &e.Subagent.Agent) {
+			r.fail()
+			return true
+		}
+		r.consumeChildStatus(*e)
+		return true
+	default:
+		return false
+	}
+}
+
 func (r *liveRuntime) drain() {
 	defer close(r.drained)
 	for event := range r.worker.Client.Events() {
 		r.eventMu.Lock()
+		if r.consumeChildInteraction(event.AgentEvent) {
+			r.eventMu.Unlock()
+			continue
+		}
 		r.mu.Lock()
 		buffered, valid := r.bufferCompactionEventLocked(event)
 		if !buffered && valid {
@@ -343,12 +440,16 @@ func (r *liveRuntime) consumeEvent(event clientrpc.Event) {
 	e := event.AgentEvent
 	// Child output, thinking, tool arguments/private previews, raw worker or
 	// completion errors, and arbitrary future events are never copied to
-	// browser-facing state. Accepted root EvError diagnostics are the same public
-	// event stream rendered by the TUI and are projected below after bounding.
-	// Root events normally carry metadata too. A non-nil Agent is not
-	// evidence of a child. Retain support for legacy untagged root events,
-	// but reject children and inconsistent root identities.
-	if ref := e.Agent; ref != nil && (ref.Path != protocol.RootAgentPath || ref.Depth != 0 || ref.ParentPath != "" || ref.ParentThreadID != "" || ref.Validate() != nil) {
+	// browser-facing state. Child interaction handling is limited to projecting a
+	// valid permission request and clearing it on matching terminal status; Web
+	// must resolve the shared FIFO broker or a shell-capable child would deadlock
+	// in ask mode. Accepted root EvError
+	// diagnostics are projected below after bounding. Retain support for legacy
+	// untagged root events, but reject inconsistent identities.
+	if r.consumeChildInteraction(e) {
+		return
+	}
+	if !runtimeRootAgent(e.Agent) {
 		return
 	}
 	r.mu.Lock()
@@ -432,6 +533,7 @@ func (r *liveRuntime) consumeEvent(event clientrpc.Event) {
 		invalid = !ok
 		if ok {
 			r.snapshot.Permission = permission
+			r.permissionAgent = nil
 			r.snapshot.Status = "permission"
 			r.publishLocked()
 		}

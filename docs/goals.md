@@ -105,9 +105,11 @@ are never automatically replayed.
 The fixed `managed-explicit-goals` worker profile suppresses goal tool schemas
 and rejects their dispatch during ordinary prompts. Within explicit goal work,
 get/update apply only to the owning goal; the model cannot create or replace a
-goal. This is still the existing agent loop, not a browser scheduler or autonomous
-multi-agent workflow. Plugins, MCP and subagents remain disabled. Installed skills
-follow the workspace's saved next-start policy and default to enabled for new
+goal. This is still the existing agent loop, not a browser scheduler. Configured
+MCP servers and bounded subagent tools remain available under the worker's normal
+permission and lifecycle limits; the goal controller itself does not schedule a
+separate multi-agent workflow. Plugins remain disabled. Installed skills follow
+the workspace's saved next-start policy and default to enabled for new
 registrations; opt out under **Settings → Workspaces → Installed skills**. The
 policy is independent of goal controls and tool permissions, and changes apply on
 the next explicit start, not to a live run. Managed

@@ -151,8 +151,8 @@ closed. It still reads the live host worktree/object store and is not a sandbox
 against concurrent host mutation. File-name exclusions are not secret detection.
 
 The fifth increment adds explicit model/session discovery through the activated
-worker, conversation-scoped model selection that leaves host settings unchanged,
-create/rename/switch controls, authoritative Plan Mode, public proposed-plan
+worker, durable conversation-scoped model selection that leaves host settings
+unchanged, create/rename/switch controls, authoritative Plan Mode, public proposed-plan
 history, and counts-only usage/context indicators. Active switching requires
 Stop-and-switch confirmation and definitive completion; each session transition
 rotates control identities and fences old events. Nonqueued controls revalidate
@@ -168,8 +168,9 @@ search typing and cached reopening do not discover or select anything. The
 bounded/partial/empty/error states and idle admission remain authoritative.
 A pinned search header and separately scrollable results retain keyboard editing,
 IME composition, Escape/focus return and 12px visible-viewport clearance.
-The existing provider/model selection stays active when switching conversations
-within that worker. The searchable-picker workflow suite passes **1,736
+A saved conversation selection is restored when switching or explicitly
+reopening it; a conversation without saved selection inherits the active worker
+pair. The searchable-picker workflow suite passes **1,736
 assertions** across seven widths and both themes; the full responsive matrix
 passes **2,058 reports / 38,804 assertions**. Short 240px viewports retain a
 visible search field above scrolling results. Evidence is in
@@ -509,8 +510,12 @@ Existing Queue next, Edit & resend and Regenerate remain subject to their shared
 admission and recovery rules. At that milestone, skills were disabled by default
 and required an explicit per-start checkbox; the later Settings-owned enabled
 default documented above supersedes that startup policy. CLI extension trust and
-tool permissions stay independent. Plugins, MCP, subagents and debug remain
-disabled. At that milestone, remote access, host-settings/provider-setup editors,
+tool permissions stay independent. Plugins and debug remain disabled. Configured
+MCP servers and bounded subagents are enabled in explicitly activated workers;
+MCP and shell-capable child operations use the session permission broker. Trust
+remembered before this authority expansion is revoked once so the new activation
+disclosure must be reviewed explicitly. At that
+milestone, remote access, host-settings/provider-setup editors,
 clone-directory jobs, worktree forks and manual compaction were not supplied.
 The later local increment below supersedes only its implemented subset.
 The phased capability tables below remain targets, not the availability contract.
@@ -617,11 +622,13 @@ against unintended target changes; it is not general filesystem/process/network
 containment. The read-only project inspector remains separately pinned to each
 registered root with its own exclusion and input/output rules.
 
-Worktree forks, remote deployment, browser OAuth, plugin/MCP/subagent
-enablement, general Git mutation controls, editors, PTYs and preview fleets are
-deliberately out of scope for this delivered local increment. Skills now have
-a per-project remembered startup preference as described in the current implementation
-status; that does not enable plugins, MCP or subagents. Keep these boundaries independent of what other Snow
+Worktree forks, remote deployment, browser OAuth, plugin enablement,
+browser-side MCP configuration, direct subagent management controls, general Git
+mutation controls, editors, PTYs and preview fleets are deliberately out of scope
+for this delivered local increment. Explicitly activated workers do load configured
+MCP servers and expose bounded model-directed subagents. Skills retain a separate
+per-project remembered startup preference; changing it does not alter plugins,
+MCP or subagent policy. Keep these boundaries independent of what other Snow
 surfaces support. No web imports of app/agent/session/hostcontrol/hostops internals
 or duplicate turn loop are introduced; public typed RPC carries the controls.
 

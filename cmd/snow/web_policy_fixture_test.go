@@ -41,7 +41,7 @@ func policyFixtureOptions(args []string) (app.Options, error) {
 	for _, name := range []string{"mode", "rpc-startup", "permission", "provider", "model"} {
 		cmd.Flags().String(name, "", "")
 	}
-	for _, name := range []string{"no-session", "managed-explicit-goals", "no-plugins", "no-mcp", "no-skills", "no-subagents", "no-debug"} {
+	for _, name := range []string{"no-session", "managed-explicit-goals", "no-plugins", "no-mcp", "no-skills", "subagents", "no-subagents", "no-debug"} {
 		cmd.Flags().Bool(name, false, "")
 	}
 	cmd.Flags().StringSlice("tools", nil, "")
@@ -64,7 +64,7 @@ func runPolicyFixtureWorker() int {
 		return 91
 	}
 	opts, err := policyFixtureOptions(os.Args[1:])
-	if err != nil || opts.Provider != "fake" || opts.Model != "fake-1" || !opts.NoSession || !opts.NoPlugins || !opts.NoMCP || !opts.NoSkills || opts.Subagents == nil || *opts.Subagents || opts.Debug == nil || *opts.Debug {
+	if err != nil || opts.Provider != "fake" || opts.Model != "fake-1" || !opts.NoSession || !opts.NoPlugins || opts.NoMCP || !opts.NoSkills || opts.Subagents == nil || !*opts.Subagents || opts.Debug == nil || *opts.Debug {
 		return 92
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)

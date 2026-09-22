@@ -94,15 +94,17 @@ export function Activation({
           Drafts stay in this tab. {sessionID ? 'Resume' : 'Start'}, then review
           and send.
         </p>
+        <p className="activation-boundary">
+          Starting loads this workspace’s configuration and instructions,
+          connects enabled MCP servers, and allows model-directed subagents.
+          Tools, local MCP servers, and child agents run with your host account’s
+          privileges, not in a sandbox. Browsing does not start an agent or MCP
+          server.
+        </p>
         {project.trusted ? (
           <input type="hidden" name="confirm" value="trusted" />
         ) : (
           <>
-            <p className="activation-boundary">
-              Starting loads this workspace’s configuration and instructions.
-              Tools run with your host account’s privileges, not in a sandbox.
-              Browsing does not start an agent.
-            </p>
             <input type="hidden" name="remember_trust" value="project" />
             <label className="checkbox-label">
               <input

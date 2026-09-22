@@ -4,18 +4,23 @@ import (
 	"bytes"
 	"context"
 	json "encoding/json/v2"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/elmissouri16/snow-core/internal/app"
+	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
-func TestSessionSetModelDoesNotPersistOperatorSelections(t *testing.T) {
+func TestSessionSetModelPersistsConversationWithoutChangingOperatorConfig(t *testing.T) {
 	a, calls := discoveryTestApp(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"data":[{"id":"inactive-model","supports_thinking":true,"thinking_levels":["high"]}]}`)
 	})
@@ -67,6 +72,15 @@ func TestSessionSetModelDoesNotPersistOperatorSelections(t *testing.T) {
 	if calls.Load() != 1 {
 		t.Fatalf("selection unexpectedly repeated cached discovery: calls=%d", calls.Load())
 	}
+	metadata := a.Session.(session.MetadataStore)
+	raw, found, err := metadata.Metadata(sessionModelMetadataKey)
+	if err != nil || !found {
+		t.Fatalf("conversation selection metadata missing: %q %v %v", raw, found, err)
+	}
+	var saved savedSessionModel
+	if err := json.Unmarshal([]byte(raw), &saved, json.RejectUnknownMembers(true)); err != nil || saved != (savedSessionModel{Version: 1, Provider: "inactive", Model: "inactive-model", Thinking: "off"}) {
+		t.Fatalf("saved conversation selection = %+v, raw=%q, err=%v", saved, raw, err)
+	}
 	// Current supported effort is preserved without an extra request parameter.
 	if err := a.Agent.SetThinking(protocol.ThinkingHigh); err != nil {
 		t.Fatal(err)
@@ -89,6 +103,20 @@ func TestSessionSetModelDoesNotPersistOperatorSelections(t *testing.T) {
 	}
 	if info.Data.SessionID != beforeSession || info.Data.Provider != "inactive" || info.Data.Model != "inactive-model" || info.Data.Thinking != protocol.ThinkingHigh {
 		t.Fatalf("current session metadata=%+v", info.Data)
+	}
+	activeModel, err := a.ResolveProviderModel(t.Context(), "openai-compatible", "active-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SetProviderModelThinkingContext(t.Context(), "openai-compatible", activeModel, protocol.ThinkingOff); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.restoreSessionModel(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	provider, model, _ = a.ActiveModelsSnapshot()
+	if provider != "inactive" || model.ID != "inactive-model" || a.Agent.Thinking() != protocol.ThinkingHigh || calls.Load() != 1 {
+		t.Fatalf("saved conversation selection not restored: provider=%q model=%+v thinking=%q calls=%d", provider, model, a.Agent.Thinking(), calls.Load())
 	}
 	// Switching back to a model that cannot think safely resets effort to off.
 	if err := srv.handle(t.Context(), Request{Type: "session_set_model", Provider: "openai-compatible", Model: "active-model"}); err != nil {
@@ -119,6 +147,70 @@ func TestSessionSetModelDoesNotPersistOperatorSelections(t *testing.T) {
 	}
 	if !bytes.Equal(beforePersisted, afterPersisted) || !bytes.Equal(beforeEffective, afterEffective) {
 		t.Fatal("session-only model selection changed persisted/effective config or project selection maps")
+	}
+}
+
+func TestSessionModelRestoresAfterAppRestart(t *testing.T) {
+	t.Setenv("SNOW_HOME", t.TempDir())
+	t.Setenv("SNOW_SESSIONS_DIR", filepath.Join(t.TempDir(), "sessions"))
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/active/models":
+			_, _ = io.WriteString(w, `{"data":[{"id":"active-model"}]}`)
+		case "/saved/models":
+			_, _ = io.WriteString(w, `{"data":[{"id":"saved-model"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer remote.Close()
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	config := fmt.Sprintf(`{"providers":{"openai-compatible":{"base_url":%q},"saved":{"type":"openai-compatible","base_url":%q}}}`, remote.URL+"/active", remote.URL+"/saved")
+	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	open := func() *app.App {
+		a, err := app.New(t.Context(), app.Options{Provider: "openai-compatible", ConfigPath: configPath, Permission: "deny", NoPlugins: true, NoMCP: true, NoSkills: true, CWD: cwd})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	first := open()
+	var output bytes.Buffer
+	server := New(t.Context(), first, strings.NewReader(""), &output)
+	if err := server.handle(t.Context(), Request{Type: "models_discover"}); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if err := server.handle(t.Context(), Request{Type: "session_set_model", Provider: "saved", Model: "saved-model"}); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := first.Session.ID()
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	second := open()
+	defer second.Close()
+	if provider, model, _ := second.ActiveModelsSnapshot(); provider != "openai-compatible" || model.ID != "active-model" {
+		t.Fatalf("restart did not begin from host default: provider=%q model=%q", provider, model.ID)
+	}
+	output.Reset()
+	server = New(t.Context(), second, strings.NewReader(""), &output)
+	params, err := json.Marshal(struct {
+		SessionID string `json:"session_id"`
+	}{sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.handle(t.Context(), Request{Type: "session_open", Params: params}); err != nil {
+		t.Fatal(err)
+	}
+	provider, model, _ := second.ActiveModelsSnapshot()
+	if second.Session.ID() != sessionID || provider != "saved" || model.ID != "saved-model" {
+		t.Fatalf("reopened conversation selection = session:%q provider:%q model:%q", second.Session.ID(), provider, model.ID)
 	}
 }
 

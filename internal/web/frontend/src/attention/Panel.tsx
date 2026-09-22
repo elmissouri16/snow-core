@@ -24,6 +24,7 @@ function Permission({pending, state, onGuard}: Props) {
     <div className="attention-warning">{blocked ? 'Incomplete summary · approval blocked' : 'APPROVAL REQUIRED'}</div>
     <div className="attention-body attention-permission-body" tabIndex={0} role="group" aria-label="Permission details">
       <h2 className="attention-title">{string(p.tool) || 'Tool'} · {string(p.risk) || 'unspecified risk'}</h2>
+      {p.agent_path && <p>Requested by subagent <code>{string(p.agent_path)}</code>{p.agent_role && <> ({string(p.agent_role)})</>}</p>}
       {p.reason && <p>{string(p.reason)}</p>}{p.scope_label && <p>{string(p.scope_label)}</p>}
       {list(p.paths).map((path, i) => <pre key={i}>{string(path)}</pre>)}
       {!!list(p.capabilities).length && <p>Capabilities: {list(p.capabilities).map(string).join(', ')}</p>}

@@ -7,10 +7,10 @@
     <label class="visually-hidden" for="workspace-prompt">Session draft</label>
     <textarea id="workspace-prompt" class="activation-draft" rows="2" maxlength="65536" data-draft-project="{{.Project.ID}}" data-draft-session="{{.SessionID}}" data-draft-name="{{.Project.Name}}" placeholder="What would you like to work on?" aria-describedby="workspace-draft-help" disabled></textarea>
     <p class="fine" id="workspace-draft-help">Drafts stay in this tab. {{if .SessionID}}Resume{{else}}Start{{end}}, then review and send.</p>
+    <p class="activation-boundary">Starting loads this workspace’s configuration and instructions, connects enabled MCP servers, and allows model-directed subagents. Tools, local MCP servers, and child agents run with your host account’s privileges, not in a sandbox. Browsing does not start an agent or MCP server.</p>
     {{if .Project.Trusted}}
     <input type="hidden" name="confirm" value="trusted">
     {{else}}
-    <p class="activation-boundary">Starting loads this workspace’s configuration and instructions. Tools run with your host account’s privileges, not in a sandbox. Browsing does not start an agent.</p>
     <input type="hidden" name="remember_trust" value="project">
     <label class="checkbox-label"><input name="confirm" type="checkbox" value="activate" required> I trust this workspace. Remember my choice for future starts in this manager.</label>
     <p class="fine">Trust does not grant tools Allow permissions. Forget it in Settings → Workspaces.</p>

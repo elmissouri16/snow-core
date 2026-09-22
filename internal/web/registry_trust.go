@@ -5,12 +5,15 @@ package web
 import (
 	"context"
 	"database/sql"
+	"errors"
 )
 
 // Consent is manager-only and absent by default, including on migration. Exact
 // registration identity is stored explicitly, independently of mutable labels.
 // Triggers revoke consent in the same statement that archives/deletes/rebinds a
 // registration, and prevent orphan, inactive, or more than MaxProjects entries.
+const runtimeProfileConsentVersion = 1
+
 func migrateProjectTrust(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, `
  CREATE TABLE IF NOT EXISTS project_trust (
@@ -35,7 +38,41 @@ func migrateProjectTrust(ctx context.Context, tx *sql.Tx) error {
  BEGIN DELETE FROM project_trust WHERE project_id IN (OLD.id,NEW.id); END;
  CREATE TRIGGER IF NOT EXISTS project_trust_delete AFTER DELETE ON projects
  BEGIN DELETE FROM project_trust WHERE project_id=OLD.id; END;
+ CREATE TABLE IF NOT EXISTS runtime_profile_consent (
+  singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton=1),
+  version INTEGER NOT NULL CHECK(version>0)
+ );
+ CREATE TABLE IF NOT EXISTS project_trust_profile (
+  project_id TEXT PRIMARY KEY NOT NULL CHECK(length(project_id)=36),
+  version INTEGER NOT NULL CHECK(version>0)
+ );
+ CREATE TRIGGER IF NOT EXISTS project_trust_profile_delete AFTER DELETE ON project_trust
+ BEGIN DELETE FROM project_trust_profile WHERE project_id=OLD.project_id; END;
  `)
+	if err != nil {
+		return registryError(ctx)
+	}
+	var version int
+	err = tx.QueryRowContext(ctx, `SELECT version FROM runtime_profile_consent WHERE singleton=1`).Scan(&version)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Existing trust predates MCP/subagent activation authority. Revoke it
+		// once so the next explicit start presents the expanded disclosure.
+		_, err = tx.ExecContext(ctx, `DELETE FROM project_trust;
+ INSERT INTO runtime_profile_consent(singleton,version) VALUES(1,?)`, runtimeProfileConsentVersion)
+	} else if err == nil && version < runtimeProfileConsentVersion {
+		_, err = tx.ExecContext(ctx, `DELETE FROM project_trust;
+ UPDATE runtime_profile_consent SET version=? WHERE singleton=1`, runtimeProfileConsentVersion)
+	} else if err == nil && version != runtimeProfileConsentVersion {
+		err = errors.New("web: unsupported runtime profile consent version")
+	}
+	if err != nil {
+		return registryError(ctx)
+	}
+	_, err = tx.ExecContext(ctx, `DELETE FROM project_trust
+ WHERE NOT EXISTS (SELECT 1 FROM project_trust_profile p
+  WHERE p.project_id=project_trust.project_id AND p.version=?);
+ DELETE FROM project_trust_profile
+ WHERE version!=? OR NOT EXISTS (SELECT 1 FROM project_trust t WHERE t.project_id=project_trust_profile.project_id)`, runtimeProfileConsentVersion, runtimeProfileConsentVersion)
 	if err != nil {
 		return registryError(ctx)
 	}
@@ -110,6 +147,10 @@ func (r *Registry) RememberProjectTrust(ctx context.Context, expected Project) e
  ON CONFLICT(project_id) DO UPDATE SET path=excluded.path,device=excluded.device,inode=excluded.inode`, current.ID, current.Path, current.device, current.inode)
 	if err := organizationResult(ctx, result, err); err != nil {
 		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO project_trust_profile(project_id,version) VALUES(?,?)
+ ON CONFLICT(project_id) DO UPDATE SET version=excluded.version`, current.ID, runtimeProfileConsentVersion); err != nil {
+		return registryError(ctx)
 	}
 	current.checkIdentity()
 	if !current.Available {

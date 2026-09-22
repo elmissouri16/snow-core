@@ -31,10 +31,13 @@ func runtimeWorkerFixture() int {
 	if strings.HasPrefix(os.Getenv("SNOW_WEB_RUNTIME_TEST_MODE"), "workflow") {
 		return runtimeWorkflowFixture()
 	}
-	for _, flag := range []string{"--no-session", "--managed-explicit-goals", "--no-plugins", "--no-mcp", "--no-skills", "--no-subagents", "--no-debug"} {
+	for _, flag := range []string{"--no-session", "--managed-explicit-goals", "--no-plugins", "--subagents", "--no-skills", "--no-debug"} {
 		if !slices.Contains(os.Args, flag) {
 			return 10
 		}
+	}
+	if slices.Contains(os.Args, "--no-mcp") || slices.Contains(os.Args, "--no-subagents") {
+		return 10
 	}
 	if slices.Contains(os.Args, "--permission") {
 		return 11 // An explicit override prevents session policy restoration.
@@ -47,7 +50,7 @@ func runtimeWorkerFixture() int {
 	}
 	mode := os.Getenv("SNOW_WEB_RUNTIME_TEST_MODE")
 	emit := func(value any) {
-		// Production root events carry AgentRef metadata even with subagents disabled.
+		// Production root events carry AgentRef metadata when subagents are enabled.
 		if event, ok := value.(protocol.AgentEvent); ok && event.Agent == nil && mode != "legacy" {
 			event.Agent = &protocol.AgentRef{ThreadID: "root-thread", Path: protocol.RootAgentPath, Depth: 0, Role: "root"}
 			value = event
@@ -159,8 +162,9 @@ func runtimeWorkerFixture() int {
 			emit(protocol.AgentEvent{Type: protocol.EvToolEnd, ToolOutput: "SECRET-OUTPUT"})
 			emit(protocol.AgentEvent{Type: protocol.EvTextDelta, Text: "SECRET-CHILD", Agent: &protocol.AgentRef{ThreadID: "child-thread", ParentThreadID: "root-thread", Path: "/root/child", ParentPath: protocol.RootAgentPath, Depth: 1}})
 
-			// Invalid/child interaction events must not create browser prompts or
-			// fail an otherwise healthy root turn.
+			// Invalid/child non-interaction output must not create browser prompts
+			// or fail an otherwise healthy root turn. Recognized permission and
+			// lifecycle interactions are separately required to fail closed.
 			for _, ref := range []*protocol.AgentRef{
 				{ThreadID: "child-thread", ParentThreadID: "root-thread", Path: "/root/child", ParentPath: protocol.RootAgentPath, Depth: 1},
 				{},
@@ -168,7 +172,6 @@ func runtimeWorkerFixture() int {
 				{ThreadID: "wrong-parent", Path: protocol.RootAgentPath, ParentPath: protocol.RootAgentPath, ParentThreadID: "other"},
 			} {
 				emit(protocol.AgentEvent{Type: protocol.EvTextDelta, Text: "SECRET-NONROOT", Agent: ref})
-				emit(protocol.AgentEvent{Type: protocol.EvPermissionRequest, Agent: ref})
 				emit(protocol.AgentEvent{Type: protocol.EvUserInputRequest, Agent: ref})
 			}
 			switch request.Message {

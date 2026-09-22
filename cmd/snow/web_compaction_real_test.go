@@ -65,7 +65,7 @@ func runCompactionRealWorker(directory string) int {
 		}
 		return 0
 	}
-	if startup != "eager" || opts.Provider != "fake" || opts.Model != "fake-1" || !opts.ManagedExplicitGoals || !opts.NoSession || !opts.NoPlugins || !opts.NoMCP || !opts.NoSkills || opts.Subagents == nil || *opts.Subagents {
+	if startup != "eager" || opts.Provider != "fake" || opts.Model != "fake-1" || !opts.ManagedExplicitGoals || !opts.NoSession || !opts.NoPlugins || opts.NoMCP || !opts.NoSkills || opts.Subagents == nil || !*opts.Subagents {
 		return 95
 	}
 	a, err := app.New(ctx, opts)

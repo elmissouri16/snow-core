@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
@@ -76,6 +77,24 @@ func (a *App) loadProviderCatalogs(ctx context.Context, force bool) ([]protocol.
 	}
 	a.stateMu.Unlock()
 	return cloneModels(models), loadErr
+}
+
+// ResolveProviderModel returns one exact catalog-backed provider/model pair.
+// It loads only the requested provider and does not change the active selection.
+func (a *App) ResolveProviderModel(ctx context.Context, providerID, modelID string) (protocol.Model, error) {
+	if a == nil || a.runtimeSelection == nil {
+		return protocol.Model{}, errors.New("app: provider catalogs unavailable")
+	}
+	models, loadErr := a.runtimeSelection.ensureCatalog(ctx, providerID, false)
+	for _, model := range models {
+		if model.ID == modelID {
+			return model.Clone(), nil
+		}
+	}
+	if loadErr != nil {
+		return protocol.Model{}, fmt.Errorf("app: discover models for provider %s: %w", providerID, loadErr)
+	}
+	return protocol.Model{}, fmt.Errorf("app: model %q is unavailable for provider %s", modelID, providerID)
 }
 
 // SubagentModels returns exact provider/model pairs currently available to children.

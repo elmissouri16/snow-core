@@ -1874,8 +1874,9 @@ bounded current-branch text, including pre-compaction history.
 
 Explicit activation owns at most two live project workers. Fixed CLI policy uses
 an Ask new-session baseline and the fixed `managed-explicit-goals` profile.
-Plugins/MCP/skills/subagents/debug remain disabled; managed-process tools are
-enabled. Ordinary prompts neither expose nor dispatch goal tools; only explicitly
+Configured MCP servers, bounded subagents and managed-process tools are enabled;
+plugins and debug remain disabled. Installed skills follow the manager's separate
+per-project next-start policy. Ordinary prompts neither expose nor dispatch goal tools; only explicitly
 admitted native goal work can get/update the owning goal. New or resumed durable sessions support serial text
 prompts, definitive completion, Stop, allow-once/deny decisions and typed question
 replies. Worker-instance identities bind controls and read-only subscriptions.
@@ -1961,8 +1962,10 @@ remain disabled after mutations until a fresh bound snapshot reconciles state.
 The activated worker now supplies explicit bounded `models_discover` catalogs,
 usage/context counts with recorded-cost estimates, and current-CWD session choices. The additive
 `session_set_model` command selects a cached provider/model pair without rewriting
-operator-owned host/project settings; legacy `set_model` remains unchanged.
-Conversation creation/opening reuses the worker, requires explicit confirmation
+operator-owned host/project settings, stores the effective pair in bounded,
+provider-excluded conversation metadata, and restores it on explicit
+`session_open` after worker or manager restart; legacy `set_model` remains
+unchanged. Conversation creation/opening reuses the worker, requires explicit confirmation
 before stopping active work, waits for definitive completion, rotates control
 identities and fences retired-session events. Nonqueued controls revalidate the
 identity after lock acquisition. Unknown transitions fail closed rather than

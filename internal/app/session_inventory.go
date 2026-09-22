@@ -88,6 +88,42 @@ func (a *App) OpenSession(sessionID string) (session.SessionInfo, error) {
 	return a.sessionInfoByID(sessionID)
 }
 
+// SessionMetadataByID reads one provider-excluded metadata value from an exact
+// current-project session without changing the active session.
+func (a *App) SessionMetadataByID(sessionID, key string) (string, bool, error) {
+	activeID, _, err := a.Agent.SessionIdentity()
+	if err != nil {
+		return "", false, err
+	}
+	if activeID == sessionID {
+		a.stateMu.Lock()
+		st := a.Session
+		a.stateMu.Unlock()
+		metadata, ok := st.(session.MetadataStore)
+		if !ok || st.ID() != sessionID {
+			return "", false, errors.New("app: session metadata unavailable")
+		}
+		return metadata.Metadata(key)
+	}
+	info, err := a.sessionInfoByID(sessionID)
+	if err != nil {
+		return "", false, err
+	}
+	st, err := session.NewFileIndex(session.DefaultSessionsRoot()).Open(info.Path)
+	if err != nil {
+		return "", false, err
+	}
+	if st.ID() != sessionID {
+		return "", false, errors.Join(session.ErrNotFound, st.Close())
+	}
+	metadata, ok := st.(session.MetadataStore)
+	if !ok {
+		return "", false, errors.Join(errors.New("app: session metadata unavailable"), st.Close())
+	}
+	value, found, readErr := metadata.Metadata(key)
+	return value, found, errors.Join(readErr, st.Close())
+}
+
 // DeleteSessionByID permanently deletes an inactive project session selected
 // by immutable ID. DeleteSession retains the active-session and cleanup checks.
 func (a *App) DeleteSessionByID(sessionID string) error {
