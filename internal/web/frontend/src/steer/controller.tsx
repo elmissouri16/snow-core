@@ -9,7 +9,7 @@ import {accepted, authority, bindReviewed, blocking as ownsDraft, canDismissUnkn
 import type {API, Identity, Operation, Snapshot, State, Store, UI} from './model.ts';
 
 type View = {
-  api: API; identity: Identity; container: HTMLElement; root: Root; state: State; present: boolean;
+  api: API; identity: Identity; container: HTMLElement; root: Root; state: State; present: boolean; rendered: Presentation | null;
   dialog: RefObject<HTMLDialogElement | null>; input: RefObject<HTMLTextAreaElement | null>;
   returnFocus: HTMLElement | null; actions: Actions;
 };
@@ -26,7 +26,7 @@ export function init(api: API): void {
   const store = stores.get(key) || {text: '', revision: 0};
   stores.delete(key); stores.set(key, store);
   while (stores.size > 16) { const oldest = stores.keys().next(); if (!oldest.done) stores.delete(oldest.value); }
-  const current: View = {api, identity, container, root: createRoot(container), state: initialState(store), present: true,
+  const current: View = {api, identity, container, root: createRoot(container), state: initialState(store), present: true, rendered: null,
     dialog: createRef(), input: createRef(), returnFocus: null, actions: {
       open: trigger => { if (bound(current)) open(trigger); }, close: () => close(current), closed: () => closed(current),
       review: () => review(current), copy: (request, trigger) => copy(current, request, trigger),
@@ -82,11 +82,22 @@ function presentation(current: View): Presentation {
     items: s.projection?.items || [],
   };
 }
+function samePresentation(left: Presentation | null, right: Presentation): boolean {
+  return !!left && left.text === right.text && left.busy === right.busy && left.composing === right.composing && left.triggerHidden === right.triggerHidden &&
+    left.canOpen === right.canOpen && left.canSubmit === right.canSubmit && left.error === right.error && left.reviewHidden === right.reviewHidden &&
+    left.canReview === right.canReview && left.dismiss === right.dismiss && left.items.length === right.items.length &&
+    left.items.every((item, index) => {
+      const other = right.items[index];
+      return item.request_id === other.request_id && item.item_id === other.item_id && item.text === other.text && item.status === other.status;
+    });
+}
 function draw(current: View): void {
   if (view !== current || !current.present) return;
   // Pass a presentation snapshot, never the mutable admission object. React
   // owns every descendant; native refs only manage modal/focus behavior.
   const state = presentation(current);
+  if (samePresentation(current.rendered, state)) return;
+  current.rendered = state;
   flushSync(() => current.root.render(<SteerPanel state={state} actions={current.actions} dialog={current.dialog} input={current.input} />));
 }
 function changed(current: View): void {

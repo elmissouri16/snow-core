@@ -4,7 +4,7 @@ import {createRoot, type Root} from 'react-dom/client';
 import {Chrome} from './Chrome';
 import {Actions, Editor, Notices, Status, TurnStatus, type DraftHandle, type Suggestions} from './Composer';
 import {Regeneration} from './Regeneration';
-import {initialChrome, initialControls, type ChromeState, type ControlsState} from './model';
+import {initialChrome, initialControls, sameControlField, type ChromeState, type ControlsState} from './model';
 
 type Part = 'chrome' | 'composer-notices' | 'composer-editor' | 'composer-actions' | 'composer-status' | 'turn-status' | 'regenerate-dialog';
 interface Owner {
@@ -51,7 +51,7 @@ function updateControls(patch: Partial<ControlsState>) {
   const current = owner; if (!current) return;
   const previous = current.controls;
   const initial = Object.keys(patch).length === 0;
-  const changed = (...keys: (keyof ControlsState)[]) => initial || keys.some(key => key in patch && patch[key] !== previous[key]);
+  const changed = (...keys: (keyof ControlsState)[]) => initial || keys.some(key => key in patch && !sameControlField(key, patch[key]!, previous[key]));
   current.controls = {...previous, ...patch};
   const view = current.controls;
   // Only an explicit composer-mode change updates the editor's label/placeholder.

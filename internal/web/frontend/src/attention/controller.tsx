@@ -15,7 +15,7 @@ interface View {
   identity: (string | undefined)[]; scope: string; key: string; kind: 'input' | 'permission'; pending: unknown; turn: string;
   draft: Draft | null; state: State; feedback: string; composing: boolean;
   form: ReturnType<typeof createRef<HTMLFormElement>>; body: ReturnType<typeof createRef<HTMLDivElement>>;
-  observer?: ResizeObserver; layoutFrame: number; layoutMetrics: number[] | null;
+  observer?: ResizeObserver; layoutFrame: number; layoutMetrics: number[] | null; renderKey: string; takingOver: boolean;
 }
 const stores = new Map<string, Draft>(), MAX_STORES = 8, MAX_AGE = 30 * 60 * 1000;
 const pageNonce = globalThis.crypto?.randomUUID?.() || String(Date.now());
@@ -38,7 +38,7 @@ export function init(api: Options = {}): void {
   trimStores();
   const current: View = {api, root, region, seat, react: createRoot(region), controller: new AbortController(), identity,
     scope: JSON.stringify([api.nonce ?? pageNonce, ...identity]), key: '', kind: 'input', pending: null, turn: '', draft: null,
-    state: {}, feedback: '', composing: false, form: createRef(), body: createRef(), layoutFrame: 0, layoutMetrics: null};
+    state: {}, feedback: '', composing: false, form: createRef(), body: createRef(), layoutFrame: 0, layoutMetrics: null, renderKey: '', takingOver: false};
   view = current;
   const options = {signal: current.controller.signal}, schedule = () => layout(current);
   window.addEventListener('resize', schedule, options);
@@ -82,13 +82,19 @@ export function render(snapshot: Snapshot | null, state: State = {}): {takingOve
     }
   }
   const takingOver = !!current.pending;
-  draw(current); takeover(current, takingOver);
-  if (takingOver) layout(current); else current.api.onLayout?.();
+  const changed = current.renderKey !== presentationKey(current);
+  if (changed) draw(current);
+  if (current.takingOver !== takingOver) {current.takingOver = takingOver; takeover(current, takingOver);}
+  if (changed) {if (takingOver) layout(current); else current.api.onLayout?.();}
   return {takingOver};
+}
+function presentationKey(current: View): string {
+  return JSON.stringify([current.key, !!current.pending, current.state.safe === true, current.state.busy === true, current.state.canStop === true, current.state.stopping === true]);
 }
 function alive(current: View, key: string): boolean {return view === current && current.key === key && current.region.isConnected;}
 function draw(current: View) {
   if (view !== current) return;
+  current.renderKey = presentationKey(current);
   const key = current.key;
   const ready = () => alive(current, key) && current.state.safe === true;
   flushSync(() => current.react.render(current.pending && current.draft ? <Panel key={key} kind={current.kind} pending={current.pending}

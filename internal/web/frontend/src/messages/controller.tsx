@@ -5,12 +5,12 @@ import { Message } from './Message';
 import { defaultActions, mergeActions } from './actions';
 import type { ActionPresentation, ActionPresentationPatch } from './actions';
 import { ToolContents, ToolRow } from './ToolRow';
-import { projectActivities, projectMessages, record, text } from './model';
+import { projectActivities, projectMessages, record, sameActivityProjection, sameMessageProjection, text } from './model';
 import type { Activity, MessageData, ToolData } from './model';
 import { initialActivities, initialMessages } from './initial';
 import { scopeKey, scopeOf } from './imageTransport';
 
-type State = {actions: ActionPresentation; root: Root; host: HTMLElement; scope: HTMLElement | null; identity: string; messages: MessageData[]; activities: Activity[]; region: HTMLElement | null; truncated: boolean; slots: Map<string, HTMLElement>; noticeHost: HTMLElement | null};
+type State = {actions: ActionPresentation; root: Root; host: HTMLElement; scope: HTMLElement | null; identity: string; messages: MessageData[]; activities: Activity[]; region: HTMLElement | null; truncated: boolean; slots: Map<string, HTMLElement>; noticeHost: HTMLElement | null; presentation: string; committed: boolean};
 const states = new Map<HTMLElement, State>();
 // Ephemeral public-only projection for same-document lifecycle (not browser
 // storage). A bfcache pagehide/dispose must not erase saved-history content on
@@ -18,6 +18,9 @@ const states = new Map<HTMLElement, State>();
 const retired = new WeakMap<HTMLElement, {identity: string; messages: MessageData[]; activities: Activity[]; truncated: boolean}>();
 const standaloneTools = new Map<HTMLDetailsElement, Root>();
 function scope(host: HTMLElement) { return host.closest<HTMLElement>('#live-session') || host.closest<HTMLElement>('.catalog-history'); }
+function presentation(scope: HTMLElement | null) {
+  return JSON.stringify([scope?.dataset.runtime, scope?.dataset.messageEditEnabled, scope?.dataset.messageRegenerateEnabled]);
+}
 function create(host: HTMLElement): State {
   const owner = scope(host), region = owner?.id === 'live-session' ? owner.querySelector<HTMLElement>('#live-activities') : null;
   const identity = scopeKey(scopeOf(owner)), saved = retired.get(host);
@@ -27,7 +30,7 @@ function create(host: HTMLElement): State {
   const truncated = restored?.truncated ?? region?.querySelector<HTMLElement>('.activity-limit')?.hidden === false;
   // Only explicit public SSR markup is read; all subsequent children are JSX.
   const root = createRoot(host);
-  const state: State = {actions: defaultActions(), root, host, scope: owner, identity: scopeKey(scopeOf(owner)), messages, activities, region, truncated, slots: new Map(), noticeHost: null};
+  const state: State = {actions: defaultActions(), root, host, scope: owner, identity: scopeKey(scopeOf(owner)), messages, activities, region, truncated, slots: new Map(), noticeHost: null, presentation: presentation(owner), committed: false};
   states.set(host, state);
   if (region) attachRegion(state, region);
   return state;
@@ -69,6 +72,7 @@ function View({state}: {state: State}) {
   </>;
 }
 function commit(state: State) {
+  state.committed = true; state.presentation = presentation(state.scope);
   const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const selection = window.getSelection();
   // Numeric endpoints, not cloned live Ranges: changing a retained text node's
@@ -120,7 +124,9 @@ function retire(state: State) {
 }
 function render(host: HTMLElement | null, messages: unknown) {
   if (!host || host.closest('[data-react-saved-history]')) return;
-  const state = ensure(host); state.messages = projectMessages(messages); commit(state);
+  const state = ensure(host), next = projectMessages(messages);
+  if (state.committed && state.presentation === presentation(state.scope) && sameMessageProjection(state.messages, next)) return;
+  state.messages = next; commit(state);
 }
 function updateActions(host: HTMLElement | null, partialPresentation: ActionPresentationPatch) {
   if (!host?.isConnected || host.closest('[data-react-saved-history]')) return;
@@ -153,10 +159,23 @@ function init(scope: ParentNode | null) {
 }
 function renderActivities(region: HTMLElement | null, snapshot: unknown, transcript: HTMLElement | null = document.querySelector('#live-transcript')) {
   if (!region || !transcript || transcript.closest('[data-react-saved-history]')) return;
+  const state = ensure(transcript), data = record(snapshot), next = projectActivities(data.activities);
+  const truncated = !!data.activities_truncated || Array.isArray(data.activities) && data.activities.length > 128;
+  const regionChanged = state.region !== region || !state.noticeHost;
+  if (regionChanged) attachRegion(state, region);
+  if (state.committed && !regionChanged && state.presentation === presentation(state.scope) && state.truncated === truncated && sameActivityProjection(state.activities, next)) return;
+  state.activities = next; state.truncated = truncated; commit(state);
+}
+/** One authoritative runtime snapshot produces one transcript commit. */
+function renderSnapshot(region: HTMLElement | null, snapshot: unknown, transcript: HTMLElement | null = document.querySelector('#live-transcript')) {
+  if (!region || !transcript || transcript.closest('[data-react-saved-history]')) return;
   const state = ensure(transcript), data = record(snapshot);
-  if (state.region !== region || !state.noticeHost) attachRegion(state, region);
-  state.activities = projectActivities(data.activities);
-  state.truncated = !!data.activities_truncated || Array.isArray(data.activities) && data.activities.length > 128;
+  const nextMessages = projectMessages(data.messages), nextActivities = projectActivities(data.activities);
+  const truncated = !!data.activities_truncated || Array.isArray(data.activities) && data.activities.length > 128;
+  const regionChanged = state.region !== region || !state.noticeHost;
+  if (regionChanged) attachRegion(state, region);
+  if (state.committed && !regionChanged && state.presentation === presentation(state.scope) && state.truncated === truncated && sameMessageProjection(state.messages, nextMessages) && sameActivityProjection(state.activities, nextActivities)) return;
+  state.messages = nextMessages; state.activities = nextActivities; state.truncated = truncated;
   commit(state);
 }
 // Compatibility for independently owned legacy callers. Transcript/history rows
@@ -172,5 +191,5 @@ function renderToolRow(row: HTMLDetailsElement, value: unknown) {
   if (!data.expandable) row.open = false;
   flushSync(() => root.render(<ToolContents data={data}/>));
 }
-export const messages = Object.freeze({render, enhance, init, dispose, updateActions});
+export const messages = Object.freeze({render, renderSnapshot, enhance, init, dispose, updateActions});
 export const visibility = Object.freeze({renderActivities, renderToolRow});

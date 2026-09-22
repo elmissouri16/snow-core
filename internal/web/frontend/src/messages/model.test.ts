@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { boundedOutput, projectActivities, projectMessages } from './model.ts';
+import { boundedOutput, projectActivities, projectMessages, sameActivityProjection, sameMessageProjection } from './model.ts';
 import { imageURL } from './imageTransport.ts';
 import { markdownTags, safeLink } from './markdownModel.ts';
 import { defaultActions, mergeActions } from './actions.ts';
@@ -58,6 +58,19 @@ test('runtime activity binds only an exact marker, bounds output, and handles un
   assert.equal(known.messageID, 'marker'); assert.equal(known.data.label, 'Outcome unknown');
   assert.equal(known.data.output.length, 16384); assert.equal(known.data.truncated, true);
   assert.equal(unknown.messageID, ''); assert.equal(unknown.data.label, 'Status unavailable');
+});
+
+test('runtime projections detect semantic changes without treating fresh snapshot objects as changes', () => {
+  const messages = [
+    {id: 'u', role: 'user', text: 'hello', can_edit: true},
+    {id: 'a', role: 'assistant', text: 'answer', html: '<p>answer</p>', tools: [{id: 't', tool: 'read', status: 'completed', output_available: true, output: 'done'}]},
+  ];
+  const activities = [{id: 't', message_id: 'marker', tool: 'read', status: 'completed', output: 'done'}];
+  const firstMessages = projectMessages(messages), firstActivities = projectActivities(activities);
+  assert.equal(sameMessageProjection(firstMessages, projectMessages(structuredClone(messages))), true);
+  assert.equal(sameActivityProjection(firstActivities, projectActivities(structuredClone(activities))), true);
+  assert.equal(sameMessageProjection(firstMessages, projectMessages([{...messages[0], text: 'changed'}, messages[1]])), false);
+  assert.equal(sameActivityProjection(firstActivities, projectActivities([{...activities[0], output: 'changed'}])), false);
 });
 
 test('image URLs require exact authenticated local route, identity, raster type and query', () => {

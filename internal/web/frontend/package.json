@@ -10,7 +10,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "node scripts/build.mjs",
     "check": "node scripts/check.mjs",
-    "test": "node --experimental-strip-types --test src/activity/summary.test.ts src/organization/model.test.mjs src/browser-access/model.test.ts src/host-settings/model.test.ts src/reasoning/model.test.ts src/compaction/model.test.ts src/goals/model.test.ts src/versions/model.test.ts src/conversation/model.test.ts src/steer/model.test.ts src/queue/model.test.ts src/composer-context/model.test.ts src/attention/model.test.ts src/messages/model.test.ts src/inspection/model.test.ts src/processes/model.test.ts src/shell/model.test.ts src/shell/controller.test.ts src/shell/menu-aria.test.ts src/workspace/model.test.ts src/workspace/operationController.test.ts scripts/assets.test.mjs",
+    "test": "node --experimental-strip-types --test src/activity/summary.test.ts src/organization/model.test.mjs src/browser-access/model.test.ts src/host-settings/model.test.ts src/reasoning/model.test.ts src/compaction/model.test.ts src/goals/model.test.ts src/versions/model.test.ts src/conversation/model.test.ts src/steer/model.test.ts src/queue/model.test.ts src/composer-context/model.test.ts src/attention/model.test.ts src/live-view/model.test.ts src/messages/model.test.ts src/inspection/model.test.ts src/processes/model.test.ts src/shell/model.test.ts src/shell/controller.test.ts src/shell/menu-aria.test.ts src/workspace/model.test.ts src/workspace/operationController.test.ts scripts/assets.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

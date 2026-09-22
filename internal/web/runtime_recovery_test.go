@@ -249,6 +249,46 @@ func TestRecoveryFailedWorkerCloseReopenIsIsolated(t *testing.T) {
 	}
 }
 
+func TestRecoveryRepeatedFailedWorkerCloseReopensExactSession(t *testing.T) {
+	m, projects, _ := runtimeTestManager(t, "")
+	m.recovery = &memoryRecoveryStore{}
+	current, err := m.Open(t.Context(), projects[0], "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID := current.SessionID
+	for cycle := range 2 {
+		if err := m.Prompt(t.Context(), projects[0].ID, current.InstanceID, "ack-exit"); err != nil {
+			t.Fatalf("cycle %d prompt: %v", cycle, err)
+		}
+		releaseRecoveryEOF(t, m, projects[0].ID, current.InstanceID)
+		failed := runtimeWait(t, m, projects[0].ID, func(s RuntimeSnapshot) bool { return s.Status == "failed" })
+		if failed.Recovery.State != RecoveryAdmitted {
+			t.Fatalf("cycle %d recovery evidence: %+v", cycle, failed.Recovery)
+		}
+		if _, err := m.Open(t.Context(), projects[0], sessionID, "", ""); !errors.Is(err, ErrRuntimeBusy) {
+			t.Fatalf("cycle %d implicitly reopened failed runtime: %v", cycle, err)
+		}
+		if err := m.CloseProject(t.Context(), projects[0].ID, current.InstanceID); err != nil {
+			t.Fatalf("cycle %d close: %v", cycle, err)
+		}
+		if _, ok := m.Snapshot(projects[0].ID); ok {
+			t.Fatalf("cycle %d retained closed runtime", cycle)
+		}
+		next, err := m.Open(t.Context(), projects[0], sessionID, "", "")
+		if err != nil {
+			t.Fatalf("cycle %d reopen: %v", cycle, err)
+		}
+		if next.SessionID != sessionID || next.InstanceID == current.InstanceID || next.Permission != nil || next.Input != nil || len(next.Activities) != 0 || next.Recovery.State != RecoveryAdmitted {
+			t.Fatalf("cycle %d reused authority or lost evidence: %+v", cycle, next)
+		}
+		if err := m.ReplyPermission(t.Context(), projects[0].ID, current.InstanceID, "old-permission", protocol.PermissionAllow); !errors.Is(err, ErrRuntimeInvalid) {
+			t.Fatalf("cycle %d stale permission accepted: %v", cycle, err)
+		}
+		current = next
+	}
+}
+
 func TestRecoveryOutcomeWriteFailureRetainsIntent(t *testing.T) {
 	m, projects, _ := runtimeTestManager(t, "")
 	m.recovery = &memoryRecoveryStore{failOutcome: true}

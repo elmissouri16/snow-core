@@ -45,7 +45,7 @@ func permissionFixtureWorkerArgs(args []string) (catalog, valid bool) {
 	if slices.Equal(args, []string{"--mode", "rpc", "--rpc-startup", "catalog"}) {
 		return true, true
 	}
-	base := []string{"--mode", "rpc", "--rpc-startup", "eager", "--no-session", "--managed-explicit-goals", "--no-plugins", "--no-mcp", "--no-skills", "--no-subagents", "--no-debug", "--tools", "read,glob,grep,write,edit,bash,ask_user,get_goal,create_goal,update_goal,process_start,process_status,process_logs,process_stop,process_list"}
+	base := []string{"--mode", "rpc", "--rpc-startup", "eager", "--no-session", "--managed-explicit-goals", "--no-plugins", "--subagents", "--no-skills", "--no-debug", "--tools", "read,glob,grep,write,edit,bash,ask_user,get_goal,create_goal,update_goal,process_start,process_status,process_logs,process_stop,process_list"}
 	if len(args) < len(base) || !slices.Equal(args[:len(base)], base) {
 		return false, false
 	}
@@ -94,8 +94,7 @@ func runPermissionFixtureWorker() int {
 		ticker := time.NewTicker(10 * time.Millisecond)
 		defer ticker.Stop()
 		for {
-			if !catalog && permissionFixtureMarker(filepath.Join(directory, project+"-kill"), "kill") {
-				_ = os.Remove(filepath.Join(directory, project+"-kill"))
+			if !catalog && permissionFixtureConsumeMarker(filepath.Join(directory, project+"-kill"), "kill") {
 				os.Exit(42)
 			}
 			select {
@@ -298,6 +297,9 @@ func permissionFixtureMarker(path, want string) bool {
 	data, err := io.ReadAll(io.LimitReader(file, 32))
 	return err == nil && strings.TrimSpace(string(data)) == want
 }
+func permissionFixtureConsumeMarker(path, want string) bool {
+	return permissionFixtureMarker(path, want) && os.Remove(path) == nil
+}
 func permissionFixtureGate(ctx context.Context, path string) error {
 	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
@@ -493,6 +495,10 @@ func TestWebPermissionFixture(t *testing.T) {
 	for _, key := range []string{"a", "b"} {
 		registered, err := registry.Add(t.Context(), "Permission fixture "+strings.ToUpper(key), paths[key])
 		if err != nil {
+			_ = registry.Close()
+			t.Fatal(err)
+		}
+		if err := registry.SetProjectSkills(t.Context(), registered, false); err != nil {
 			_ = registry.Close()
 			t.Fatal(err)
 		}

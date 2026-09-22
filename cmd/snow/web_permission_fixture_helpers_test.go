@@ -20,7 +20,7 @@ import (
 
 func TestWebPermissionFixtureWorkerGuard(t *testing.T) {
 	catalog := []string{"--mode", "rpc", "--rpc-startup", "catalog"}
-	eager := []string{"--mode", "rpc", "--rpc-startup", "eager", "--no-session", "--managed-explicit-goals", "--no-plugins", "--no-mcp", "--no-skills", "--no-subagents", "--no-debug", "--tools", "read,glob,grep,write,edit,bash,ask_user,get_goal,create_goal,update_goal,process_start,process_status,process_logs,process_stop,process_list"}
+	eager := []string{"--mode", "rpc", "--rpc-startup", "eager", "--no-session", "--managed-explicit-goals", "--no-plugins", "--subagents", "--no-skills", "--no-debug", "--tools", "read,glob,grep,write,edit,bash,ask_user,get_goal,create_goal,update_goal,process_start,process_status,process_logs,process_stop,process_list"}
 	for _, args := range [][]string{catalog, eager, append(slices.Clone(eager), "--provider", "fake", "--model", "fake-1")} {
 		if _, valid := permissionFixtureWorkerArgs(args); !valid {
 			t.Fatalf("rejected exact manager args: %v", args)
@@ -51,6 +51,16 @@ func TestWebPermissionFixtureWorkerGuard(t *testing.T) {
 }
 
 func TestWebPermissionFixtureGateCancellation(t *testing.T) {
+	kill := filepath.Join(t.TempDir(), "kill")
+	if err := os.WriteFile(kill, []byte("kill\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if !permissionFixtureConsumeMarker(kill, "kill") {
+		t.Fatal("valid kill marker was not consumed")
+	}
+	if _, err := os.Lstat(kill); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("consumed kill marker remains: %v", err)
+	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if err := permissionFixtureGate(ctx, filepath.Join(t.TempDir(), "absent")); !errors.Is(err, context.Canceled) {

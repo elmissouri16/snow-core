@@ -33,11 +33,12 @@ update the canonical document.
 - Do not overengineer: avoid speculative abstractions, extra dependencies,
   generic frameworks, unrelated refactors, or features for hypothetical needs.
   Add complexity only when a concrete requirement makes it necessary.
-- Do not write tests automatically for every edit. Reuse or extend existing
-  coverage first; add a focused test only when needed to cover a meaningful
-  behavior change, reproduce a defect, or protect a critical invariant that
-  existing tests do not cover. Avoid duplicate tests, implementation-detail
-  assertions, and new test harnesses when a simpler check is sufficient.
+- Tests are not a default deliverable. Add or modify tests only when the user
+  explicitly requests them, or when a test is necessary to reproduce or verify
+  a meaningful behavior change, defect, or critical invariant that existing
+  coverage does not protect. Reuse existing coverage whenever it is sufficient;
+  avoid duplicate tests, implementation-detail assertions, and new test
+  harnesses when a simpler check is sufficient.
 - Keep verification proportional to the change and its risk. Documentation,
   copy, and styling-only edits do not need new tests by default. Preserve
   security checks, required release gates, and regression coverage for changed

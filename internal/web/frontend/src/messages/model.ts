@@ -6,6 +6,16 @@ export const record = (value: unknown): Record<string, unknown> => value && type
 export type ImageData = {index: number; mime: string; url: unknown};
 export type ToolData = {id: string; tool: string; status: string; label: string; summary: string; output: string; expandable: boolean; error: boolean; truncated: boolean; available?: boolean; rawTruncated?: boolean; open?: boolean};
 export type MessageData = {id: string; role: 'user' | 'assistant' | 'plan' | 'tool_activity'; text: string; html: string; truncated: boolean; editable: boolean; regeneratable: boolean; reusable: boolean; images: ImageData[]; tools: ToolData[]; toolsOmitted: boolean};
+const sameImage = (left: ImageData, right: ImageData) => left.index === right.index && left.mime === right.mime && left.url === right.url;
+const sameTool = (left: ToolData, right: ToolData) => left.id === right.id && left.tool === right.tool && left.status === right.status && left.label === right.label &&
+  left.summary === right.summary && left.output === right.output && left.expandable === right.expandable && left.error === right.error && left.truncated === right.truncated &&
+  left.available === right.available && left.rawTruncated === right.rawTruncated && left.open === right.open;
+const sameList = <T>(left: T[], right: T[], same: (a: T, b: T) => boolean) => left.length === right.length && left.every((value, index) => same(value, right[index]));
+export function sameMessageProjection(left: MessageData[], right: MessageData[]): boolean {
+  return sameList(left, right, (a, b) => a.id === b.id && a.role === b.role && a.text === b.text && a.html === b.html && a.truncated === b.truncated &&
+    a.editable === b.editable && a.regeneratable === b.regeneratable && a.reusable === b.reusable && a.toolsOmitted === b.toolsOmitted &&
+    sameList(a.images, b.images, sameImage) && sameList(a.tools, b.tools, sameTool));
+}
 export function boundedOutput(value: unknown, limit: number) {
   const source = typeof value === 'string' ? value : '';
   let bytes = 0, end = 0;
@@ -58,6 +68,9 @@ export function projectMessages(value: unknown): MessageData[] {
 }
 const statuses: Record<string, string> = {pending: 'Pending', queued: 'Queued', running: 'Running', waiting: 'Waiting', permission: 'Approval needed', completed: 'Completed', complete: 'Completed', success: 'Completed', done: 'Completed', failed: 'Failed', error: 'Failed', denied: 'Rejected', rejected: 'Rejected', failure: 'Failed', cancelled: 'Cancelled', canceled: 'Cancelled', interrupted: 'Interrupted', unknown: 'Outcome unknown', aborted: 'Cancelled'};
 export type Activity = {messageID: string; data: ToolData};
+export function sameActivityProjection(left: Activity[], right: Activity[]): boolean {
+  return sameList(left, right, (a, b) => a.messageID === b.messageID && sameTool(a.data, b.data));
+}
 export function projectActivities(value: unknown): Activity[] {
   const result: Activity[] = [], ids = new Set<string>();
   for (const [index, item] of (Array.isArray(value) ? value.slice(-128) : []).entries()) {

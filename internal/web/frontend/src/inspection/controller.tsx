@@ -58,6 +58,8 @@ export function refresh(value: unknown): boolean {
   if (!v || !same(v) || !v.owner?.isConnected) return false;
   const live = liveProjection(value, v.props.project.id, {project_id: v.project, instance_id: v.instance, session_id: v.session});
   if (!live) return false;
+  const previous = v.props.live;
+  if (previous?.session_id === live.session_id && previous.provider === live.provider && previous.model === live.model) return true;
   v.props = {...v.props, live};
   paint(v);
   return true;

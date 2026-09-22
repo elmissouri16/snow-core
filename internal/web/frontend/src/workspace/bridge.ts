@@ -90,10 +90,18 @@ export function useWorkspaceMounted() {
     };
   }, []);
 }
+function sameNotice(left: DraftNoticeProjection | null, right: DraftNoticeProjection | null | undefined) {
+  return left === right || !!left && !!right && left.text === right.text && left.explanation === right.explanation && left.url === right.url &&
+    left.useVisible === right.useVisible && left.useDisabled === right.useDisabled;
+}
+function draftChanged(current: DraftProjection, value: Partial<DraftProjection>) {
+  return (Object.keys(value) as (keyof DraftProjection)[]).some(key => key === 'notice' ? !sameNotice(current.notice, value.notice) : current[key] !== value[key]);
+}
 // This is a view projection, not a second canonical draft or business controller.
 // Native input events continue bubbling to app's sole draft/admission owner.
 export const workspace = {
   updateDraft(value: Partial<DraftProjection>) {
+    if (!draftChanged(snapshot.draft, value)) return;
     publish({ ...snapshot, draft: { ...snapshot.draft, ...value } });
   },
   editDraft(text: string, cold = false) {

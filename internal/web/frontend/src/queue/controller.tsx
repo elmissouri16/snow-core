@@ -17,7 +17,7 @@ export interface QueueAPI {
 }
 interface View extends Admission {
   api: QueueAPI; root: Root; container: HTMLElement; controller: AbortController;
-  snapshotRevision: number; composeRevision: number; lastRaw?: unknown;
+  snapshotRevision: number; composeRevision: number; lastRaw?: unknown; renderKey: string;
   panelRef: ReturnType<typeof createRef<HTMLElement>>; rowRefs: Map<string, RowRefs>;
 }
 const stores = new Map<string, Store>();
@@ -31,7 +31,7 @@ export function init(api: QueueAPI): void {
   stores.delete(key); stores.set(key, store);
   while (stores.size > 16) stores.delete(stores.keys().next().value!);
   const current: View = {api, root: createRoot(container), container, controller: new AbortController(),
-    store, queue: null, ui: null, invalid: false, composing: false, snapshotRevision: -1, composeRevision: 0,
+    store, queue: null, ui: null, invalid: false, composing: false, snapshotRevision: -1, composeRevision: 0, renderKey: '',
     panelRef: createRef<HTMLElement>(), rowRefs: new Map()};
   view = current;
   const options = {signal: current.controller.signal};
@@ -75,8 +75,17 @@ export function render(snapshot: Snapshot | null, ui: UI, present = true): Prese
   if (present) draw(view);
   return presentation(view);
 }
+function renderKey(current: View): string {
+  const {store} = current, busy = store.busy;
+  return JSON.stringify([current.queue, current.ui, current.invalid, store.unknown, !!store.reviewable, store.error || '', !!store.copiedDraft,
+    busy ? [busy.action, busy.id] : null,
+    [...store.editors].map(([id, editor]) => [id, editor.text, editor.revision, editor.baseRevision, editor.token, !!editor.composing, editor.error || ''])]);
+}
 function draw(current: View): void {
   if (view !== current) return;
+  const key = renderKey(current);
+  if (key === current.renderKey) return;
+  current.renderKey = key;
   const focused = document.activeElement;
   const ownedFocus = !!focused && current.container.contains(focused);
   flushSync(() => current.root.render(<QueuePanel current={current} panelRef={current.panelRef} rowRefs={current.rowRefs}

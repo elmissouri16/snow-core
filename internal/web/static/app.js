@@ -436,11 +436,9 @@
     const nearBottom = !window.SnowScroll && stream.scrollHeight - stream.scrollTop - stream.clientHeight < 100;
     const messages = Array.isArray(snapshot.messages) ? snapshot.messages : [];
     const focusedActivity = document.activeElement?.closest("[data-activity-id]") ? document.activeElement : null;
-    window.SnowMessages?.render(transcript, messages);
-    // Mount chronological markers before routing their public rows. Saved tool
-    // enhancement remains independent of runtime event-step associations.
-    window.SnowMessages?.enhance(transcript);
-    window.SnowVisibility?.renderActivities($("#live-activities"), snapshot, transcript);
+    // Project messages and chronological activities before one synchronous
+    // transcript commit. Saved-history enhancement remains independent.
+    window.SnowMessages?.renderSnapshot($("#live-activities"), snapshot, transcript);
     if (focusedActivity?.isConnected && document.activeElement !== focusedActivity) focusedActivity.focus({preventScroll: true});
     $("#live-empty").hidden = messages.length > 0 || (snapshot.activities || []).length > 0;
     $("#live-history-notice").hidden = !snapshot.history_truncated;

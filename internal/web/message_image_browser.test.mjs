@@ -53,7 +53,7 @@ test("native React thumbnails and parent-owned ColdWorkspace saved-history lifet
     } else if (req.url === "/") {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.setHeader("Set-Cookie", "image_fixture=paired; HttpOnly; SameSite=Strict; Path=/");
-      res.end(`<!doctype html><style>:root{--text:#111;--muted:#555;--raised:#eee;--border:#ccc}*{box-sizing:border-box}${css}</style><div id="live-session" data-project="p" data-instance="i" data-session="s" data-runtime="true" data-message-edit-enabled="true"><div id="transcript" data-react-messages></div></div><script type="module" src="/static/generated/app.js"></script>`);
+      res.end(`<!doctype html><style>:root{--text:#111;--muted:#555;--raised:#eee;--border:#ccc}*{box-sizing:border-box}${css}</style><div id="live-session" data-project="p" data-instance="i" data-session="s" data-runtime="true" data-message-edit-enabled="true"><div id="transcript" data-react-messages></div><div id="activities"></div></div><script type="module" src="/static/generated/app.js"></script>`);
     } else if (req.url === '/cold') {
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.end(`<!doctype html><style>${css}</style>${coldPage()}<script type="module" src="/static/generated/app.js"></script>`);
@@ -151,8 +151,13 @@ test("native React thumbnails and parent-owned ColdWorkspace saved-history lifet
 async function exercise() {
   let assertions = 0;
   const check = (value, label) => { assertions++; if (!value) throw new Error(label); };
-  const root = document.querySelector("#live-session"), transcript = document.querySelector("#transcript");
+  const root = document.querySelector("#live-session"), transcript = document.querySelector("#transcript"), activities = document.querySelector("#activities");
   const api = window.SnowMessages;
+  api.renderSnapshot(activities, {messages: [{id: "marker", role: "tool_activity"}, {id: "answer", role: "assistant", text: "done", html: "<p>done</p>"}], activities: [{id: "read-1", message_id: "marker", tool: "read", status: "completed", output: "ok"}]}, transcript);
+  check(transcript.querySelector('[data-message-id="marker"] [data-activity-id="read-1"]')?.dataset.status === "completed", "one snapshot places chronological activity in its message marker");
+  check(activities.hidden, "snapshot with fully associated activity hides the fallback region");
+  window.SnowVisibility.renderActivities(activities, {activities: []}, transcript);
+  api.render(transcript, []);
   const url = (id, index = 0, query = "instance_id=i&session_id=s") => `/projects/p/runtime/images/${id}/${index}?${query}`;
   const image = (id, index = 0) => ({index, mime_type: "image/png", url: url(id, index)});
   const message = (id, images, text = "", extra = {}) => ({id, role: "user", text, images, can_edit: true, ...extra});
