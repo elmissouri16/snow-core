@@ -592,7 +592,7 @@ are refreshed under the cross-process auth-store lock; a pre-stream 401
 permits one guarded forced refresh and retry. WebSocket continuation remains
 deferred.
 
-Discovery uses the tested Codex `client_version=0.153.4` contract, independently
+Discovery uses the tested Codex `client_version=0.156.1` contract, independently
 of Snow's release version. Older contracts can omit new models, including
 GPT-6 Astra; caches from other contract versions are invalidated. ChatGPT
 publishes its 15-minute catalog expiry and a revision counter through the

@@ -24,7 +24,7 @@ func TestAstraCatalogCompatibilityReplacesFreshLegacyCache(t *testing.T) {
 		case "0.147.0":
 			w.Header().Set("ETag", "legacy")
 			fmt.Fprint(w, `{"models":[{"slug":"gpt-5.6-sol","visibility":"list"}]}`)
-		case "0.153.4":
+		case "0.156.1":
 			if r.Header.Get("If-None-Match") != "" {
 				t.Error("incompatible cache ETag was reused")
 			}

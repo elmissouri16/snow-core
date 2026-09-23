@@ -3305,21 +3305,23 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
 
 ## BUG-064: ChatGPT catalog compatibility hides GPT-6 Astra
 
-- **Status:** Resolved; verified 2026-09-10.
+- **Status:** Resolved; compatibility pin reverified 2026-09-23.
 - **Surface:** ChatGPT subscription model discovery and the shared model picker.
 - **Evidence:** Two read-only requests using the same Snow OAuth credential and
   `originator=snow` returned different catalogs: `client_version=0.147.0`
   omitted `gpt-6-astra`, while `client_version=0.153.4` returned it with
-  `visibility=list`. The latter matches the installed Codex client's catalog
-  compatibility version. Snow pins the older version in
-  `internal/provider/chatgpt/client.go`; refreshing its cache cannot reveal a
-  model omitted by that compatibility contract.
+  `visibility=list`. Version `0.153.4` matched the installed Codex client when
+  the defect was first fixed. On 2026-09-23, the official npm `latest` dist-tag,
+  the official GitHub release tag, and the installed Codex CLI all reported
+  `0.156.1`, while Snow still advertised `0.153.4`. Refreshing a cache cannot
+  reveal a model omitted by an older compatibility contract.
 - **Related defect:** ChatGPT had a 15-minute disk cache but did not expose its
   expiry to the app's retained catalog snapshot, so an open process can keep
   an old inventory until forced refresh or restart.
-- **Resolution:** Advanced the tested catalog contract to `0.153.4`; existing
-  version validation rejects caches from the old contract. The ChatGPT adapter
-  now publishes expiry and content revisions through the authenticated wrapper
+- **Resolution:** Advanced the tested catalog contract first to `0.153.4` and
+  then to the current official Codex `0.156.1`; existing version validation
+  rejects caches from older contracts. The ChatGPT adapter now publishes expiry
+  and content revisions through the authenticated wrapper
   to the app loader. Cache reads retain their original deadline, 304 responses
   renew freshness, and outages keep only compatible same-account cached models
   with a one-minute picker retry interval. No model allowlist or inferred
@@ -3335,7 +3337,11 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
   Installed-binary live checks selected Astra from discovery and a cached
   restart, then completed a read-tool round trip with the correct random fixture
   contents. An installed PTY check confirmed Astra in the filtered picker,
-  Ctrl+R refresh with preserved query, and model/reasoning selection.
+  Ctrl+R refresh with preserved query, and model/reasoning selection. The
+  `0.156.1` follow-up passed the focused ChatGPT suite, the complete Go package
+  set split across `./internal/...` and `./cmd/... ./pkg/...`, `go vet ./...`,
+  the same targeted race suite, all 70 Python support tests, the benchmark
+  guard, and `git diff --check`; no credentialed live-provider smoke was run.
 
 ## BUG-065: Modified Enter accepts composer completions
 

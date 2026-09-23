@@ -21,7 +21,7 @@ const (
 	OAuthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 	// This is the tested Codex catalog contract, not Snow's release version.
 	// Older versions can omit newly released models even for entitled accounts.
-	CatalogCompatibilityVersion = "0.153.4"
+	CatalogCompatibilityVersion = "0.156.1"
 	refreshSkew                 = 5 * time.Minute
 	maxAuthResponseBytes        = 1 << 20
 )

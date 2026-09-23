@@ -141,7 +141,7 @@ the raw ID token.
 ## Authenticated model catalog
 
 `/model` uses authenticated
-`GET /backend-api/codex/models?client_version=0.153.4` discovery. Raw records
+`GET /backend-api/codex/models?client_version=0.156.1` discovery. Raw records
 are cached for 15 minutes under
 `~/.snow/cache/chatgpt-models/<origin-and-account-hash>.json` with versioned
 origin/account metadata, ETags, and mode `0600`.
