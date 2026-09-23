@@ -15,7 +15,7 @@
     {
       "source": "docs/plan-mode.md",
       "resource": "docs/plan-mode.md",
-      "sha256": "0bc1e56eb91afdb4016d47ef69482b69105cb3128342408913f73b4ff2ba7158"
+      "sha256": "44752aeefc95effe14edd99437e2a8a143fcfb1dcbb0367d7a59c568b5e1ce00"
     },
     {
       "source": "docs/plugin-extensions.md",
@@ -65,7 +65,7 @@
     {
       "source": "docs/subagents.md",
       "resource": "docs/subagents.md",
-      "sha256": "2592aa39523b46f84199b41506050cd0e0555ad6ce6e5c317a864a4540856f55"
+      "sha256": "963eae75cb352ad929e602b7a34ccbdd553b9aaf37165d2919811547ecfa64cb"
     },
     {
       "source": "docs/tool-routing.md",

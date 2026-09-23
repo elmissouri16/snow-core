@@ -2,6 +2,8 @@ package subagent
 
 import (
 	"errors"
+	"maps"
+	"slices"
 
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
@@ -33,6 +35,24 @@ func planRoleReadOnly(role Role, recursiveAuthority bool) bool {
 		}
 	}
 	return true
+}
+
+// resolvePlanDefaultRole picks the narrowest conventional profile when the
+// configured default is not Plan-safe, then falls back deterministically to a
+// custom read-only role. Explicit role requests never use this fallback.
+func resolvePlanDefaultRole(roles map[string]Role, defaultRole string, recursiveAuthority bool) (string, Role, bool) {
+	if role, ok := roles[defaultRole]; ok && planRoleReadOnly(role, recursiveAuthority) {
+		return defaultRole, role, true
+	}
+	if role, ok := roles["explorer"]; ok && planRoleReadOnly(role, recursiveAuthority) {
+		return "explorer", role, true
+	}
+	for _, name := range slices.Sorted(maps.Keys(roles)) {
+		if role := roles[name]; planRoleReadOnly(role, recursiveAuthority) {
+			return name, role, true
+		}
+	}
+	return "", Role{}, false
 }
 
 func (m *Manager) planSafeTarget(r *runtime) error {

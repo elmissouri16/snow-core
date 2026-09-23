@@ -24,8 +24,16 @@ func TestDefaultExplorerPluginDocsPlanSafety(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := m.Spawn(t.Context(), m.RootCaller(), protocol.SpawnSubagentRequest{Name: "docs", Task: "inspect plugin references", Role: "explorer"}); err != nil {
+			req := protocol.SpawnSubagentRequest{Name: "docs", Task: "inspect plugin references", Role: "explorer"}
+			if beforeSpawn {
+				req.Role = ""
+			}
+			state, err := m.Spawn(t.Context(), m.RootCaller(), req)
+			if err != nil {
 				t.Fatal(err)
+			}
+			if state.Agent.Role != "explorer" {
+				t.Fatalf("role=%q, want explorer", state.Agent.Role)
 			}
 			if err := m.ValidatePlanTransition(); err != nil {
 				t.Fatal(err)
@@ -106,11 +114,31 @@ func TestPlanSpawnChecksCapabilitiesNotRoleName(t *testing.T) {
 		t.Fatal(err)
 	}
 	caller := m.RootCaller()
+	defaulted, err := m.Spawn(t.Context(), caller, protocol.SpawnSubagentRequest{Name: "default_safe", Task: "inspect"})
+	if err != nil {
+		t.Fatalf("omitted Plan role rejected: %v", err)
+	}
+	if defaulted.Agent.Role != "safe_alt" {
+		t.Fatalf("omitted Plan role=%q, want safe_alt", defaulted.Agent.Role)
+	}
 	if _, err := m.Spawn(t.Context(), caller, protocol.SpawnSubagentRequest{Name: "unsafe", Task: "inspect", Role: "unsafe"}); !errors.Is(err, errPlanRequiresReadOnlyChild) {
 		t.Fatalf("unsafe spawn error=%v", err)
 	}
 	if _, err := m.Spawn(t.Context(), caller, protocol.SpawnSubagentRequest{Name: "safe", Task: "inspect", Role: "safe_alt"}); err != nil {
 		t.Fatalf("safe renamed role rejected: %v", err)
+	}
+}
+
+func TestPlanSpawnWithoutReadOnlyDefaultFailsClosed(t *testing.T) {
+	m, fixture := newPlanPolicyManager(t, map[string]Role{
+		"unsafe": {Name: "unsafe", Tools: []string{"read", "bash"}},
+	})
+	if err := fixture.root.SetMode(protocol.ModePlan); err != nil {
+		t.Fatal(err)
+	}
+	_, err := m.Spawn(t.Context(), m.RootCaller(), protocol.SpawnSubagentRequest{Name: "unsafe_default", Task: "inspect"})
+	if !errors.Is(err, errPlanRequiresReadOnlyChild) {
+		t.Fatalf("omitted unsafe Plan role error=%v", err)
 	}
 }
 

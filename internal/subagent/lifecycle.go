@@ -598,9 +598,18 @@ func (m *Manager) Spawn(ctx context.Context, caller Caller, req protocol.SpawnSu
 		m.mu.Unlock()
 		return protocol.SubagentState{}, errors.New("subagents: invalid caller")
 	}
+	recursiveAuthority := m.limits.Recursive && m.limits.MaxDepth > 1
+	planRoot := caller.Path == protocol.RootAgentPath && m.root.Mode() == protocol.ModePlan
+	roleOmitted := strings.TrimSpace(req.Role) == ""
 	roleName, role, ok := resolveRole(m.limits.Roles, m.limits.DefaultRole, req.Role)
+	if planRoot && roleOmitted && (!ok || !planRoleReadOnly(role, recursiveAuthority)) {
+		roleName, role, ok = resolvePlanDefaultRole(m.limits.Roles, m.limits.DefaultRole, recursiveAuthority)
+	}
 	if !ok {
 		m.mu.Unlock()
+		if planRoot && roleOmitted {
+			return protocol.SubagentState{}, errPlanRequiresReadOnlyChild
+		}
 		return protocol.SubagentState{}, availableRoleError(m.limits.Roles, m.limits.DefaultRole, req.Role)
 	}
 	var pluginTools map[string]string
@@ -614,13 +623,12 @@ func (m *Manager) Spawn(ctx context.Context, caller Caller, req protocol.SpawnSu
 			m.mu.Unlock()
 			return protocol.SubagentState{}, err
 		}
-		if m.root.Mode() == protocol.ModePlan {
+		if planRoot {
 			m.mu.Unlock()
 			return protocol.SubagentState{}, errors.New("explicit child plugin tools require default mode")
 		}
 	}
-	recursiveAuthority := m.limits.Recursive && m.limits.MaxDepth > 1
-	if caller.Path == protocol.RootAgentPath && m.root.Mode() == protocol.ModePlan && !planRoleReadOnly(role, recursiveAuthority) {
+	if planRoot && !planRoleReadOnly(role, recursiveAuthority) {
 		m.mu.Unlock()
 		return protocol.SubagentState{}, errPlanRequiresReadOnlyChild
 	}

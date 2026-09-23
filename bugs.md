@@ -1,5 +1,14 @@
 # Known bugs
 
+## BUG-251: Plan Mode omitted subagent roles resolve to a shell-capable default
+
+- **Status:** Resolved — omitted Plan Mode roles now select a Plan-safe profile.
+- **Severity:** Medium
+- **Surface:** Plan Mode subagent delegation
+- **Evidence:** The default subagent role is `general`, which includes permission-gated Bash. Although Plan Mode correctly rejected that resolved capability profile, a `spawn_agent` call that omitted `role` inherited `general` and failed instead of selecting an available read-only profile. This made models repeatedly attempt a non-Plan-safe default even when the built-in `explorer` role was available.
+- **Fix:** Plan Mode now keeps an explicitly requested role authoritative and rejects it when unsafe, but an omitted role resolves to the configured default only when that profile is read-only and non-recursive. Otherwise Snow prefers a safe `explorer` profile, then deterministically selects another configured safe role, and fails closed if none exists. Tool schema, provider guidance, and user documentation describe this mode-specific default.
+- **Verification:** Focused subagent and app tests cover built-in and custom safe-role selection, explicit unsafe-role rejection, and the no-safe-role failure. All Go tests, `go vet ./...`, all 70 Python support tests, synchronized plugin-doc resources, the benchmark guard, targeted race coverage for subagent/agent/app, `git diff --check`, and local installation passed.
+
 ## BUG-250: Unchanged Web runtime panels still commit synchronously
 
 - **Status:** Resolved — unchanged critical panel projections no longer synchronously commit.

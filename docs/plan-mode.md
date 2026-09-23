@@ -43,8 +43,11 @@ does not override this boundary. Read and search tools remain available.
 > sandbox. Snow and allowed tools still run with the user's privileges.
 
 A Plan Mode root can delegate only to children whose resolved tool profile is
-read-only and non-recursive. Snow also rejects entry into Plan Mode while
-mutation-capable child work is active.
+read-only and non-recursive. When a spawn request omits `role`, Snow ignores an
+unsafe ordinary default and selects a configured Plan-safe profile, preferring
+`explorer`; if no such profile exists, the spawn fails closed. An explicitly
+requested shell-capable or mutation-capable role is always rejected. Snow also
+rejects entry into Plan Mode while mutation-capable child work is active.
 
 ## Review a proposed plan
 

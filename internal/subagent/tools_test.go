@@ -264,13 +264,13 @@ func TestListSubagentModelsReturnsExactPairs(t *testing.T) {
 
 func TestSpawnAgentSchemaExplainsContextAndConfiguredRoles(t *testing.T) {
 	schema := toolSchemas["spawn_agent"]
-	for _, want := range []string{"canonical /root/", "hyphens normalize to underscores", "list_subagent_models", "supported reasoning levels", "separate conversation context", "shared working directory", "OS privileges", "disjoint ownership", "Built-in role defaults", "configuration may change", "configured capability profiles, not task labels", "task-specific and output-style instructions in task"} {
+	for _, want := range []string{"canonical /root/", "hyphens normalize to underscores", "list_subagent_models", "supported reasoning levels", "separate conversation context", "shared working directory", "OS privileges", "disjoint ownership", "Built-in role defaults", "configuration may change", "In Plan Mode, omit role", "read-only, non-recursive profile", "explicit non-read-only roles are rejected", "configured capability profiles, not task labels", "task-specific and output-style instructions in task"} {
 		if !strings.Contains(schema.Description, want) {
 			t.Fatalf("spawn_agent description missing %q: %q", want, schema.Description)
 		}
 	}
 	parameters := string(schema.Parameters)
-	for _, want := range []string{`"maxLength":64`, `"pattern":"^[a-z][a-z0-9_-]{0,63}$"`, `"pattern":"^(none|all|[1-9][0-9]*)$"`, "positive integer string", `"description":"Optional configured capability role;`, "Task-specific behavior and output-style instructions belong in task", "read-only investigation or review", "schema-accepted level advertised for the exact provider/model", "otherwise omit it", `"provider"`, `"required":["name","task"]`, "configured subagent default model", "configured default", "Sanitized parent conversation", "incomplete tool pairs are excluded"} {
+	for _, want := range []string{`"maxLength":64`, `"pattern":"^[a-z][a-z0-9_-]{0,63}$"`, `"pattern":"^(none|all|[1-9][0-9]*)$"`, "positive integer string", `"description":"Optional configured capability role.`, "Task-specific behavior and output-style instructions belong in task", "read-only investigation or review", "schema-accepted level advertised for the exact provider/model", "otherwise omit it", `"provider"`, `"required":["name","task"]`, "configured subagent default model", "Default Mode", "In Plan Mode", "configured read-only, non-recursive role", "Sanitized parent conversation", "incomplete tool pairs are excluded"} {
 		if !strings.Contains(parameters, want) {
 			t.Fatalf("spawn_agent schema missing %q: %s", want, schema.Parameters)
 		}

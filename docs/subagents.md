@@ -159,8 +159,11 @@ files even when direct file-edit tools are absent. Never send parallel mutators
 to overlapping files, and use an external container or VM when host isolation
 is required.
 
-Plan Mode permits only read-only, non-recursive child profiles. Snow rejects a
-transition into Plan Mode while mutation-capable child work is active.
+Plan Mode permits only read-only, non-recursive child profiles. Omit `role` to
+have Snow select a configured Plan-safe profile (preferring `explorer`) instead
+of the ordinary shell-capable default. Explicit unsafe roles and spawns with no
+available read-only profile fail closed. Snow rejects a transition into Plan
+Mode while mutation-capable child work is active.
 
 ## Resume child work
 
