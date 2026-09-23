@@ -53,6 +53,24 @@ func TestBuiltInThemeChoices(t *testing.T) {
 	}
 }
 
+func TestBuiltInThemeUserSurfacesArePaletteSpecific(t *testing.T) {
+	want := map[string]config.AdaptiveColor{
+		"default": {Light: "#D0DCE8", Dark: "#3A4656"},
+		"frost":   {Light: "#CDE6EA", Dark: "#294957"},
+		"ember":   {Light: "#EAD8C8", Dark: "#564033"},
+		"aurora":  {Light: "#DED3EB", Dark: "#493A5C"},
+	}
+	for name, wantBackground := range want {
+		theme, err := makeTUITheme(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if theme.userBackground != wantBackground {
+			t.Errorf("theme %q user background=%+v want %+v", name, theme.userBackground, wantBackground)
+		}
+	}
+}
+
 func TestLegacyThemesRemainHiddenAndSupported(t *testing.T) {
 	choices := strings.Join(themeChoices(), ",")
 	for _, name := range []string{"dark", "light", "high-contrast", "nord", "dracula", "gruvbox"} {
@@ -102,6 +120,14 @@ func TestBuiltInThemeTextContrast(t *testing.T) {
 					if ratio := contrastRatio(t, foreground, tt.background); ratio < 4.5 {
 						t.Errorf("%s %s contrast %.2f with %s; want >= 4.5", role, foreground, ratio, tt.background)
 					}
+				}
+				userBackground := resolvedHexColor(t, theme.userBackground, tt.dark)
+				userForeground := resolvedHexColor(t, theme.soft, tt.dark)
+				if ratio := contrastRatio(t, userForeground, userBackground); ratio < 4.5 {
+					t.Errorf("user message contrast %.2f between %s and %s; want >= 4.5", ratio, userForeground, userBackground)
+				}
+				if ratio := contrastRatio(t, userBackground, tt.background); ratio < 1.3 {
+					t.Errorf("user surface %s contrast %.2f with %s; want >= 1.3", userBackground, ratio, tt.background)
 				}
 				separator := resolvedHexColor(t, theme.sep, tt.dark)
 				if ratio := contrastRatio(t, separator, tt.background); ratio < 3 {

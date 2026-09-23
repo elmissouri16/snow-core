@@ -18,7 +18,7 @@ func TestResolveThemesReturnsAdaptivePathFreeCatalog(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(global, "themes", "ocean.yaml"), []byte("version: 1\nname: ocean\nextends: frost\ncolors:\n  accent: {light: '#111111', dark: '#eeeeee'}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(project, ".snow", "themes", "ocean.yaml"), []byte("version: 1\nname: ocean\nextends: ember\ncolors:\n  success: {dark: '#00ff00'}\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(project, ".snow", "themes", "ocean.yaml"), []byte("version: 1\nname: ocean\nextends: ember\ncolors:\n  success: {dark: '#00ff00'}\n  user_background: {light: '#ead8c8', dark: '#654321'}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -35,6 +35,9 @@ func TestResolveThemesReturnsAdaptivePathFreeCatalog(t *testing.T) {
 	}
 	if custom.Colors.Accent != builtInThemeColors["ember"].Accent {
 		t.Fatalf("custom base accent = %+v", custom.Colors.Accent)
+	}
+	if want := (AdaptiveColor{Light: "#ead8c8", Dark: "#654321"}); custom.Colors.UserBackground != want {
+		t.Fatalf("custom user background = %+v, want %+v", custom.Colors.UserBackground, want)
 	}
 }
 

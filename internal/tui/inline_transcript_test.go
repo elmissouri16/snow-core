@@ -22,7 +22,7 @@ func TestInlineTranscriptCommitsStableRowsAndKeepsLiveTail(t *testing.T) {
 	m.inlineTranscript = true
 	m.width, m.height = 80, 30
 	m.layout()
-	m.pushLine(styleUser.Render("› committed prompt"))
+	m.pushLine(m.renderUserMessage("committed prompt"))
 	m.thinkingBuf.WriteString("live reasoning")
 	m.refreshTranscriptForced()
 

@@ -22,31 +22,31 @@ var builtInThemeColors = map[string]ThemeColors{
 		Accent: AdaptiveColor{Light: "#0969DA", Dark: "#58A6FF"}, Muted: AdaptiveColor{Light: "#57606A", Dark: "#8B949E"},
 		Foreground: AdaptiveColor{Light: "#24292F", Dark: "#F0F6FC"}, Warning: AdaptiveColor{Light: "#9A6700", Dark: "#E3B341"},
 		Error: AdaptiveColor{Light: "#CF222E", Dark: "#FF7B72"}, Success: AdaptiveColor{Light: "#1A7F37", Dark: "#7EE787"},
-		Separator: AdaptiveColor{Light: "#8C959F", Dark: "#6E7681"},
+		Separator: AdaptiveColor{Light: "#8C959F", Dark: "#6E7681"}, UserBackground: AdaptiveColor{Light: "#D0DCE8", Dark: "#3A4656"},
 	},
 	"frost": {
 		Accent: AdaptiveColor{Light: "#006A7A", Dark: "#67E8F9"}, Muted: AdaptiveColor{Light: "#52606D", Dark: "#94A3B8"},
 		Foreground: AdaptiveColor{Light: "#172B4D", Dark: "#E6F6FF"}, Warning: AdaptiveColor{Light: "#8A4B00", Dark: "#FBBF24"},
 		Error: AdaptiveColor{Light: "#B42318", Dark: "#FDA4AF"}, Success: AdaptiveColor{Light: "#166534", Dark: "#86EFAC"},
-		Separator: AdaptiveColor{Light: "#8091A5", Dark: "#64748B"},
+		Separator: AdaptiveColor{Light: "#8091A5", Dark: "#64748B"}, UserBackground: AdaptiveColor{Light: "#CDE6EA", Dark: "#294957"},
 	},
 	"ember": {
 		Accent: AdaptiveColor{Light: "#9A3412", Dark: "#FDBA74"}, Muted: AdaptiveColor{Light: "#62564B", Dark: "#B8A99A"},
 		Foreground: AdaptiveColor{Light: "#29211A", Dark: "#FFF7ED"}, Warning: AdaptiveColor{Light: "#7C4A03", Dark: "#FDE047"},
 		Error: AdaptiveColor{Light: "#B42318", Dark: "#FB7185"}, Success: AdaptiveColor{Light: "#166534", Dark: "#86EFAC"},
-		Separator: AdaptiveColor{Light: "#8A7968", Dark: "#7C6F64"},
+		Separator: AdaptiveColor{Light: "#8A7968", Dark: "#7C6F64"}, UserBackground: AdaptiveColor{Light: "#EAD8C8", Dark: "#564033"},
 	},
 	"aurora": {
 		Accent: AdaptiveColor{Light: "#6D28D9", Dark: "#C4B5FD"}, Muted: AdaptiveColor{Light: "#5B5668", Dark: "#A7A0B8"},
 		Foreground: AdaptiveColor{Light: "#211B2E", Dark: "#FAF5FF"}, Warning: AdaptiveColor{Light: "#854D0E", Dark: "#FDE047"},
 		Error: AdaptiveColor{Light: "#BE123C", Dark: "#FDA4AF"}, Success: AdaptiveColor{Light: "#166534", Dark: "#86EFAC"},
-		Separator: AdaptiveColor{Light: "#877F96", Dark: "#756E86"},
+		Separator: AdaptiveColor{Light: "#877F96", Dark: "#756E86"}, UserBackground: AdaptiveColor{Light: "#DED3EB", Dark: "#493A5C"},
 	},
 	"high-contrast": {
 		Accent: AdaptiveColor{Light: "#004FB3", Dark: "#00D7FF"}, Muted: AdaptiveColor{Light: "#30363D", Dark: "#FFFFFF"},
 		Foreground: AdaptiveColor{Light: "#000000", Dark: "#FFFFFF"}, Warning: AdaptiveColor{Light: "#6F4E00", Dark: "#FFFF00"},
 		Error: AdaptiveColor{Light: "#A4001D", Dark: "#FF6B6B"}, Success: AdaptiveColor{Light: "#006B2D", Dark: "#00FF66"},
-		Separator: AdaptiveColor{Light: "#000000", Dark: "#FFFFFF"},
+		Separator: AdaptiveColor{Light: "#000000", Dark: "#FFFFFF"}, UserBackground: AdaptiveColor{Light: "#D0D0D0", Dark: "#444444"},
 	},
 }
 
@@ -90,6 +90,7 @@ func ResolveCustomTheme(custom ThemeFile, scope string) (ResolvedTheme, error) {
 	overlayAdaptive(&colors.Error, custom.Colors.Error)
 	overlayAdaptive(&colors.Success, custom.Colors.Success)
 	overlayAdaptive(&colors.Separator, custom.Colors.Separator)
+	overlayAdaptive(&colors.UserBackground, custom.Colors.UserBackground)
 	return ResolvedTheme{Name: custom.Name, DisplayName: custom.Name, Scope: scope, Colors: colors}, nil
 }
 

@@ -410,7 +410,7 @@ func (m *Model) hydrationMessageRows(msg protocol.Message, call protocol.Content
 			} else if images > 0 {
 				text += fmt.Sprintf(" [%d image(s)]", images)
 			}
-			rows = append(rows, styleUser.Render("› "+text))
+			rows = append(rows, m.renderUserMessage(text))
 		}
 	case protocol.RoleAssistant:
 		if thinking := sessionMessageThinking(msg); thinking != "" {

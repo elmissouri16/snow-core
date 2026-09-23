@@ -376,8 +376,8 @@ func TestDefaults(t *testing.T) {
 	if cfg.ToolOutputLimit() != DefaultToolOutputBytes {
 		t.Fatal("wrong tool output limit")
 	}
-	if cfg.BashTimeout() != DefaultBashTimeout {
-		t.Fatal("wrong bash timeout")
+	if cfg.BashTimeoutMS != 300000 || cfg.BashTimeout() != DefaultBashTimeout {
+		t.Fatalf("bash timeout=%dms (%s), want 300000ms", cfg.BashTimeoutMS, cfg.BashTimeout())
 	}
 }
 

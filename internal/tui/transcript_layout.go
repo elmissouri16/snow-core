@@ -871,7 +871,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if strings.TrimSpace(display) == "" {
 				display = fmt.Sprintf("[%d image(s)]", len(m.promptImages))
 			}
-			m.pushLine(styleUser.Render("› " + display))
+			m.pushLine(m.renderUserMessage(display))
 			m.imagePasteGeneration++
 			m.editor.Reset()
 			return m, m.startPrompt(displayText)

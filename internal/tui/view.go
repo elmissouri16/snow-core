@@ -145,7 +145,7 @@ func (m *Model) handlePlanImplementationKey(msg tea.KeyPressMsg) (tea.Model, tea
 			}
 			message = "A previous agent produced the plan below. Implement it in a fresh context, re-read files as needed, and carry the work through implementation and verification.\n\n" + planText
 		}
-		m.pushLine(styleUser.Render("› " + message))
+		m.pushLine(m.renderUserMessage(message))
 		return m, m.startPromptWithMode(message, protocol.ModeDefault)
 	}
 	return m, nil

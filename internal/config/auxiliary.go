@@ -34,13 +34,14 @@ type AdaptiveColor struct {
 
 // ThemeColors contains the semantic roles understood by the TUI.
 type ThemeColors struct {
-	Accent     AdaptiveColor `yaml:"accent" json:"accent"`
-	Muted      AdaptiveColor `yaml:"muted" json:"muted"`
-	Foreground AdaptiveColor `yaml:"foreground" json:"foreground"`
-	Warning    AdaptiveColor `yaml:"warning" json:"warning"`
-	Error      AdaptiveColor `yaml:"error" json:"error"`
-	Success    AdaptiveColor `yaml:"success" json:"success"`
-	Separator  AdaptiveColor `yaml:"separator" json:"separator"`
+	Accent         AdaptiveColor `yaml:"accent" json:"accent"`
+	Muted          AdaptiveColor `yaml:"muted" json:"muted"`
+	Foreground     AdaptiveColor `yaml:"foreground" json:"foreground"`
+	Warning        AdaptiveColor `yaml:"warning" json:"warning"`
+	Error          AdaptiveColor `yaml:"error" json:"error"`
+	Success        AdaptiveColor `yaml:"success" json:"success"`
+	Separator      AdaptiveColor `yaml:"separator" json:"separator"`
+	UserBackground AdaptiveColor `yaml:"user_background" json:"user_background"`
 }
 
 // ThemeFile is the versioned custom theme format.
@@ -396,7 +397,7 @@ func validateTheme(t ThemeFile) error {
 	if !IsBuiltInTUITheme(t.Extends) {
 		return fmt.Errorf("theme extends unsupported built-in %q", t.Extends)
 	}
-	pairs := []AdaptiveColor{t.Colors.Accent, t.Colors.Muted, t.Colors.Foreground, t.Colors.Warning, t.Colors.Error, t.Colors.Success, t.Colors.Separator}
+	pairs := []AdaptiveColor{t.Colors.Accent, t.Colors.Muted, t.Colors.Foreground, t.Colors.Warning, t.Colors.Error, t.Colors.Success, t.Colors.Separator, t.Colors.UserBackground}
 	for _, pair := range pairs {
 		if err := validateColor(pair.Light); err != nil {
 			return err

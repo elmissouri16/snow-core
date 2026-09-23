@@ -1464,9 +1464,10 @@ ASCII, accented text, CJK, and emoji; fixed latency improves 11–34% against v1
 The standard benchmark gate covers both sets of fixtures. See
 [TUI performance](docs/tui-performance.md#charm-v2-migration-measurements).
 
-The TUI renders a transcript with
-markdown, streaming updates, model/provider pickers, model-aware `/thinking`
-effort selection, login/logout, permissions, sessions, slash completion, and
+The TUI renders a transcript with markdown, streaming updates, palette-specific
+adaptive full-width user-turn surfaces for scanning long conversations,
+model/provider pickers, model-aware `/thinking` effort selection, login/logout,
+permissions, sessions, slash completion, and
 `@` file mentions. A leading `$` autocompletes enabled Agent Skills. Strict
 bounded YAML custom themes and keybindings support global and trusted-project
 precedence with warnings.

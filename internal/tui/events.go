@@ -677,9 +677,43 @@ func (m *Model) finalizeAssistant() {
 	}
 }
 
+// renderUserMessage gives each user turn a full-width surface so prompts stay
+// easy to find while scanning a long transcript. Wrapping before styling keeps
+// the background rectangular across every visual row, including explicit
+// newlines. One blank row and one cell of horizontal padding make the container
+// visually distinct from adjacent assistant output.
+func (m *Model) renderUserMessage(text string) string {
+	width := max(1, m.transcript.Width())
+	content := "› " + text
+	if width < 3 {
+		return styleUserMessage.Render(wrapTranscript(content, width))
+	}
+	content = wrapTranscript(content, width-2)
+	var padded strings.Builder
+	padded.Grow(len(userMessageStylePrefix) + len(content) + 2*(strings.Count(content, "\n")+1) + 2*(width+1) + len(userMessageStyleSuffix))
+	padded.WriteString(userMessageStylePrefix)
+	for range width {
+		padded.WriteByte(' ')
+	}
+	padded.WriteString("\n ")
+	for i := range len(content) {
+		if content[i] == '\n' {
+			padded.WriteString(" \n ")
+			continue
+		}
+		padded.WriteByte(content[i])
+	}
+	padded.WriteString(" \n")
+	for range width {
+		padded.WriteByte(' ')
+	}
+	padded.WriteString(userMessageStyleSuffix)
+	return padded.String()
+}
+
 // renderAssistantBody renders the assistant response without a role label.
-// The user prompt already has the blue prompt marker; the response should
-// read as a clean continuation, like the pi transcript.
+// The user prompt already has a distinct surface; the response should read as
+// a clean continuation, like the pi transcript.
 func (m *Model) renderAssistantBody(text string) string {
 	width := m.transcript.Width() - 4
 	body := strings.TrimSpace(text)

@@ -20,6 +20,6 @@ func (m *Model) startInitCommand(displayLine string) (tea.Model, tea.Cmd) {
 	if displayLine == "" {
 		displayLine = "/init"
 	}
-	m.pushLine(styleUser.Render("› " + displayLine))
+	m.pushLine(m.renderUserMessage(displayLine))
 	return m, m.startPromptWithDisplay(prompt, displayLine)
 }

@@ -177,7 +177,7 @@ func (m *Model) runCommandWithDisplay(line, displayLine string) (tea.Model, tea.
 		if displayMessage == "" {
 			displayMessage = message
 		}
-		m.pushLine(styleUser.Render("› " + displayMessage))
+		m.pushLine(m.renderUserMessage(displayMessage))
 		return m, m.startPromptWithMode(message, protocol.ModePlan)
 	case "/default":
 		if len(args) > 0 {

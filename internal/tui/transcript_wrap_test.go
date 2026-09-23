@@ -6,6 +6,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/elmissouri16/snow-core/internal/app"
 )
 
 func TestWrapTranscriptPreservesWidthAndTerminalState(t *testing.T) {
@@ -29,6 +31,38 @@ func TestWrapTranscriptPreservesWidthAndTerminalState(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRenderUserMessageBuildsFullWidthSurface(t *testing.T) {
+	m := newModel(t.Context(), app.Options{})
+	m.transcript.SetWidth(24)
+
+	rendered := m.renderUserMessage("a long user prompt that wraps\nthen continues")
+	if rendered == stripANSI(rendered) {
+		t.Fatal("user message surface has no terminal styling")
+	}
+	rows := strings.Split(rendered, "\n")
+	if len(rows) < 5 {
+		t.Fatalf("user message rows=%d, want padded wrapped multiline content", len(rows))
+	}
+	if strings.TrimSpace(stripANSI(rows[0])) != "" || strings.TrimSpace(stripANSI(rows[len(rows)-1])) != "" {
+		t.Fatalf("user message lacks blank container rows: first=%q last=%q", stripANSI(rows[0]), stripANSI(rows[len(rows)-1]))
+	}
+	for i, row := range rows {
+		if width := lipgloss.Width(row); width != m.transcript.Width() {
+			t.Errorf("row %d width=%d, want %d", i, width, m.transcript.Width())
+		}
+		plain := stripANSI(row)
+		if !strings.HasPrefix(plain, " ") || !strings.HasSuffix(plain, " ") {
+			t.Errorf("row %d lacks horizontal container padding: %q", i, plain)
+		}
+	}
+	plain := stripANSI(rendered)
+	for _, want := range []string{"› a long user prompt", "then continues"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("rendered user message missing %q: %q", want, plain)
+		}
 	}
 }
 

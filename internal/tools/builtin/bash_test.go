@@ -20,11 +20,18 @@ func runBash(b *Bash, dir string, args map[string]any) tools.ToolResult {
 }
 
 func TestBashSchemaDirectsLongRunningCommandsToProcessStart(t *testing.T) {
-	description := NewBash().Schema().Description
+	bash := NewBash()
+	schema := bash.Schema()
 	for _, want := range []string{"bounded", "one-shot", "process_start", "development servers", "watchers"} {
-		if !strings.Contains(description, want) {
-			t.Fatalf("bash description missing %q: %q", want, description)
+		if !strings.Contains(schema.Description, want) {
+			t.Fatalf("bash description missing %q: %q", want, schema.Description)
 		}
+	}
+	if bash.Timeout != 5*time.Minute {
+		t.Fatalf("default timeout=%s, want 5m", bash.Timeout)
+	}
+	if parameters := string(schema.Parameters); !strings.Contains(parameters, `"default": 300000`) {
+		t.Fatalf("bash schema does not advertise five-minute default: %s", parameters)
 	}
 }
 

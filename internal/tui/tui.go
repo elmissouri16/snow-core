@@ -29,32 +29,45 @@ import (
 // Styles use the adaptive default palette until a model applies the selected
 // built-in or custom theme.
 var (
-	colorAccent color.Color = lipgloss.Color("#58a6ff")
-	colorMuted  color.Color = lipgloss.Color("#8b949e")
-	colorSoft   color.Color = lipgloss.Color("#f0f6fc")
-	colorWarn   color.Color = lipgloss.Color("#e3b341")
-	colorErr    color.Color = lipgloss.Color("#ff7b72")
-	colorOk     color.Color = lipgloss.Color("#7ee787")
+	colorAccent         color.Color = lipgloss.Color("#58a6ff")
+	colorMuted          color.Color = lipgloss.Color("#8b949e")
+	colorSoft           color.Color = lipgloss.Color("#f0f6fc")
+	colorWarn           color.Color = lipgloss.Color("#e3b341")
+	colorErr            color.Color = lipgloss.Color("#ff7b72")
+	colorOk             color.Color = lipgloss.Color("#7ee787")
+	colorUserBackground color.Color = lipgloss.Color("#3a4656")
 
-	styleUser      = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
-	styleAssistant = lipgloss.NewStyle().Foreground(colorSoft)
-	styleTool      = lipgloss.NewStyle().Foreground(colorWarn)
-	styleError     = lipgloss.NewStyle().Foreground(colorErr)
-	styleFooter    = lipgloss.NewStyle().Foreground(colorMuted)
-	styleThinking  = lipgloss.NewStyle().Foreground(colorMuted).Italic(true)
-	styleHeader    = lipgloss.NewStyle().Foreground(colorSoft).Bold(true)
-	styleHeaderDim = lipgloss.NewStyle().Foreground(colorMuted)
-	styleDiffAdd   = lipgloss.NewStyle().Foreground(colorOk)
-	styleDiffDel   = lipgloss.NewStyle().Foreground(colorErr)
-	styleBrand     = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
-	styleSep       = lipgloss.NewStyle().Foreground(lipgloss.Color("#6e7681"))
-	stylePrompt    = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
-	styleMention   = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
-	styleComposer  = lipgloss.NewStyle()
+	styleUser        = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleUserMessage = lipgloss.NewStyle().Foreground(colorSoft).Background(colorUserBackground)
+	styleAssistant   = lipgloss.NewStyle().Foreground(colorSoft)
+	styleTool        = lipgloss.NewStyle().Foreground(colorWarn)
+	styleError       = lipgloss.NewStyle().Foreground(colorErr)
+	styleFooter      = lipgloss.NewStyle().Foreground(colorMuted)
+	styleThinking    = lipgloss.NewStyle().Foreground(colorMuted).Italic(true)
+	styleHeader      = lipgloss.NewStyle().Foreground(colorSoft).Bold(true)
+	styleHeaderDim   = lipgloss.NewStyle().Foreground(colorMuted)
+	styleDiffAdd     = lipgloss.NewStyle().Foreground(colorOk)
+	styleDiffDel     = lipgloss.NewStyle().Foreground(colorErr)
+	styleBrand       = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleSep         = lipgloss.NewStyle().Foreground(lipgloss.Color("#6e7681"))
+	stylePrompt      = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleMention     = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleComposer    = lipgloss.NewStyle()
 
 	styleCompletion         = lipgloss.NewStyle().Foreground(colorMuted)
 	styleCompletionSelected = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+
+	userMessageStylePrefix, userMessageStyleSuffix = splitStyleSequences(styleUserMessage)
 )
+
+func splitStyleSequences(style lipgloss.Style) (string, string) {
+	const marker = "X"
+	prefix, suffix, ok := strings.Cut(style.Render(marker), marker)
+	if !ok {
+		return "", ""
+	}
+	return prefix, suffix
+}
 
 // Messages
 type agentEventMsg struct {

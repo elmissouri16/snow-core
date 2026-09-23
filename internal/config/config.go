@@ -14,7 +14,7 @@ import (
 const DefaultToolOutputBytes = 262144
 
 // DefaultBashTimeout is the default bash tool timeout.
-const DefaultBashTimeout = 120 * time.Second
+const DefaultBashTimeout = 5 * time.Minute
 
 // DefaultContextCapBytes is the hard cap for injected project context (100 KiB).
 const DefaultContextCapBytes = 100 * 1024

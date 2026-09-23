@@ -17,7 +17,7 @@ import (
 
 const (
 	// DefaultBashTimeout is the default command timeout.
-	DefaultBashTimeout = 120 * time.Second
+	DefaultBashTimeout = 5 * time.Minute
 	// defaultProcessWaitDelay bounds pipe draining after a shell leader exits.
 	defaultProcessWaitDelay = 2 * time.Second
 )
@@ -30,7 +30,7 @@ type Bash struct {
 	MaxOutputBytes int
 	// ProtectedPaths adds operator-owned protected shell resources.
 	ProtectedPaths []string
-	// Timeout caps execution. Defaults to 120s.
+	// Timeout caps execution. Defaults to 5m.
 	Timeout time.Duration
 }
 
@@ -55,7 +55,7 @@ func (b *Bash) Schema() tools.ToolSchema {
   "required": ["command"],
   "properties": {
     "command": { "type": "string", "description": "Shell command to execute. Must be non-interactive." },
-    "timeout_ms": { "type": "integer", "default": 120000, "description": "Requested timeout in milliseconds, capped by the configured command timeout." }
+    "timeout_ms": { "type": "integer", "default": 300000, "description": "Requested timeout in milliseconds, capped by the configured command timeout." }
   }
 }`),
 	}

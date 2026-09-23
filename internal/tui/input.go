@@ -627,7 +627,7 @@ func (m *Model) startQueueFallback() tea.Cmd {
 	m.modeSwitchReady = false
 	m.beginOptimisticRun()
 	m.planPrompt = false
-	m.pushLine(styleUser.Render("› " + msg.text))
+	m.pushLine(m.renderUserMessage(msg.text))
 	var pastedTexts []pastedTextAttachment
 	if m.editor.Value() == msg.text {
 		m.editor.Reset()

@@ -11,14 +11,15 @@ import (
 // when a terminal has limited color support. Every selectable palette is
 // adaptive so it remains coherent on both light and dark terminal backgrounds.
 type tuiTheme struct {
-	name   string
-	accent config.AdaptiveColor
-	muted  config.AdaptiveColor
-	soft   config.AdaptiveColor
-	warn   config.AdaptiveColor
-	err    config.AdaptiveColor
-	ok     config.AdaptiveColor
-	sep    config.AdaptiveColor
+	name           string
+	accent         config.AdaptiveColor
+	muted          config.AdaptiveColor
+	soft           config.AdaptiveColor
+	warn           config.AdaptiveColor
+	err            config.AdaptiveColor
+	ok             config.AdaptiveColor
+	sep            config.AdaptiveColor
+	userBackground config.AdaptiveColor
 }
 
 func adaptive(light, dark string) config.AdaptiveColor {
@@ -28,14 +29,15 @@ func adaptive(light, dark string) config.AdaptiveColor {
 func fromResolvedTheme(resolved config.ResolvedTheme) tuiTheme {
 	colors := resolved.Colors
 	return tuiTheme{
-		name:   resolved.Name,
-		accent: adaptive(colors.Accent.Light, colors.Accent.Dark),
-		muted:  adaptive(colors.Muted.Light, colors.Muted.Dark),
-		soft:   adaptive(colors.Foreground.Light, colors.Foreground.Dark),
-		warn:   adaptive(colors.Warning.Light, colors.Warning.Dark),
-		err:    adaptive(colors.Error.Light, colors.Error.Dark),
-		ok:     adaptive(colors.Success.Light, colors.Success.Dark),
-		sep:    adaptive(colors.Separator.Light, colors.Separator.Dark),
+		name:           resolved.Name,
+		accent:         adaptive(colors.Accent.Light, colors.Accent.Dark),
+		muted:          adaptive(colors.Muted.Light, colors.Muted.Dark),
+		soft:           adaptive(colors.Foreground.Light, colors.Foreground.Dark),
+		warn:           adaptive(colors.Warning.Light, colors.Warning.Dark),
+		err:            adaptive(colors.Error.Light, colors.Error.Dark),
+		ok:             adaptive(colors.Success.Light, colors.Success.Dark),
+		sep:            adaptive(colors.Separator.Light, colors.Separator.Dark),
+		userBackground: adaptive(colors.UserBackground.Light, colors.UserBackground.Dark),
 	}
 }
 
@@ -87,7 +89,10 @@ func applyResolvedTheme(t tuiTheme) {
 	activeTUITheme = t
 	colorAccent, colorMuted, colorSoft = themeColor(t.accent), themeColor(t.muted), themeColor(t.soft)
 	colorWarn, colorErr, colorOk = themeColor(t.warn), themeColor(t.err), themeColor(t.ok)
+	colorUserBackground = themeColor(t.userBackground)
 	styleUser = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleUserMessage = lipgloss.NewStyle().Foreground(colorSoft).Background(colorUserBackground)
+	userMessageStylePrefix, userMessageStyleSuffix = splitStyleSequences(styleUserMessage)
 	styleAssistant = lipgloss.NewStyle().Foreground(colorSoft)
 	styleTool = lipgloss.NewStyle().Foreground(colorWarn)
 	styleError = lipgloss.NewStyle().Foreground(colorErr)

@@ -210,7 +210,7 @@ A representative configuration:
   "collaboration_mode": "default",
   "plan_mode_reasoning_effort": "medium",
   "tool_output_bytes": 262144,
-  "bash_timeout_ms": 120000,
+  "bash_timeout_ms": 300000,
   "processes": {
     "max_running": 4,
     "max_records": 32,
@@ -316,7 +316,7 @@ fills required zero-value defaults before validation.
 | `collaboration_mode` | `default` | `default` or `plan`; branch persistence may restore a saved mode |
 | `plan_mode_reasoning_effort` | Plan preset | Optional explicit normalized thinking level |
 | `tool_output_bytes` | `262144` | Bound for provider-facing tool results and previews |
-| `bash_timeout_ms` | `120000` | Operator cap for foreground host shell execution |
+| `bash_timeout_ms` | `300000` | Operator cap for foreground host shell execution |
 | `processes.max_running` | `4` | Maximum concurrently running app-owned background process groups (`1..32`) |
 | `processes.max_records` | `32` | Maximum running and terminal runtime records; must be at least `max_running` and at most `256` |
 | `processes.retained_output_bytes` | `1048576` | Newest combined stdout/stderr bytes retained per process (`65536..16777216`) |
@@ -503,10 +503,14 @@ semantic palette to the terminal's reported light/dark background, including
 Markdown rendered inside the transcript. Snow queries the background on startup
 and focus, and follows appearance notifications when the terminal supports mode
 2031. It restores that mode on exit if Snow enabled it. Theme changes keep drafts,
-dialogs, and transcript position. Snow keeps terminal backgrounds
-transparent. Legacy names (`dark`, `light`, `high-contrast`, `nord`, `dracula`,
-and `gruvbox`) remain accepted for saved configurations and custom-theme
-inheritance but are hidden from the Settings cycle. Any other valid name refers
+dialogs, and transcript position. Snow keeps the frame, composer, and assistant
+output transparent; user turns use a contrasting, palette-specific adaptive
+background with horizontal and vertical padding so prompts remain easy to find
+in long transcripts without clashing with the selected theme. Legacy names
+(`dark`, `light`,
+`high-contrast`, `nord`, `dracula`, and `gruvbox`) remain accepted for saved
+configurations and custom-theme inheritance but are hidden from the Settings
+cycle. Any other valid name refers
 to a custom theme file. Snow always uses Bubble Tea's
 alternate-screen, app-owned transcript viewport so scrolling cannot expose
 stale rendered headers or composer chrome. The default `mouse: true` keeps
@@ -830,6 +834,7 @@ colors:
   error: {light: "#B00020", dark: "#FF6B6B"}
   success: {light: "#137333", dark: "#50FA7B"}
   separator: {light: "250", dark: "238"}
+  user_background: {light: "#D0DCE8", dark: "#3A4656"}
 ```
 
 `extends` is optional and defaults to `default`; when supplied, it must name one
@@ -837,8 +842,10 @@ of the four selectable built-ins or a supported legacy built-in listed above.
 Custom names cannot replace current or legacy built-in names, exceed 64 runes,
 contain control characters, or contain `/` or `\\`. Colors are optional
 semantic overrides using `#RRGGBB` or ANSI `0..255`. Each light/dark value styles
-both TUI chrome and Markdown while backgrounds remain terminal-owned. Project
-themes replace same-named global themes. RPC clients use `themes_list` to read
+TUI chrome and Markdown; `user_background` controls the only transcript message
+surface while the frame, composer, and assistant output remain terminal-owned.
+When omitted, it inherits the selected `extends` palette. Project themes replace
+same-named global themes. RPC clients use `themes_list` to read
 the resolved catalog and selected name; `settings_get`/`settings_update` read
 and change the same persisted `theme` setting used by the TUI.
 
