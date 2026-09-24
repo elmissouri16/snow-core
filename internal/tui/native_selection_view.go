@@ -50,9 +50,8 @@ func (m *Model) sessionCard() selectionCard {
 		}
 	}
 	active := currentSessionID(m.app)
-	for _, info := range m.sessions {
-		card.items = append(card.items, formatSessionPickerInfo(info, active))
-	}
+	card.itemCount = len(m.sessions)
+	card.itemAt = func(i int) string { return formatSessionPickerInfo(m.sessions[i], active) }
 	if m.sessionRenaming {
 		card.input = "Rename session: " + m.sessionRenameInput + "_"
 		card.footer = "Enter save · Esc cancel"

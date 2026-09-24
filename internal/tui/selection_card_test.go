@@ -281,6 +281,33 @@ func TestSelectionCardResumesAfterBlockingHostRequests(t *testing.T) {
 	}
 }
 
+func TestSessionPickerFormatsOnlyVisibleRows(t *testing.T) {
+	m := modelPickerTestModel(t, 80, 24)
+	m.pickSession = true
+	m.sessions = make([]session.SessionInfo, 1000)
+	for i := range m.sessions {
+		m.sessions[i] = session.SessionInfo{ID: fmt.Sprintf("session-%04d", i), Name: fmt.Sprintf("name-%04d", i)}
+	}
+	m.sessionIndex = 900
+	card := m.sessionCard()
+	if len(card.items) != 0 || card.count() != len(m.sessions) {
+		t.Fatalf("picker built %d eager rows for %d sessions", len(card.items), len(m.sessions))
+	}
+	calls := 0
+	itemAt := card.itemAt
+	card.itemAt = func(i int) string {
+		calls++
+		return itemAt(i)
+	}
+	rendered := stripANSI(m.renderSelectionCard(card))
+	if !strings.Contains(rendered, "name-0900") || !strings.Contains(rendered, "901 of 1000") {
+		t.Fatalf("selected session missing from picker: %s", rendered)
+	}
+	if calls == 0 || calls > m.selectionCardLayout(card).listRows {
+		t.Fatalf("formatted %d rows; expected at most the visible page", calls)
+	}
+}
+
 func TestSelectionCardComponentClipsTinyAndUnicodeContent(t *testing.T) {
 	m := modelPickerTestModel(t, 80, 24)
 	for width := 1; width <= 35; width++ {

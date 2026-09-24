@@ -15,6 +15,8 @@ type selectionCard struct {
 	title, detail, footer string
 	compactFooter         string
 	items                 []string
+	itemCount             int
+	itemAt                func(int) string
 	selected              int
 	loading               string
 	input                 string
@@ -26,6 +28,20 @@ type selectionCardLayout struct {
 	detail    []string
 	listRows  int
 	separator bool
+}
+
+func (card selectionCard) count() int {
+	if card.itemAt != nil {
+		return card.itemCount
+	}
+	return len(card.items)
+}
+
+func (card selectionCard) item(index int) string {
+	if card.itemAt != nil {
+		return card.itemAt(index)
+	}
+	return card.items[index]
 }
 
 func (m *Model) selectionCardLayout(card selectionCard) selectionCardLayout {
@@ -56,7 +72,7 @@ func (m *Model) selectionCardLayout(card selectionCard) selectionCardLayout {
 	}
 	layout.detail = wrappedCardRows(card.detail, width, min(detailLimit, max(0, g.innerHeight-chrome-1)))
 	layout.listRows = max(1, g.innerHeight-chrome-len(layout.detail))
-	count := max(1, len(card.items))
+	count := max(1, card.count())
 	if card.loading != "" {
 		count = 1
 	}
@@ -91,11 +107,12 @@ func wrappedCardRows(text string, width, limit int) []string {
 func (m *Model) renderSelectionCard(card selectionCard) string {
 	layout := m.selectionCardLayout(card)
 	g := layout.geometry
-	selected := clampPickerIndex(card.selected, len(card.items))
-	start, end := settingsCardWindow(selected, len(card.items), layout.listRows)
+	count := card.count()
+	selected := clampPickerIndex(card.selected, count)
+	start, end := settingsCardWindow(selected, count, layout.listRows)
 	status := ""
-	if len(card.items) > 0 {
-		status = fmt.Sprintf("%d of %d", selected+1, len(card.items))
+	if count > 0 {
+		status = fmt.Sprintf("%d of %d", selected+1, count)
 	}
 	rows := []string{renderPickerCardHeader(card.title, status, g.innerWidth)}
 	if layout.separator {
@@ -107,7 +124,7 @@ func (m *Model) renderSelectionCard(card selectionCard) string {
 		if i == selected {
 			prefix, style = "› ", styleCompletionSelected
 		}
-		list = append(list, style.Render(truncateDisplayText(prefix+sanitizeTerminalLine(card.items[i]), g.innerWidth)))
+		list = append(list, style.Render(truncateDisplayText(prefix+sanitizeTerminalLine(card.item(i)), g.innerWidth)))
 	}
 	if card.loading != "" {
 		list = []string{styleHeaderDim.Render(truncateDisplayText(sanitizeTerminalLine(card.loading), g.innerWidth))}

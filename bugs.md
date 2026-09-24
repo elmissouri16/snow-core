@@ -1,5 +1,15 @@
 # Known bugs
 
+## BUG-252: Resume inventory slows as project sessions accumulate
+
+- **Status:** Open — avoidable startup and rendering costs removed; full inventory scanning remains.
+- **Severity:** Medium
+- **Surface:** CLI/TUI session picker and project session inventory
+- **Evidence:** Interactive `snow resume` previously ran `FileIndex.List` in the CLI and then again in the TUI picker. Every listing walks all project session databases and opens each through read-only SQLite validation; durability inspection also counted every matching row in several tables merely to determine whether any durable work exists. `/resume` performs one scan but can still wait for all databases to be inspected. Once loaded, picker rendering formats every session on each frame even though only visible rows are displayed.
+- **Mitigation:** Interactive startup now lets the picker perform the sole inventory scan; headless resume still selects the newest indexed session. Durability checks use `EXISTS` while preserving old-schema fallback, root-only exclusion, goal-only inclusion, read-only discovery, and stored-CWD filtering. The TUI formats only the visible picker rows on each frame. An explicit `snow resume /absolute/path/to/session.db` avoids inventory discovery.
+- **Remaining work:** Measure larger synthetic cohorts and deep histories, then consider indexed or incremental discovery without weakening identity, ordering, legacy-directory, or read-only checks. The current changes do not make inventory lookup sublinear.
+- **Verification:** `go test ./...`, `go vet ./...`, affected package tests, the performance guard, `git diff --check`, and the local install passed. On an Apple M3 Pro, the new warm synthetic listing benchmark measured 6.2 ms for 10 one-message sessions and 58.8 ms for 100 (three iterations each, `-benchtime=3x`); these are post-change costs, not a comparative speedup or a measurement of the user's environment.
+
 ## BUG-251: Plan Mode omitted subagent roles resolve to a shell-capable default
 
 - **Status:** Resolved — omitted Plan Mode roles now select a Plan-safe profile.

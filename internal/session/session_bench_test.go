@@ -141,6 +141,39 @@ func BenchmarkSQLiteBranchHydration5000(b *testing.B) {
 	}
 }
 
+// BenchmarkFileIndexList measures the cost of discovering a project's saved
+// sessions, excluding database creation from the timed portion.
+func BenchmarkFileIndexList(b *testing.B) {
+	for _, count := range []int{10, 100} {
+		b.Run(fmt.Sprintf("sessions-%d", count), func(b *testing.B) {
+			root := b.TempDir()
+			cwd := filepath.Join(root, "project")
+			index := NewFileIndex(filepath.Join(root, "sessions"))
+			for i := range count {
+				store, err := index.Create(cwd)
+				if err != nil {
+					b.Fatal(err)
+				}
+				err = store.Append(msg(fmt.Sprintf("m%d", i), "", "saved"))
+				if closeErr := store.Close(); err == nil {
+					err = closeErr
+				}
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				infos, err := index.List(cwd)
+				if err != nil || len(infos) != count {
+					b.Fatalf("listed %d of %d sessions: %v", len(infos), count, err)
+				}
+			}
+		})
+	}
+}
+
 // BenchmarkLargeSessionReload opens a SQLite session with 10k entries and
 // measures reload time.
 func BenchmarkLargeSessionReload(b *testing.B) {

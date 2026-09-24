@@ -65,17 +65,17 @@ func inspectSQLiteSession(path, cwd string, updatedAt int64) (SessionInfo, bool,
 	}
 	var durable int
 	err = db.QueryRow(`SELECT
-		(SELECT count(*) FROM entries WHERE id <> 'root') +
-		(SELECT count(*) FROM session_meta WHERE name <> '') +
-		(SELECT count(*) FROM subagent_threads) +
-		(SELECT count(*) FROM thread_goals) +
-		(SELECT count(*) FROM session_branches WHERE branch_id <> 'main') +
-		(SELECT count(*) FROM thread_state WHERE collaboration_mode <> 'default') +
-		(SELECT count(*) FROM thread_goal_deferrals WHERE deferred <> 0)`).Scan(&durable)
+		EXISTS(SELECT 1 FROM entries WHERE id <> 'root') OR
+		EXISTS(SELECT 1 FROM session_meta WHERE name <> '') OR
+		EXISTS(SELECT 1 FROM subagent_threads) OR
+		EXISTS(SELECT 1 FROM thread_goals) OR
+		EXISTS(SELECT 1 FROM session_branches WHERE branch_id <> 'main') OR
+		EXISTS(SELECT 1 FROM thread_state WHERE collaboration_mode <> 'default') OR
+		EXISTS(SELECT 1 FROM thread_goal_deferrals WHERE deferred <> 0)`).Scan(&durable)
 	if err != nil && strings.Contains(strings.ToLower(err.Error()), "no such table") {
 		err = db.QueryRow(`SELECT
-			(SELECT count(*) FROM entries WHERE id <> 'root') +
-			(SELECT count(*) FROM session_meta WHERE name <> '')`).Scan(&durable)
+			EXISTS(SELECT 1 FROM entries WHERE id <> 'root') OR
+			EXISTS(SELECT 1 FROM session_meta WHERE name <> '')`).Scan(&durable)
 	}
 	if err != nil {
 		return SessionInfo{}, false, err

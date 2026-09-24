@@ -137,6 +137,13 @@ func resumeCmd() *cobra.Command {
 				path = args[0]
 			}
 			if path == "" {
+				mode, _ := cmd.Flags().GetString("mode")
+				prompt, _ := cmd.Flags().GetString("prompt")
+				if mode == "" && prompt == "" {
+					// The picker lists sessions itself. Do not scan every database
+					// here only to repeat the scan after TUI startup.
+					return runInteractiveWithSessionPicker(cmd, nil)
+				}
 				cwd := mustCWD()
 				infos, err := session.NewFileIndex(session.DefaultSessionsRoot()).List(cwd)
 				if err != nil {
@@ -144,11 +151,6 @@ func resumeCmd() *cobra.Command {
 				}
 				if len(infos) == 0 {
 					return fmt.Errorf("resume: no saved sessions for %s; run snow to start one", cwd)
-				}
-				mode, _ := cmd.Flags().GetString("mode")
-				prompt, _ := cmd.Flags().GetString("prompt")
-				if mode == "" && prompt == "" {
-					return runInteractiveWithSessionPicker(cmd, nil)
 				}
 				// Headless modes cannot show an interactive picker. Preserve their
 				// useful no-path behavior by resuming the newest indexed session.
