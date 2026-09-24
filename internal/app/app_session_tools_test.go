@@ -168,9 +168,10 @@ func TestAppPermissionModeUsesLaunchBaselineForNewSessions(t *testing.T) {
 	}{
 		{name: "default ask", initial: permission.ModeAsk, manual: permission.ModeAllow, newSession: permission.ModeAsk},
 		{name: "explicit launch allow", override: "allow", initial: permission.ModeAllow, manual: permission.ModeDeny, newSession: permission.ModeAllow},
+		{name: "explicit launch deny", override: "deny", initial: permission.ModeDeny, manual: permission.ModeAllow, newSession: permission.ModeDeny},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a, err := New(context.Background(), Options{Provider: "fake", NoSession: true, Permission: tc.override, CWD: t.TempDir()})
+			a, err := New(t.Context(), Options{Provider: "fake", NoSession: true, Permission: tc.override, CWD: t.TempDir()})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -374,23 +375,6 @@ func TestTrustedProjectSystemPromptCannotEscapeProject(t *testing.T) {
 	}
 	if _, err := New(context.Background(), opts); err == nil || !strings.Contains(err.Error(), "escapes trusted project root") {
 		t.Fatalf("project prompt escape error = %v", err)
-	}
-}
-
-// TestAppPermissionDenyBlocksBash verifies deny mode blocks write tools at the app level.
-func TestAppPermissionDenyBlocksBash(t *testing.T) {
-	ctx := t.Context()
-	dir := t.TempDir()
-
-	// Use the opencode-go provider? No — we need a provider that errors without
-	// credentials. Instead just verify permission service wiring.
-	a, err := New(ctx, Options{Provider: "fake", NoSession: true, Permission: "deny", CWD: dir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer a.Close()
-	if string(a.Perm.Mode()) != "deny" {
-		t.Fatalf("mode = %s, want deny", a.Perm.Mode())
 	}
 }
 
