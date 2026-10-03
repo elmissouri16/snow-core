@@ -312,8 +312,6 @@ func (m *Model) cycleSetting(direction int) {
 		}
 	case settingsTerminalTitle:
 		err = m.app.UpdateTerminalSettings(app.TerminalSettingsUpdate{Title: new(!m.app.Cfg.TUI.TerminalTitle)})
-	case settingsTerminalProgress:
-		err = m.app.UpdateTerminalSettings(app.TerminalSettingsUpdate{Progress: new(!m.app.Cfg.TUI.TerminalProgress)})
 	case settingsNotifications:
 		next := cycleValue([]string{"off", "unfocused", "always"}, m.app.Cfg.TUI.Notifications, direction)
 		err = m.app.UpdateTerminalSettings(app.TerminalSettingsUpdate{Notifications: new(next)})

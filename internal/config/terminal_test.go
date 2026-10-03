@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,19 +9,26 @@ import (
 
 func TestTerminalPreferencesDefaultsAndPersistence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"tui":{"theme":"frost","mouse":false}}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"tui":{"theme":"frost","mouse":false,"terminal_progress":true}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.TUI.TerminalTitle || !cfg.TUI.TerminalProgress || cfg.TUI.Notifications != "unfocused" || cfg.TUI.Mouse {
+	if !cfg.TUI.TerminalTitle || cfg.TUI.Notifications != "unfocused" || cfg.TUI.Mouse {
 		t.Fatalf("legacy defaults = %+v", cfg.TUI)
 	}
-	cfg.TUI.TerminalTitle, cfg.TUI.TerminalProgress, cfg.TUI.Notifications = false, false, "off"
+	cfg.TUI.TerminalTitle, cfg.TUI.Notifications = false, "off"
 	if err := Save(path, cfg); err != nil {
 		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte(`"terminal_progress"`)) {
+		t.Fatal("removed terminal progress preference was saved")
 	}
 	loaded, err := Load(path)
 	if err != nil || loaded.TUI != cfg.TUI {

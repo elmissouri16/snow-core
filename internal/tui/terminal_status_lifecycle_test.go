@@ -15,8 +15,8 @@ func TestLatePromptErrorKeepsTerminalCompletionSettled(t *testing.T) {
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvError, TurnID: "failed", Message: "private failure"})
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone, TurnID: "failed"})
 	m.Update(promptDoneMsg{generation: generation, turnID: "failed", admitted: true, err: errors.New("private failure")})
-	if m.busy || m.terminal.heartbeat {
-		t.Fatal("late prompt result restarted settled work and terminal progress")
+	if m.busy {
+		t.Fatal("late prompt result restarted settled work")
 	}
 	if got := terminalTestAlert(m); got != "\a"+ansi.Notify("Snow encountered an error") {
 		t.Fatalf("late prompt result lost completion alert: %q", got)

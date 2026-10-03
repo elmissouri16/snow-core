@@ -93,14 +93,14 @@ saved newline bindings keep their configured keys. Ghostty normally lets you
 hold Shift while dragging for terminal-native selection. F6 also switches modes.
 
 Snow also updates the tab/window title with the project and running/waiting
-status. In Ghostty, a progress bar above the split shows activity and pauses for
-approval or input. When you are in another tab/window, completion and requests
+status. Snow does not display Ghostty's animated progress bar above the split.
+When you are in another tab/window, completion and requests
 for attention send a generic desktop notification and terminal bell. Manual
 compaction also reports completion or failure after final cleanup; cancellation
 reports Stopped without a completion alert. If automatic compaction fails and
 blocks a goal, Snow sends one generic failure alert.
 Change
-**Terminal tab title**, **Terminal progress**, or **Terminal alerts** in
+**Terminal tab title** or **Terminal alerts** in
 `/settings`; alerts can be `off`, `unfocused` (default), or `always`.
 See [terminal integration settings](configuration.md#tui) for Ghostty controls
 and notification permissions.

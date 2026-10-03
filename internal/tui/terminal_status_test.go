@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -9,7 +8,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/elmissouri16/snow-core/internal/app"
 	"github.com/elmissouri16/snow-core/internal/config"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
@@ -27,99 +25,77 @@ func TestTerminalTitleBoundsAndSanitizesProjectName(t *testing.T) {
 
 func TestTerminalStatusLifecycle(t *testing.T) {
 	m := modelPickerTestModel(t, 80, 24)
-	assertStatus := func(title string, progress tea.ProgressBarState) {
+	assertStatus := func(title string) {
 		t.Helper()
 		view := m.View()
-		if !strings.HasSuffix(view.WindowTitle, " · "+title) || view.ProgressBar == nil || view.ProgressBar.State != progress {
+		if !strings.HasSuffix(view.WindowTitle, " · "+title) || view.ProgressBar != nil {
 			t.Fatalf("title=%q progress=%+v", view.WindowTitle, view.ProgressBar)
 		}
 	}
-	assertStatus("Ready", tea.ProgressBarNone)
+	assertStatus("Ready")
 	m.beginOptimisticRun()
-	assertStatus("Running", tea.ProgressBarIndeterminate)
+	assertStatus("Running")
 	m.compacting = true
-	assertStatus("Compacting", tea.ProgressBarIndeterminate)
+	assertStatus("Compacting")
 	m.compacting = false
 	m.permPending = true
-	assertStatus("Waiting for approval", tea.ProgressBarWarning)
+	assertStatus("Waiting for approval")
 	m.permPending, m.userInputPending = false, true
-	assertStatus("Waiting for input", tea.ProgressBarWarning)
+	assertStatus("Waiting for input")
 	m.userInputPending = false
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone, TurnID: "done"})
-	assertStatus("Done", tea.ProgressBarNone)
+	assertStatus("Done")
 	m.Update(tea.FocusMsg{})
-	assertStatus("Ready", tea.ProgressBarNone)
+	assertStatus("Ready")
 	m.beginOptimisticRun()
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvError, TurnID: "failed", Message: "private error"})
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone, TurnID: "failed"})
-	assertStatus("Failed", tea.ProgressBarError)
+	assertStatus("Failed")
 	m.beginOptimisticRun()
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvAborted, TurnID: "stopped"})
-	assertStatus("Stopped", tea.ProgressBarNone)
+	assertStatus("Stopped")
 	m.terminal.unfocused = true
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone, TurnID: "stopped"})
-	assertStatus("Stopped", tea.ProgressBarNone)
+	assertStatus("Stopped")
 	if terminalTestAlert(m) != "" {
 		t.Fatal("canceled turn announced success at its bookkeeping boundary")
 	}
 	m.Update(tea.FocusMsg{})
 	m.terminal.unfocused = true
 	m.handleAgentEvent(protocol.AgentEvent{Type: protocol.EvTurnDone, TurnID: "stopped"})
-	if terminalTestAlert(m) != "" || m.View().ProgressBar.State != tea.ProgressBarNone {
+	if terminalTestAlert(m) != "" || m.View().ProgressBar != nil {
 		t.Fatal("acknowledging cancellation allowed a late success notification")
 	}
 }
 
-func TestTerminalHeartbeatUsesCurrentStateAndReusesFrame(t *testing.T) {
+func TestTerminalAlertReusesFrameWithoutStartingTimer(t *testing.T) {
 	m := modelPickerTestModel(t, 80, 24)
 	m.beginOptimisticRun()
-	if m.syncTerminalStatus() == nil {
-		t.Fatal("busy state did not start a heartbeat")
+	if m.syncTerminalStatus() != nil {
+		t.Fatal("busy state scheduled a terminal progress timer")
 	}
-	tick := terminalProgressTick(m.terminal.generation)
-	m.permPending = true
+	m.terminal.unfocused, m.permPending = true, true
+	cmd := m.syncTerminalStatus()
+	if cmd == nil {
+		t.Fatal("pending permission did not schedule an alert")
+	}
 	before := m.View()
-	msg := terminalStatusFilter(m, tick)
+	msg := terminalStatusFilter(m, cmd())
 	raw, ok := msg.(tea.RawMsg)
-	if !ok || fmt.Sprint(raw.Msg) != ansi.SetWarningProgressBar(0) {
-		t.Fatalf("heartbeat used captured running state: %#v", msg)
+	if !ok || fmt.Sprint(raw.Msg) != "\a"+ansi.Notify("Snow: Waiting for approval") {
+		t.Fatalf("permission alert=%#v", msg)
 	}
-	_, cmd := m.Update(msg)
+	_, cmd = m.Update(msg)
 	after := m.View()
-	if cmd == nil || !m.terminal.reuseView || after.Content != before.Content || after.WindowTitle != before.WindowTitle {
-		t.Fatal("heartbeat did not retain the frame and continue its timer chain")
+	if cmd != nil || !m.terminal.reuseView || after.Content != before.Content || after.WindowTitle != before.WindowTitle {
+		t.Fatal("alert did not retain the frame or started a timer")
 	}
 	if got := testing.AllocsPerRun(100, func() { _ = m.View() }); got != 0 {
-		t.Fatalf("cached heartbeat frame allocated %g times", got)
+		t.Fatalf("cached alert frame allocated %g times", got)
 	}
 	m.Update(tea.WindowSizeMsg{Width: 50, Height: 16})
 	if m.terminal.reuseView || m.View().Content == before.Content {
 		t.Fatal("resize reused the old frame")
-	}
-	m.permPending = false
-	m.setRunIdle()
-	m.syncTerminalStatus()
-	if m.terminal.heartbeat || terminalStatusFilter(m, tick) != nil {
-		t.Fatal("late heartbeat resurrected idle progress")
-	}
-	m.beginOptimisticRun()
-	m.syncTerminalStatus()
-	if terminalStatusFilter(m, tick) != nil {
-		t.Fatal("old timer joined a new timer chain")
-	}
-	m.app.Cfg.TUI.TerminalProgress = false
-	if terminalStatusFilter(m, terminalProgressTick(m.terminal.generation)) != nil || m.View().ProgressBar != nil {
-		t.Fatal("disabled progress continued emitting")
-	}
-}
-
-func TestTerminalHeartbeatTimerCancelsWithModel(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	m := newModel(ctx, app.Options{})
-	cmd := m.terminalProgressTick()
-	cancel()
-	if got := cmd(); got != nil {
-		t.Fatalf("canceled timer returned %T", got)
 	}
 }
 
@@ -230,7 +206,7 @@ func TestTerminalAttentionDeduplicatesRequestIdentity(t *testing.T) {
 
 func TestTerminalSettingsRemainVisibleAndPersistAtSmallSizes(t *testing.T) {
 	m := modelPickerTestModel(t, 60, 12)
-	for _, row := range []int{settingsTerminalTitle, settingsTerminalProgress, settingsNotifications} {
+	for _, row := range []int{settingsTerminalTitle, settingsNotifications} {
 		m.pickSettings, m.settingsIndex = true, row
 		if !strings.Contains(stripANSI(m.renderSettings()), "› Terminal") {
 			t.Fatalf("terminal setting %d was clipped", row)
@@ -244,7 +220,7 @@ func TestTerminalSettingsRemainVisibleAndPersistAtSmallSizes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.TUI.TerminalTitle || loaded.TUI.TerminalProgress || loaded.TUI.Notifications != "always" {
+	if loaded.TUI.TerminalTitle || loaded.TUI.Notifications != "always" {
 		t.Fatalf("settings did not persist: %+v", loaded.TUI)
 	}
 	view := m.View()

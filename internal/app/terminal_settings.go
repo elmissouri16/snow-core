@@ -6,7 +6,6 @@ import "github.com/elmissouri16/snow-core/internal/config"
 // fields preserve both concurrent disk changes and runtime-only overrides.
 type TerminalSettingsUpdate struct {
 	Title         *bool
-	Progress      *bool
 	Notifications *string
 }
 
@@ -23,9 +22,6 @@ func (a *App) UpdateTerminalSettings(update TerminalSettingsUpdate) error {
 	mutate := func(cfg *config.Config) error {
 		if update.Title != nil {
 			cfg.TUI.TerminalTitle = *update.Title
-		}
-		if update.Progress != nil {
-			cfg.TUI.TerminalProgress = *update.Progress
 		}
 		if update.Notifications != nil {
 			cfg.TUI.Notifications = *update.Notifications

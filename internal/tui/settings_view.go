@@ -74,7 +74,6 @@ func (m *Model) settingsCardRows() []settingsCardRow {
 		{text: m.updateActionText(), available: m.updateActionAvailable()},
 		{text: "Keybindings  configure shortcuts", available: true},
 		{text: "Terminal tab title  " + onOff(m.app.Cfg.TUI.TerminalTitle), available: true},
-		{text: "Terminal progress  " + onOff(m.app.Cfg.TUI.TerminalProgress), available: true},
 		{text: "Terminal alerts  " + m.app.Cfg.TUI.Notifications, available: true},
 	}
 }

@@ -1452,8 +1452,9 @@ shutdown. The TUI owns OS signals through `signal.NotifyContext` and disables
 Bubble Tea's internal signal handler to avoid competing shutdown paths. Core
 and public SDK packages remain UI-independent.
 
-Terminal status stays in `internal/tui/terminal_status.go`. Declarative title
-and progress use the existing reducer's root work/approval/input state. Global
+Terminal status stays in `internal/tui/terminal_status.go`. Declarative titles
+use the existing reducer's root work/approval/input state. Snow does not emit
+OSC 9;4 progress bars or run terminal-progress keep-alive timers. Global
 preferences apply live through an app facade without changing agent/RPC/SDK
 contracts. Generic attention/desktop alerts are deduplicated and focus-gated;
 child completion, snapshots, stale turns, and goal continuations do not announce
@@ -1467,12 +1468,11 @@ mailbox-cleanup errors override provisional stream success. Pre-admission errors
 report failure, and cancellation reports Stopped. Automatic goal-compaction
 failures announce once at the idle-core terminal goal boundary, without treating
 intermediate compaction success or goal snapshots as completed work.
-A generation-scoped, cancelable one-second progress keep-alive
-goes through a Bubble Tea program filter and `RawMsg` output, deriving state
-immediately before emission. Only these terminal-only messages reuse the last
-complete `tea.View`; all ordinary updates, including resize and focus, invalidate
-that shortcut. Progress timers stop at idle, and Bubble Tea restores owned
-title/progress state on quit, cancellation, and suspend.
+Notification commands go through a Bubble Tea program filter and `RawMsg`
+output, checking current state immediately before emission. These terminal-only
+messages reuse the last complete `tea.View`; all ordinary updates, including
+resize and focus, invalidate that shortcut. Bubble Tea restores the owned title
+on quit, cancellation, and suspend.
 
 Frame composition performs one final padding/clipping pass and reuses a bounded
 composer view until input, cursor, selection, geometry, or styling changes.

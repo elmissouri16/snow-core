@@ -47,7 +47,7 @@ func (o *terminalOutputCapture) snapshot() string {
 	return o.Buffer.String()
 }
 
-func TestTerminalRendererHeartbeatAndShutdown(t *testing.T) {
+func TestTerminalRendererOmitsProgressAndCleansUpTitle(t *testing.T) {
 	for _, cancelProgram := range []bool{false, true} {
 		t.Run(map[bool]string{false: "quit", true: "cancel"}[cancelProgram], func(t *testing.T) {
 			m := modelPickerTestModel(t, 80, 24)
@@ -71,18 +71,23 @@ func TestTerminalRendererHeartbeatAndShutdown(t *testing.T) {
 			})
 			deadline := time.NewTimer(6 * time.Second)
 			defer deadline.Stop()
-			for strings.Count(output.snapshot(), ansi.SetWarningProgressBar(0)) < 3 {
+			for !strings.Contains(output.snapshot(), "Snow · ") || !strings.Contains(output.snapshot(), "\a"+ansi.Notify("Snow: Waiting for approval")) {
 				select {
 				case <-output.changed:
 				case err := <-done:
-					t.Fatalf("program exited before heartbeats: %v", err)
+					t.Fatalf("program exited before title and alert: %v", err)
 				case <-deadline.C:
-					t.Fatalf("progress was not refreshed through the renderer: %q", output.snapshot())
+					t.Fatalf("title and alert were not emitted: %q", output.snapshot())
 				}
 			}
-			pulses := strings.Split(output.snapshot(), ansi.SetWarningProgressBar(0))
-			if between := pulses[len(pulses)-2]; between != "" {
-				t.Fatalf("heartbeat redrew terminal content between pulses: %q", between)
+			// Stay active beyond the former one-second progress heartbeat.
+			select {
+			case err := <-done:
+				t.Fatalf("program exited during active work: %v", err)
+			case <-time.After(1100 * time.Millisecond):
+			}
+			if strings.Contains(output.snapshot(), "\x1b]9;4;") {
+				t.Fatal("active renderer emitted terminal progress")
 			}
 			if cancelProgram {
 				cancel()
@@ -101,8 +106,8 @@ func TestTerminalRendererHeartbeatAndShutdown(t *testing.T) {
 			if !strings.Contains(text, "Snow · ") || !strings.Contains(text, "\a"+ansi.Notify("Snow: Waiting for approval")) {
 				t.Fatal("real program did not emit title and attention/desktop notification")
 			}
-			if strings.LastIndex(text, ansi.ResetProgressBar) < strings.LastIndex(text, ansi.SetWarningProgressBar(0)) {
-				t.Fatal("progress remained active after shutdown")
+			if strings.Contains(text, "\x1b]9;4;") {
+				t.Fatal("renderer emitted terminal progress on shutdown")
 			}
 			if !strings.Contains(text, ansi.SetWindowTitle("")) {
 				t.Fatal("title was not cleared by Bubble Tea shutdown")

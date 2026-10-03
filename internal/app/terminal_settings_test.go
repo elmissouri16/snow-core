@@ -29,7 +29,7 @@ func TestTerminalSettingsPreserveOtherPreferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.TUI.Theme != "frost" || loaded.TUI.TerminalTitle || loaded.TUI.Notifications != "always" || !loaded.TUI.TerminalProgress {
+	if loaded.TUI.Theme != "frost" || loaded.TUI.TerminalTitle || loaded.TUI.Notifications != "always" {
 		t.Fatalf("persisted = %+v", loaded.TUI)
 	}
 	if a.Cfg.TUI.Theme != "ember" || a.Cfg.TUI.TerminalTitle || a.Cfg.TUI.Notifications != "always" {
@@ -48,7 +48,7 @@ func TestTerminalSettingsFailureLeavesLiveStateUntouched(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.ConfigPath = filepath.Join(blocker, "config.json")
-	if err := a.UpdateTerminalSettings(TerminalSettingsUpdate{Progress: new(false)}); err == nil {
+	if err := a.UpdateTerminalSettings(TerminalSettingsUpdate{Title: new(false)}); err == nil {
 		t.Fatal("invalid config path saved")
 	}
 	if a.Cfg.TUI != before {

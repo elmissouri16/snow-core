@@ -2,14 +2,11 @@ package tui
 
 import (
 	"path/filepath"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
-
-const terminalProgressInterval = time.Second
 
 type terminalActivity uint8
 
@@ -26,18 +23,6 @@ const (
 
 var terminalActivityNames = [...]string{
 	"Ready", "Running", "Compacting", "Waiting for approval", "Waiting for input", "Done", "Failed", "Stopped",
-}
-
-// Immutable values avoid allocating a progress bar on every streamed frame.
-var terminalProgressBars = [...]tea.ProgressBar{
-	{State: tea.ProgressBarNone},
-	{State: tea.ProgressBarIndeterminate},
-	{State: tea.ProgressBarIndeterminate},
-	{State: tea.ProgressBarWarning},
-	{State: tea.ProgressBarWarning},
-	{State: tea.ProgressBarNone},
-	{State: tea.ProgressBarError},
-	{State: tea.ProgressBarNone},
 }
 
 type terminalAttention struct {
@@ -59,8 +44,6 @@ type terminalStatus struct {
 	alertActivity  terminalActivity
 	alertID        uint64
 	alertScheduled bool
-	heartbeat      bool
-	generation     uint64
 	titleCWD       string
 	titleActivity  terminalActivity
 	title          string
@@ -78,15 +61,8 @@ type terminalSettlement struct {
 	generation uint64 // fallback for legacy events without a turn ID
 }
 
-type terminalProgressTick uint64
 type terminalAlertMsg uint64
 type terminalAlertOutput string
-type terminalProgressOutput struct {
-	sequence   string
-	generation uint64
-}
-
-func (o terminalProgressOutput) String() string { return o.sequence }
 
 func (m *Model) terminalActivity() terminalActivity {
 	switch {
@@ -117,9 +93,6 @@ func (m *Model) applyTerminalStatus(view *tea.View) {
 			m.terminal.titleCWD, m.terminal.titleActivity = cwd, activity
 		}
 		view.WindowTitle = m.terminal.title
-	}
-	if m.app.Cfg.TUI.TerminalProgress {
-		view.ProgressBar = &terminalProgressBars[activity]
 	}
 }
 
@@ -242,11 +215,6 @@ func (m *Model) queueTerminalAlert(text string) {
 	m.terminal.alertScheduled = false
 }
 
-func (m *Model) terminalNeedsHeartbeat() bool {
-	return m.app != nil && m.app.Cfg.TUI.TerminalProgress &&
-		(m.busy || m.compacting || m.permPending || m.userInputPending || m.planPrompt)
-}
-
 func (m *Model) syncTerminalStatus() tea.Cmd {
 	attention := terminalAttention{}
 	switch {
@@ -270,57 +238,23 @@ func (m *Model) syncTerminalStatus() tea.Cmd {
 			m.terminal.alertActivity = attention.kind
 		}
 	}
-	var heartbeat, alert tea.Cmd
-	if active := m.terminalNeedsHeartbeat(); active != m.terminal.heartbeat {
-		m.terminal.generation++
-		m.terminal.heartbeat = active
-		if active {
-			heartbeat = m.terminalProgressTick()
-		}
-	}
 	if m.terminal.alert != "" && !m.terminal.alertScheduled {
 		m.terminal.alertScheduled = true
 		id := m.terminal.alertID
-		alert = func() tea.Msg { return terminalAlertMsg(id) }
+		return func() tea.Msg { return terminalAlertMsg(id) }
 	}
-	return tea.Batch(heartbeat, alert)
-}
-
-func (m *Model) terminalProgressTick() tea.Cmd {
-	ctx, generation := m.ctx, m.terminal.generation
-	return func() tea.Msg {
-		timer := time.NewTimer(terminalProgressInterval)
-		defer timer.Stop()
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-timer.C:
-			return terminalProgressTick(generation)
-		}
-	}
+	return nil
 }
 
 // The filter runs on Bubble Tea's event goroutine, immediately before RawMsg
-// output. Derive the sequence here so an idle transition, new turn, focus change,
-// or settings change cannot be overtaken by stale asynchronous commands.
+// output. Check current state here so a new turn, focus change, or settings
+// change cannot be overtaken by stale asynchronous notification commands.
 func terminalStatusFilter(model tea.Model, msg tea.Msg) tea.Msg {
 	m, ok := model.(*Model)
 	if !ok {
 		return msg
 	}
 	switch msg := msg.(type) {
-	case terminalProgressTick:
-		if uint64(msg) != m.terminal.generation || !m.terminal.heartbeat || !m.terminalNeedsHeartbeat() {
-			return nil
-		}
-		sequence := ansi.SetIndeterminateProgressBar
-		switch m.terminalActivity() {
-		case terminalPermission, terminalInput:
-			sequence = ansi.SetWarningProgressBar(0)
-		case terminalFailed:
-			sequence = ansi.SetErrorProgressBar(0)
-		}
-		return tea.RawMsg{Msg: terminalProgressOutput{sequence: sequence, generation: uint64(msg)}}
 	case terminalAlertMsg:
 		if uint64(msg) != m.terminal.alertID || m.terminal.alert == "" {
 			return nil
@@ -345,13 +279,7 @@ func (m *Model) updateTerminalOutput(msg tea.Msg) (bool, tea.Cmd) {
 	if !ok {
 		return false, nil
 	}
-	switch output := raw.Msg.(type) {
-	case terminalProgressOutput:
-		m.terminal.reuseView = true
-		if output.generation == m.terminal.generation && m.terminal.heartbeat {
-			return true, m.terminalProgressTick()
-		}
-		return true, nil
+	switch raw.Msg.(type) {
 	case terminalAlertOutput:
 		m.terminal.reuseView = true
 		return true, nil

@@ -754,7 +754,6 @@ const (
 	settingsUpdateNow
 	settingsKeybindings
 	settingsTerminalTitle
-	settingsTerminalProgress
 	settingsNotifications
 	settingsCount
 )

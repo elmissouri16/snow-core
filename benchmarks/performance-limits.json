@@ -70,10 +70,10 @@
     },
     {
       "package": "./internal/tui",
-      "pattern": "^BenchmarkTerminalHeartbeat$",
+      "pattern": "^BenchmarkTerminalAlert$",
       "benchtime": "500ms",
       "benchmarks": {
-        "BenchmarkTerminalHeartbeat": {
+        "BenchmarkTerminalAlert": {
           "max_ns_per_op": 10000,
           "max_bytes_per_op": 256,
           "max_allocs_per_op": 8

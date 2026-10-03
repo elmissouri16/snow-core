@@ -313,7 +313,7 @@ func Default() Config {
 		Processes:  DefaultProcesses(),
 		Retry:      DefaultRetry(),
 		Compaction: DefaultCompaction(),
-		TUI:        TUIConfig{Theme: "default", Mouse: true, TerminalTitle: true, TerminalProgress: true, Notifications: "unfocused"},
+		TUI:        TUIConfig{Theme: "default", Mouse: true, TerminalTitle: true, Notifications: "unfocused"},
 	}
 }
 

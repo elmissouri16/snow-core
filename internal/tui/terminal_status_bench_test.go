@@ -42,7 +42,7 @@ func BenchmarkTerminalStatusFrame(b *testing.B) {
 		}
 		b.Run(name, func(b *testing.B) {
 			m := terminalBenchmarkModel(b)
-			m.app.Cfg.TUI.TerminalTitle, m.app.Cfg.TUI.TerminalProgress = enabled, enabled
+			m.app.Cfg.TUI.TerminalTitle = enabled
 			b.ReportAllocs()
 			for b.Loop() {
 				m.syncTerminalStatus()
@@ -52,12 +52,13 @@ func BenchmarkTerminalStatusFrame(b *testing.B) {
 	}
 }
 
-func BenchmarkTerminalHeartbeat(b *testing.B) {
+func BenchmarkTerminalAlert(b *testing.B) {
 	m := terminalBenchmarkModel(b)
-	tick := terminalProgressTick(m.terminal.generation)
+	m.terminal.unfocused = true
 	b.ReportAllocs()
 	for b.Loop() {
-		msg := terminalStatusFilter(m, tick)
+		m.queueTerminalAlert("Snow finished")
+		msg := terminalStatusFilter(m, terminalAlertMsg(m.terminal.alertID))
 		m.Update(msg)
 		_ = m.View()
 	}
