@@ -1,6 +1,9 @@
 /* Transient feedback must not resize the transcript, including native no-ops.
  * Reuse the scroll owner's measured composer clearance instead of guessing it. */
 #live-session .compaction-inline:not([hidden]) { position: absolute; z-index: 8; bottom: max(8px, min(calc(var(--scroll-jump-bottom, 16px) + 42px), calc(100% - 48px - min(120px, 20dvh)))); left: 50%; transform: translateX(-50%); display: flex; align-items: flex-start; gap: 8px; width: min(calc(100% - 32px), var(--composer-width, 852px)); max-height: min(120px, 20dvh); overflow-y: auto; overscroll-behavior: contain; margin: 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: 0 4px 16px #00000018; }
+/* Recovery warnings already use the outer conversation scroller. Keep feedback
+ * in that flow rather than floating it over mandatory review/dismiss actions. */
+#live-session:has(#live-error:not([hidden]), #live-turn-outcome:not([hidden]), #live-unknown:not([hidden])) .compaction-inline:not([hidden]) { position: static; transform: none; margin: 0 auto 8px; }
 .compaction-inline p { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .compaction-inline .icon-button { flex: none; width: 28px; min-width: 28px; height: 28px; min-height: 28px; padding: 4px; }
 .compaction-dialog{width:min(38rem,calc(100vw - 2rem));max-height:calc(100dvh - 2rem);overflow:auto}

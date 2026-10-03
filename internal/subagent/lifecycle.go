@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -144,8 +145,9 @@ func (m *Manager) Bind(root *agent.Agent, factory ChildFactory, publish func(pro
 				copy.State.Error = "invalid child session locator"
 			} else {
 				copy.State.Status = normalizeRestoredStatus(copy.State.Status)
+				reconcileRestoredUsage(m.ctx, &copy)
 			}
-			if copy.State.Status != rec.State.Status || copy.State.Error != rec.State.Error {
+			if copy.State.Status != rec.State.Status || copy.State.Error != rec.State.Error || !reflect.DeepEqual(copy.State.Usage, rec.State.Usage) {
 				expectedGeneration := rec.State.Generation
 				copy.State.Generation++
 				if err := store.CompareAndSwapSubagent(rec.State.Agent.ThreadID, expectedGeneration, copy); err != nil {
@@ -171,6 +173,19 @@ func (m *Manager) Bind(root *agent.Agent, factory ChildFactory, publish func(pro
 	m.rootRef = rootRef
 	m.byID, m.byPath, m.order = byID, byPath, order
 	return nil
+}
+
+// Only inspect validated durable children with an existing cached total. Failed
+// inspection preserves the snapshot; an unavailable child must not break other
+// parent sessions or cause a fabricated zero total. No child runtime is started.
+func reconcileRestoredUsage(ctx context.Context, record *session.SubagentRecord) {
+	if record.State.Usage == nil {
+		return
+	}
+	usage, err := session.InspectChildUsage(ctx, record.ChildSessionPath, record.State.Agent.ThreadID)
+	if err == nil {
+		record.State.Usage = usage.Clone()
+	}
 }
 
 func discardChildLocator(store session.SubagentTaskStore, child, threadID string) {
@@ -396,8 +411,9 @@ func (m *Manager) setStore(store session.SubagentTaskStore) error {
 			copy.State.Error = "invalid child session locator"
 		} else {
 			copy.State.Status = normalizeRestoredStatus(copy.State.Status)
+			reconcileRestoredUsage(m.ctx, &copy)
 		}
-		if copy.State.Status != rec.State.Status || copy.State.Error != rec.State.Error {
+		if copy.State.Status != rec.State.Status || copy.State.Error != rec.State.Error || !reflect.DeepEqual(copy.State.Usage, rec.State.Usage) {
 			expectedGeneration := rec.State.Generation
 			copy.State.Generation++
 			if err := store.CompareAndSwapSubagent(rec.State.Agent.ThreadID, expectedGeneration, copy); err != nil {

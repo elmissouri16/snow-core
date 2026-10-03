@@ -1,36 +1,87 @@
 # Known bugs
 
+## BUG-263: Generated Chat Completions tool-call IDs can collide with wire IDs
+
+- **Status:** Resolved — verified with focused, race, and built-binary localhost regressions.
+- **Severity:** Medium
+- **Surface:** Tool-call identity assignment in `internal/provider/opencodego/stream.go`; also the generic Chat Completions fallback.
+- **Evidence:** An ID-less call at index zero publishes `tc-0`; a different index with explicit wire ID `tc-0` publishes that same identity. The agent accumulates calls by published ID, so different indexed calls can merge. The duplicate emission was reproduced directly; downstream tool-dispatch consequences were not separately exercised.
+- **Remediation:** Assign identities that are both stable per index and unique across the bounded batch, including collisions between generated IDs and explicit wire IDs. Verify both ordering directions and coherent replay of the resulting assistant/tool pairs.
+- **Resolution:** Before first publication, proposed IDs are checked against the bounded accumulator map and replaced with an unused suffixed fallback if necessary. Regression coverage exercises both collision orders and occupied replacements; a built-binary mock verifies two distinct calls remain paired with their tool results on replay.
+
+## BUG-262: Deferred Chat Completions tool-call IDs change an already published identity
+
+- **Status:** Resolved — verified with focused, race, and built-binary localhost regressions.
+- **Severity:** Medium
+- **Surface:** `internal/provider/opencodego/stream.go` tool-call accumulation/completion; also the generic OpenAI-compatible Chat Completions fallback.
+- **Evidence:** A first fragment for tool-call index zero without an ID publishes fallback `tc-0`. A subsequent fragment for the same index supplies its actual ID, overwriting the accumulator identity. The agent retains the abandoned fallback call and rejects the otherwise complete request. A local CLI reproduction with valid accumulated JSON arguments exits 1 with `provider ended with an incomplete tool call`, before tool execution. Existing `TestChatEmptyToolCallID` covers IDs omitted throughout, not IDs supplied later. Incidence at real endpoints has not been measured.
+- **Remediation:** Keep a consistent externally published identity for every call, or buffer initial fragments until their wire identity can be resolved. Preserve consistent identities in replayed assistant/tool history. Add a deferred-ID regression alongside permanently omitted-ID coverage.
+- **Resolution:** The first published identity is retained for all deltas, completion, and assistant/tool replay, including when a later fragment supplies a wire ID. Deferred, permanently missing, and initially supplied IDs pass regressions. The built-binary mock now completes its tool-result follow-up instead of failing with an incomplete call.
+
+## BUG-261: Context-inheriting children count parent usage as their own
+
+- **Status:** Resolved — verified for fresh requests, fleet totals, runtime reopen, and cold cached restoration.
+- **Severity:** Medium
+- **Surface:** `internal/subagent/context.go`, child-store construction/runtime accounting in `internal/app`, and restored fleet accounting in `internal/subagent/lifecycle.go`.
+- **Evidence:** Sanitized fork messages retain cloned parent `Usage`. Both built-in session stores aggregate it as ordinary child usage, and the manager later includes that total in fleet accounting. An overlay reproduction copying a parent assistant with 80 input and 20 output tokens reports 100 child tokens immediately after child construction, before any child provider request. Default/all and numeric context inheritance are affected; additional or recursive children can count the same inherited usage repeatedly. This is incorrect usage/cost attribution, not evidence of an additional provider charge or a budget-enforcement failure.
+- **Remediation:** Remove incurred usage from inherited context messages, or persist provenance that excludes it from child-incurred accounting. Keep context-sizing information separate if needed, and address already-persisted child totals. Verify zero incurred usage before a fresh child request and correct fleet totals after requests and reopen.
+- **Resolution:** New fork context clears cloned usage. Child runtime accounting excludes only the initial inherited prefix, retains actual and auxiliary usage across compaction, and does not rewrite history. Both restoration paths inspect existing cached usage without activating a child or migrating its database, validate identity, and reconcile corrected totals through generation/CAS. Tests verify zero initial usage, two-child fleet totals, legacy currency/cache handling, unchanged child bytes/permissions, and idempotent cached restoration. Unavailable, invalid, or overly deep histories preserve cached usage; inspection is bounded and context-aware.
+
+## BUG-260: Unnamed Chat Completions error envelopes are reported as successful completion
+
+- **Status:** Resolved — verified with focused, race, and built-binary localhost regressions.
+- **Severity:** High
+- **Surface:** `internal/provider/opencodego/stream.go` SSE decoding and success conversion; also the generic OpenAI-compatible Chat Completions fallback.
+- **Evidence:** In an HTTP 200 SSE stream, a valid JSON `data:` record containing only a top-level error is successfully decoded into the chunk struct because unknown fields are ignored. Error-envelope detection incorrectly runs only when chunk decoding fails. With no explicit `event: error`, the failure is dropped, and a following `[DONE]` emits successful completion. A local CLI reproduction exits 0, emits no error event, and makes one Chat Completions request despite the mock upstream failure. Explicit named error-event tests do not cover this case. Real-provider incidence has not been measured.
+- **Remediation:** Detect a top-level error independently of successful chunk decoding before processing choices. Emit a bounded/redacted terminal stream error and retain recognized classification codes where appropriate. Cover unnamed errors both before output and after partial text.
+- **Resolution:** Ordinary chunks decode once with an explicit error field; non-null errors take precedence over output and malformed choices. Named and unnamed errors terminate without success, with bounded/redacted diagnostics and recognized retry/context classifications. Tests cover partial output, null and atypical envelopes, field ordering, and diagnostics. A built-binary mock now exits nonzero on the same unnamed failure. The existing streaming allocation ceiling remains unchanged and passes.
+
+## BUG-259: Inherited idle RPC stdin can prevent cancellation and shutdown
+
+- **Status:** Resolved — verified on macOS/arm64 with Go 1.27rc3 and real inherited-stdio subprocesses.
+- **Severity:** High
+- **Surface:** `internal/rpc/process_input.go`, RPC input interruption, and eager/catalog/control entry points.
+- **Evidence:** The process-input wrapper unconditionally promises that closing inherited stdin interrupts a blocked read, and hides any underlying read-deadline capability. A bounded subprocess reproduction launches runtime-free RPC catalog mode with stdin connected to an open idle pipe. After its ready event, SIGTERM leaves the worker alive beyond a two-second wait; supplying stdin EOF immediately releases it and exits 1 with `snow: context canceled`. Eager RPC uses the same synchronous interruption before normal shutdown, but managed-process cleanup consequences were not separately reproduced. Existing fallback coverage uses a custom reader designed to unblock on close rather than a real inherited OS pipe.
+- **Remediation:** Provide an actually interruptible inherited-stdin transport and preserve or establish working polling/deadline capabilities instead of declaring the invariant unconditionally. Add a real subprocess regression requiring cancellation to terminate while the parent keeps stdin open. Do not replace the hang with an unjoined read/close goroutine.
+- **Resolution:** A private wake pipe interrupts synchronous polling; closure joins the current read before descriptor teardown, without helper read/close goroutines or changing shared stdin/stdout status flags. Exclusively owned pipes, sockets with per-call nonblocking reads, regular files, and `/dev/null` are supported. Terminals and other devices are explicitly rejected at startup because readiness alone cannot guarantee cancellable reads. Actual CLI subprocess tests pass in catalog/control/eager modes with stdin kept open, including three race-instrumented repetitions. Built production-binary probes also pass for all three modes and a shared duplex socket.
+
+Verification for **BUG-259–263** used the cached Go 1.27rc3 toolchain with offline module settings: the full uncached Go suite, full vet, affected app/agent/session/subagent/RPC/SDK/provider race matrix, 70 Python tests, unchanged benchmark guard, SDK example, and fresh production build all pass. Linux/amd64 RPC and CLI tests cross-compile; Linux execution and live-provider checks were not performed. Credential-free localhost probes verify the fixed production target. An initial full run exhausted disk space; clearing only the regenerable Go build cache allowed the final stable-source checks to pass.
+
 ## BUG-258: Remembered-trust browser assertion disagrees with React activation markup
 
-- **Status:** Open — reproduced in the original checkout and reorganized source.
+- **Status:** Resolved — fixture expectations corrected and the complete native browser matrix verified.
 - **Severity:** Low
 - **Surface:** `scripts/tests/browser/manager-workflows/trust.mjs` native trusted-start contract
 - **Evidence:** The complete manager-workflows matrix records 428 passing assertions and four failures of the compact trusted-start assertion. React's `workspace/Cold.tsx` renders `.activation-boundary` for both trusted and untrusted workspaces, but the assertion requires it to be absent after remembered trust. A clean `git archive HEAD` checkout reproduces the same failure in the 1280px/dark report after 107 passing assertions.
-- **Remediation:** Reconcile the intended remembered-trust disclosure/presentation contract with production React and the native assertion. Preserve explicit activation, the host-privilege disclosure, settings-owned skill policy, saved permission restoration, and no automatic provider work; do not delete safety coverage merely to make the gate green.
+- **Fix:** Trusted-start assertions now require the visible configuration/instruction, MCP, subagent, host-privilege/no-sandbox, and passive-browsing disclosures rather than incorrectly requiring their absence. Positive checks retain saved permission restoration, saved Allow-policy implications, settings-owned skills and separate CLI extension trust, explicit activation, trust revocation, and zero automatic provider work.
+- **Verification:** The complete native manager-workflows matrix passes 440 assertions with zero failures across 320/1280px and dark/light reports.
 
 ## BUG-257: Goal browser fixture treats a hidden dismiss button as an admission error
 
-- **Status:** Open — reproduced in the original checkout and reorganized source.
+- **Status:** Resolved — fixture expectations corrected and the complete native browser matrix verified.
 - **Severity:** Low
 - **Surface:** `scripts/tests/browser/manager-execution/goals.mjs` native goal admission check
 - **Evidence:** The goal admission check reads all `#live-error.textContent` without checking whether the alert is hidden. The React alert retains its dismiss button's `×` text while hidden, so every matrix cell aborts with `Goal admission: ×` even though the observed goal is active and running with no JavaScript errors. The reorganized matrix passes 188 assertions before its four failures; a clean `git archive HEAD` checkout reproduces the same false failure in the 1280px/dark report after 47 assertions.
-- **Remediation:** Inspect the visible error/message projection rather than hidden control text, retaining rejection of genuine admission errors and the exact goal/run receipt, provider-call, and no-surrogate-prompt assertions. Rerun the full production goal/process matrix before marking resolved.
+- **Fix:** Goal admission reads the visible alert's message span, ignoring the hidden dismiss control but still rejecting genuine errors. Exact goal/run identity, receipts, provider-call counts, and no-surrogate-prompt coverage remain unchanged.
+- **Verification:** The complete native manager-execution matrix passes 324 assertions with zero failures across 320/1280px and dark/light reports. An earlier run had one transient existing unsent-draft/Queue-next assertion failure; that assertion was not relaxed.
 
 ## BUG-256: Native host-control fixture rejects explicitly selected startup models
 
-- **Status:** Open — reproduced in the original checkout and reorganized source.
+- **Status:** Resolved — fixture expectations corrected and the complete native browser matrix verified.
 - **Severity:** Low
 - **Surface:** `scripts/tests/browser/manager-host-controls/run.mjs` test setup
 - **Evidence:** All four native reports time out waiting for the existing fictional worker; the worker exits with code 95. The fixture rejects eager startup arguments containing `--provider` or `--model`, while activation supplies an explicit selection. A clean `git archive HEAD` checkout reproduces the same failure in the 1280px/dark report.
-- **Remediation:** Align private fake-provider setup with the actual activation arguments while preserving strict fixture-only provider/model validation and the no-network/no-provider-work assertions. Do not bypass real production activation to manufacture a passing result.
+- **Fix:** The private fixture accepts only its intended explicit `opencode-go`/`fake-1` selection, substitutes the fake provider before actual worker parsing, and rejects other selections, duplicate flags, missing values, and equals forms. Its registered project saves disabled skills through the real next-start policy to match the reused no-skills fake worker. Production activation and permission boundaries are unchanged.
+- **Verification:** Eleven focused startup-argument cases, CLI tests/vet, and the complete native manager-host-controls matrix pass; the latter records 176 assertions with zero failures across 320/1280px and dark/light reports.
 
 ## BUG-255: Mobile runtime-review control is obscured after no-op compaction
 
-- **Status:** Open — reproduced in both the original checkout and the reorganized source.
+- **Status:** Resolved — warning-state layout keeps the native runtime-review control unobscured.
 - **Severity:** Medium
 - **Surface:** Web Manager native runtime-control browser flow at 320px width
 - **Evidence:** `node scripts/tests/browser/manager-runtime-controls/run.mjs` passes the desktop reports but fails both mobile themes when clicking `[data-runtime-reviewed]` after the no-op compaction flow. The target is present and enabled, but pointer hit testing returns the overlapping `[data-compaction-status]` paragraph instead. The reorganized matrix reports 392 assertions and two failures. A clean `git archive HEAD` checkout reproduces the same hit-test failure with `SNOW_RUNTIME_CONTROLS_WIDTH=320 SNOW_RUNTIME_CONTROLS_THEME=dark` after 95 assertions, confirming this is not caused by moving CLI files.
-- **Remediation:** Inspect the production mobile compaction-status/runtime-review layout and native click schedule. Restore an unobscured review target without weakening pointer hit testing, runtime-review admission, or compaction assertions; rerun the complete native runtime-control matrix. This UI issue is not fixed by the repository-layout change.
+- **Fix:** Compaction feedback uses normal document flow when a visible error, canceled-turn, or unknown-outcome warning is present, keeping mandatory recovery actions unobscured. Normal compaction feedback remains floating; native pointer hit testing, review admission, and no-op transcript/composer geometry checks are unchanged.
+- **Verification:** A fresh 320px/dark reproduction failed the native review click after 95 passing assertions. The corrected complete manager-runtime-controls matrix passes 404 assertions with zero failures across 320/1280px and dark/light reports.
 
 ## BUG-254: Embedded plugin references lag the canonical session guide
 
@@ -52,13 +103,15 @@
 
 ## BUG-252: Resume inventory slows as project sessions accumulate
 
-- **Status:** Open — avoidable startup and rendering costs removed; full inventory scanning remains.
+- **Status:** Open — unchanged inspections are cached; cold inspection and fresh filesystem discovery still scale with inventory size.
 - **Severity:** Medium
 - **Surface:** CLI/TUI session picker and project session inventory
-- **Evidence:** Interactive `snow resume` previously ran `FileIndex.List` in the CLI and then again in the TUI picker. Every listing walks all project session databases and opens each through read-only SQLite validation; durability inspection also counted every matching row in several tables merely to determine whether any durable work exists. `/resume` performs one scan but can still wait for all databases to be inspected. Once loaded, picker rendering formats every session on each frame even though only visible rows are displayed.
+- **Evidence:** Interactive `snow resume` previously ran `FileIndex.List` in the CLI and then again in the TUI picker. Before mitigation, every listing walked all project session databases and opened each through read-only SQLite validation; durability inspection also counted every matching row in several tables merely to determine whether any durable work exists. `/resume` performs one scan but can still wait for all databases to be inspected. Previously, loaded picker rendering formatted every session on each frame even though only visible rows were displayed.
 - **Mitigation:** Interactive startup now lets the picker perform the sole inventory scan; headless resume still selects the newest indexed session. Durability checks use `EXISTS` while preserving old-schema fallback, root-only exclusion, goal-only inclusion, read-only discovery, and stored-CWD filtering. The TUI formats only the visible picker rows on each frame. An explicit `snow resume /absolute/path/to/session.db` avoids inventory discovery.
-- **Remaining work:** Measure larger synthetic cohorts and deep histories, then consider indexed or incremental discovery without weakening identity, ordering, legacy-directory, or read-only checks. The current changes do not make inventory lookup sublinear.
-- **Verification:** `go test ./...`, `go vet ./...`, affected package tests, the performance guard, `git diff --check`, and the local install passed. On an Apple M3 Pro, the new warm synthetic listing benchmark measured 6.2 ms for 10 one-message sessions and 58.8 ms for 100 (three iterations each, `-benchtime=3x`); these are post-change costs, not a comparative speedup or a measurement of the user's environment.
+- **Further mitigation:** A bounded macOS/Linux process-local LRU now reuses complete successful inspections across fresh `FileIndex` instances. Each call still discovers current files and checks DB/WAL/journal identity, size, mode, mtime, and ctime; only stable pre/post inspections are admitted, including separately keyed foreign-CWD and root-only exclusions. Failures are not cached, atime is ignored, and actual opens/deletion keep their authoritative identity checks. Cache-specific regressions cover WAL-only count/title/branch updates, same-inode restored-mtime mutation, replacement, additions/removals/renames, alias rejection, concurrency, and bounds.
+- **Measurements:** Apple M3 Pro, OS-warm synthetic cohorts, seven repetitions after cache warming with fresh indexes: 1,000 one-message sessions fell from 607.600 ms to 13.395 ms median; 100 × 10,000-message sessions fell from 1,218.156 ms to 1.223 ms. A 20,000-entry session still reports 10,001 messages with the cap flag. These compare an uncached-call build overlay with the implemented cache, not cold-disk or user-environment performance; artifacts are under ignored `build/bug252-investigation/`.
+- **Remaining work:** Cold process startup still opens every eligible database and can traverse up to the active-ancestry message-count cap. Fresh directory discovery remains linear even after warming. Avoid claiming sublinear inventory lookup or resolving the whole startup-scaling issue on the strength of the repeated-inspection improvement.
+- **Verification:** Full repository tests/vet, the affected eight-package race matrix, repeated cache-specific tests/race checks, 70 Python tests, the performance guard, SDK example, frontend checks, all four native browser matrices, resource synchronization, production build, local installation, and six localhost-only probes against each built/installed binary passed with Go 1.27rc3. Linux/arm64 session tests were cross-compiled, not executed. The initial full-suite attempt discovered standalone investigation/overlay Go files under ignored `build/`; isolating that artifact directory as a nested module restored clean `./...` discovery, and the complete check sequence then passed.
 
 ## BUG-251: Plan Mode omitted subagent roles resolve to a shell-capable default
 

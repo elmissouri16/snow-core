@@ -1163,6 +1163,16 @@ Current directories use `cwd-v2-<sha256(normalized-absolute-cwd)>`; the legacy
 flattened encoder remains discoverable with stored-CWD verification. The
 schema is Snow-owned; old JSONL sessions are intentionally not migrated.
 
+`FileIndex.List` retains fresh directory discovery and read-only inspection.
+On macOS/Linux, a process-local LRU reuses complete successful inspections,
+including exclusions, across fresh index instances. Its absolute-path/CWD keys
+and DB/WAL/journal identity, size, mode, mtime, and ctime fingerprints preserve
+external-change invalidation; admission requires stable pre/post fingerprints.
+The cache is bounded to 4,096 entries and an 8 MiB retained-data accounting budget.
+Unsupported platforms bypass reuse. Cold inspection and filesystem discovery
+remain linear; real opens/deletions never substitute cached listing identities
+for their own validation.
+
 ### Forks
 
 - Same-database branches share one file and diverge at a `BranchTip`.

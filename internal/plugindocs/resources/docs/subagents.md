@@ -86,8 +86,10 @@ When subagents are enabled, the root model can:
 
 Child names become stable paths such as `/root/api_review`. Each new child
 receives its task, role guidance, project context, and relevant repository
-instructions. It does not receive the full parent conversation or active Thread
-Goal unless the assignment includes that information.
+instructions. `fork_turns` selects sanitized parent conversation context:
+`all` (the default), `none`, or a positive number of recent user turns. Parent
+system/agent messages and thinking blocks are excluded. The parent's active
+Thread Goal is not inherited.
 
 Use separate children for independent work. For implementation, assign disjoint
 file ownership and tell each child not to overwrite peer changes.
@@ -105,6 +107,13 @@ You can also press Alt+A. The inspector shows child state, role, provider,
 model, usage, task, final result, and a bounded event transcript. Use the arrow
 keys or `j`/`k` to select a child, PageUp/PageDown or the wheel to scroll, `r`
 to refresh, and Esc to close.
+
+Child usage and cost count that child's requests, not the parent's usage on
+inherited context. Durable children retain the same accounting after reopening;
+legacy inherited usage is excluded without rewriting exact conversation history.
+Cold restoration inspects cached totals without activating children or providers.
+This inspection is bounded; unavailable, invalid, or overly deep child histories
+retain their cached totals rather than blocking parent startup or reporting zero.
 
 Closing a finished child releases an open-agent slot while preserving its
 identity and history. Resuming reopens that child without starting a turn;

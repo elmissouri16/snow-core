@@ -93,7 +93,8 @@ func sanitizeContext(messages []protocol.Message) []protocol.Message {
 		}
 		m := original
 		m.Content = make([]protocol.ContentBlock, 0, len(original.Content))
-		m.Usage = original.Usage.Clone()
+		// Context was paid for by the parent, not incurred by this child.
+		m.Usage = nil
 		m.ToolDisplay = original.ToolDisplay.Clone()
 		for _, block := range original.Content {
 			switch block.Type {

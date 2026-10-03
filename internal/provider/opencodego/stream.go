@@ -19,10 +19,12 @@ import (
 	"sync"
 
 	providerpkg "github.com/elmissouri16/snow-core/internal/provider"
+	"github.com/elmissouri16/snow-core/internal/provider/responsesapi"
 	"github.com/elmissouri16/snow-core/pkg/protocol"
 )
 
 type openAIChunk struct {
+	Error   json.RawMessage `json:"error"`
 	Choices []struct {
 		Index int `json:"index"`
 		Delta struct {
@@ -255,31 +257,35 @@ func (s *stream) handleLine(line []byte, eventName *string, accums map[int]*tool
 		if len(data) == 0 {
 			return false
 		}
-		if *eventName == "error" {
-			*eventName = ""
-			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New(s.provider + ": " + providerpkg.RedactSecrets(string(data), s.secret))})
-			return false
-		}
+		isError := *eventName == "error"
 		*eventName = ""
-		if bytes.Equal(data, []byte("[DONE]")) {
+		if !isError && bytes.Equal(data, []byte("[DONE]")) {
 			// [DONE] terminates the stream; some servers keep the connection
 			// open afterwards, so signal the caller to stop reading.
 			*terminalObserved = true
 			return true
 		}
+		if isError {
+			var envelope struct {
+				Error json.RawMessage `json:"error"`
+			}
+			if err := json.Unmarshal(data, &envelope); err == nil && len(envelope.Error) > 0 && !bytes.Equal(bytes.TrimSpace(envelope.Error), []byte("null")) {
+				data = envelope.Error
+			}
+			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: s.streamError(data)})
+			return true
+		}
 		var chunk openAIChunk
-		if err := json.Unmarshal(data, &chunk); err != nil {
-			var errPayload struct {
-				Error *struct {
-					Message string `json:"message"`
-				} `json:"error"`
-			}
-			if uerr := json.Unmarshal(data, &errPayload); uerr == nil && errPayload.Error != nil && errPayload.Error.Message != "" {
-				markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: errors.New(s.provider + ": " + providerpkg.RedactSecrets(errPayload.Error.Message, s.secret))})
-			} else {
-				// Malformed chunk: surface it rather than silently dropping.
-				markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("%s: unparseable SSE data: %s", s.provider, truncateStr(providerpkg.RedactSecrets(string(data), s.secret), 500))})
-			}
+		err := json.Unmarshal(data, &chunk)
+		// An error envelope is terminal even when ordinary chunk fields are
+		// present or have type errors. Check it before publishing any output.
+		if len(chunk.Error) > 0 && !bytes.Equal(bytes.TrimSpace(chunk.Error), []byte("null")) {
+			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: s.streamError(chunk.Error)})
+			return true
+		}
+		if err != nil {
+			// Malformed chunk: surface it rather than silently dropping.
+			markError(protocol.StreamEvent{Type: protocol.EvStreamError, Err: fmt.Errorf("%s: unparseable SSE data: %s", s.provider, truncateStr(providerpkg.RedactSecrets(string(data), s.secret), 500))})
 			return false
 		}
 		if err := s.processChunk(chunk, accums, order, finish); err != nil {
@@ -291,6 +297,27 @@ func (s *stream) handleLine(line []byte, eventName *string, accums map[int]*tool
 		}
 	}
 	return false
+}
+
+// streamError retains classification codes while bounding and redacting diagnostics.
+func (s *stream) streamError(data []byte) error {
+	var detail struct {
+		Message string `json:"message"`
+		Code    string `json:"code"`
+		Type    string `json:"type"`
+	}
+	message, code := string(data), ""
+	if err := json.Unmarshal(data, &detail); err == nil {
+		message = detail.Message
+		code = detail.Code
+		if code == "" {
+			code = detail.Type
+		}
+	} else {
+		// Some compatible endpoints send a JSON string or plain text instead.
+		_ = json.Unmarshal(data, &message)
+	}
+	return responsesapi.NewResponseError(s.provider, 0, message, code, "", s.secret)
 }
 
 func (s *stream) processChunk(chunk openAIChunk, accums map[int]*toolCallAccum, order *[]int, finish *protocol.StopReason) error {
@@ -323,12 +350,29 @@ func (s *stream) processChunk(chunk openAIChunk, accums map[int]*toolCallAccum, 
 				accums[tc.Index] = acc
 				*order = append(*order, tc.Index)
 			}
-			if tc.ID != "" {
-				acc.id = tc.ID
-			}
-			// Sticky fallback id: some compatible servers defer/omit ids.
+			// Once published, the identity must remain stable through completion
+			// and assistant/tool replay, even if the server supplies an ID later.
 			if acc.id == "" {
-				acc.id = fmt.Sprintf("tc-%d", acc.index)
+				candidate := tc.ID
+				if candidate == "" {
+					candidate = fmt.Sprintf("tc-%d", acc.index)
+				}
+				// Wire IDs and generated fallbacks share a namespace. Check the
+				// bounded accumulator map before publishing either kind of ID.
+				for suffix := 1; ; suffix++ {
+					used := false
+					for _, other := range accums {
+						if other != acc && other.id == candidate {
+							used = true
+							break
+						}
+					}
+					if !used {
+						acc.id = candidate
+						break
+					}
+					candidate = fmt.Sprintf("tc-%d-%d", acc.index, suffix)
+				}
 			}
 			if tc.Function.Name != "" {
 				acc.name = tc.Function.Name

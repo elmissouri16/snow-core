@@ -39,7 +39,7 @@ export async function goalChecks(h) {
   await capture('goal-composer');
   await click('#live-send');
   await wait('!window.SnowGoals.composerState().busy', 'goal admission settles');
-  const admissionError = await evaluate(`${q('#live-error')}.textContent`);
+  const admissionError = await evaluate(`${q('#live-error')}.hidden ? '' : ${q('#live-error > span')}.innerText.trim()`);
   if (admissionError) throw Error('Goal admission: ' + admissionError);
   await waitCount(1);
   await wait(`${q('[data-goal-toggle]')}.getAttribute('aria-pressed')==='false' && ${q('#live-prompt')}.value===''`, 'confirmed goal consumes only its unchanged objective draft');

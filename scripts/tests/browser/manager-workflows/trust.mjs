@@ -14,7 +14,8 @@ export async function trustChecks({click, evaluate, wait, check, snapshot, callC
   await wait(`${q('[data-runtime-open] input[name=confirm]')}?.value==='trusted'`, "remembered consent shown after runtime close");
   await send("Page.reload", {ignoreCache: true});
   await wait(`${q('[data-runtime-open] input[name=confirm]')}?.value==='trusted'`, "remembered consent survives page reload");
-  check(await evaluate(`!${q('[data-runtime-open] input[type=checkbox][name=confirm]')} && !${q('[data-runtime-open] input[name=enable_skills]')} && ${q('[data-runtime-open] [data-skills-startup-policy]')}?.textContent.includes('enabled for this workspace') && !!${q('.activation-trusted')} && !${q('.activation-boundary')}`), "Trusted project shows compact Start/Resume, inherits enabled skills from Settings, and repeats no trust or skills checkbox");
+  check(await evaluate(`!${q('[data-runtime-open] input[type=checkbox][name=confirm]')} && !${q('[data-runtime-open] input[name=enable_skills]')} && ${q('[data-runtime-open] [data-skills-startup-policy]')}?.textContent.includes('enabled for this workspace') && !!${q('.activation-trusted')}`), "Trusted project shows Start/Resume, inherits enabled skills from Settings, and repeats no trust or skills checkbox");
+  check(await evaluate(`(() => {const boundary=${q('[data-runtime-open] .activation-boundary')}; const text=boundary?.innerText || ''; return !!boundary?.getClientRects().length && text.includes('configuration and instructions') && text.includes('enabled MCP servers') && text.includes('model-directed subagents') && text.includes('host account’s privileges, not in a sandbox') && text.includes('Browsing does not start an agent or MCP server');})()`), "Remembered trust retains the visible activation boundary: configuration, MCP, subagents, host privileges and passive browsing");
   check(await callCount() === calls && opens() === initialOpens, "Closing/reloading remembered trust never starts a worker or provider");
   // A deliberate same-tab saved-conversation selection is the activation
   // action once workspace trust is remembered. Direct URLs and reloads above
@@ -32,6 +33,7 @@ export async function trustChecks({click, evaluate, wait, check, snapshot, callC
   await close();
   await click('[data-runtime-open] .activation-model-help > summary');
   await wait(`${q('[data-runtime-open] .activation-model-help')}?.open`, 'startup settings disclosure exposes remembered-trust management');
+  check(await evaluate(`${q('[data-runtime-open] [data-saved-policy-note]')}?.innerText.includes('Resuming restores saved session permissions') && ${q('[data-runtime-open] [data-saved-policy-note]')}?.innerText.includes('A saved Allow policy skips tool approval prompts') && ${q('[data-runtime-open] [data-skills-startup-policy]')}?.innerText.includes('enabled for this workspace') && ${q('[data-runtime-open] [data-skills-startup-policy]')}?.innerText.includes('Project skills still require separate CLI extension trust')`), "Trusted Resume discloses saved permission restoration and settings-owned skills with separate CLI extension trust");
   await click('[data-settings-open="workspaces"]');
   await wait(`${q('#settings-dialog')}?.open && !${q('#settings-workspaces')}.hidden`, "manage trust opens Workspaces settings directly");
   await click('[data-project-trust-revoke] button');

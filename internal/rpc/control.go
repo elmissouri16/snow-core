@@ -40,7 +40,12 @@ func ControlMain(ctx context.Context, cwd, version string) error {
 	if keys, ok := any(service).(APIKeyControlService); ok {
 		options.APIKeys = keys
 	}
-	return ServeControl(ctx, newProcessInputReader(os.Stdin), out, cwd, version, service, options)
+	input, err := newProcessInputReader(os.Stdin)
+	if err != nil {
+		return errControlUnavailable
+	}
+	defer input.Close()
+	return ServeControl(ctx, input, out, cwd, version, service, options)
 }
 
 // ServeControl executes a separate serial cold command loop. Input ownership and

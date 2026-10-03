@@ -25,7 +25,12 @@ func Main(ctx context.Context, opts app.Options) (err error) {
 
 	// Stream agent events to stdout as JSONL through the server's locked
 	// writer so responses and events can never interleave corruptly.
-	srv := New(ctx, a, newProcessInputReader(os.Stdin), newProcessOutputWriter(os.Stdout))
+	input, err := newProcessInputReader(os.Stdin)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, input.Close()) }()
+	srv := New(ctx, a, input, newProcessOutputWriter(os.Stdout))
 	if err := srv.announceReady(); err != nil {
 		return err
 	}

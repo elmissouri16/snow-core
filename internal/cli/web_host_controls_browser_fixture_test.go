@@ -46,15 +46,81 @@ func init() {
 	// reserved test provider, not a valid host profile). Substitute only the
 	// explicitly activated runtime's provider to keep this fixture network-free.
 	if slices.Contains(args, "eager") {
-		if slices.Contains(args, "--provider") || slices.Contains(args, "--model") {
+		var ok bool
+		args, ok = hostControlsBrowserRuntimeArgs(args)
+		if !ok {
 			os.Exit(95)
 		}
-		args = append(args, "--provider", "fake", "--model", "fake-1")
 	}
 	os.Args = append([]string{"snow"}, args...)
 	code := runtimeControlsBrowserWorker(root)
 	_ = os.WriteFile(filepath.Join(root, "host-runtime-exit"), []byte(strconv.Itoa(code)), 0600)
 	os.Exit(code)
+}
+
+// Only the private host profile's fictional model may cross activation. Never
+// forward a real provider or arbitrary model into the actual-app worker.
+func hostControlsBrowserRuntimeArgs(args []string) ([]string, bool) {
+	args = slices.Clone(args)
+	for _, selection := range []struct{ flag, host, worker string }{
+		{"--provider", "opencode-go", "fake"},
+		{"--model", "fake-1", "fake-1"},
+	} {
+		seen := false
+		for i, arg := range args {
+			if strings.HasPrefix(arg, selection.flag+"=") {
+				return nil, false
+			}
+			if arg != selection.flag {
+				continue
+			}
+			if seen || i+1 >= len(args) || args[i+1] != selection.host {
+				return nil, false
+			}
+			seen = true
+			args[i+1] = selection.worker
+		}
+		if !seen {
+			args = append(args, selection.flag, selection.worker)
+		}
+	}
+	return args, true
+}
+
+func TestHostControlsBrowserRuntimeArgs(t *testing.T) {
+	base := []string{"--mode", "rpc", "--rpc-startup", "eager"}
+	for _, tc := range []struct {
+		name string
+		args []string
+		ok   bool
+	}{
+		{"host defaults", nil, true},
+		{"explicit fixture selection", []string{"--provider", "opencode-go", "--model", "fake-1"}, true},
+		{"provider only", []string{"--provider", "opencode-go"}, true},
+		{"model only", []string{"--model", "fake-1"}, true},
+		{"other provider", []string{"--provider", "chatgpt"}, false},
+		{"other model", []string{"--model", "real-model"}, false},
+		{"missing value", []string{"--provider"}, false},
+		{"duplicate provider", []string{"--provider", "opencode-go", "--provider", "opencode-go"}, false},
+		{"duplicate model", []string{"--model", "fake-1", "--model", "fake-1"}, false},
+		{"equals provider", []string{"--provider=chatgpt"}, false},
+		{"equals model", []string{"--model=real-model"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append(slices.Clone(base), tc.args...)
+			original := slices.Clone(args)
+			got, ok := hostControlsBrowserRuntimeArgs(args)
+			if ok != tc.ok || !slices.Equal(args, original) {
+				t.Fatal("fixture selection validation or input preservation failed")
+			}
+			if ok {
+				opts, startup, err := managerExecutionOptions(got)
+				if err != nil || startup != "eager" || opts.Provider != "fake" || opts.Model != "fake-1" {
+					t.Fatal("fixture selection did not resolve exclusively to the fake worker")
+				}
+			}
+		})
+	}
 }
 
 func hostControlsBrowserControl(root string) int {
@@ -128,6 +194,12 @@ func TestWebHostControlsBrowserFixture(t *testing.T) {
 	}
 	project, err := registry.Add(t.Context(), "Fictional existing worker", filepath.Join(root, "project-a"))
 	if err != nil {
+		_ = registry.Close()
+		t.Fatal(err)
+	}
+	// Match the reused fake worker's no-skills profile through the actual saved
+	// next-start policy, not by overriding production activation arguments.
+	if err := registry.SetProjectSkills(t.Context(), project, false); err != nil {
 		_ = registry.Close()
 		t.Fatal(err)
 	}

@@ -76,8 +76,16 @@ func (w *unavailableDeadlineWriter) Write(p []byte) (int, error) {
 func (*unavailableDeadlineWriter) SetWriteDeadline(time.Time) error { return os.ErrNoDeadline }
 
 func TestProcessInputReaderInterruptsInheritedPipeFallback(t *testing.T) {
-	base := &blockingReadCloser{closed: make(chan struct{})}
-	reader := newProcessInputReader(base)
+	base, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer base.Close()
+	defer writer.Close()
+	reader, err := newProcessInputReader(base)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !reader.InterruptsReadOnClose() {
 		t.Fatal("process input reader must declare close interruption")
 	}

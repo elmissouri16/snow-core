@@ -16,7 +16,12 @@ import (
 // is the sessions root, not a project directory. It never constructs an app,
 // reads config/auth, starts plugins/providers, or activates a session.
 func CatalogMain(ctx context.Context, cwd, sessionDir, version string) error {
-	return ServeCatalog(ctx, newProcessInputReader(os.Stdin), newProcessOutputWriter(os.Stdout), cwd, sessionDir, version)
+	input, err := newProcessInputReader(os.Stdin)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	return ServeCatalog(ctx, input, newProcessOutputWriter(os.Stdout), cwd, sessionDir, version)
 }
 
 // ServeCatalog serves only inactive project session inventory and plain display

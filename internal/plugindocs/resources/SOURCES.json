@@ -35,7 +35,7 @@
     {
       "source": "docs/rpc.md",
       "resource": "docs/rpc.md",
-      "sha256": "849073532647aa1dfb6156cf4717121a87108b2bb713df4528f15705a8d9bfc0"
+      "sha256": "441205e7b69c998a84aa0203ef51d29cde06b6859319ccc78fd94318c5074312"
     },
     {
       "source": "docs/sdk-reference.md",
@@ -55,7 +55,7 @@
     {
       "source": "docs/sessions.md",
       "resource": "docs/sessions.md",
-      "sha256": "3baf2c7141351bd4edee4e939dcfe140ee0bb7dc20dad63bc2b933cd86b1a9ac"
+      "sha256": "c1489e8d3075813898c366fae7339fa885a820d3bc7775b9cc88ee9f66c3cb49"
     },
     {
       "source": "docs/skills.md",
@@ -65,7 +65,7 @@
     {
       "source": "docs/subagents.md",
       "resource": "docs/subagents.md",
-      "sha256": "963eae75cb352ad929e602b7a34ccbdd553b9aaf37165d2919811547ecfa64cb"
+      "sha256": "9c36f5e29ad69e4c9c90f2c65db66966bfdb51782047c83771ec2c938bf4ca0d"
     },
     {
       "source": "docs/tool-routing.md",

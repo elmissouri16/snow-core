@@ -494,9 +494,9 @@ func (f *FileIndex) List(cwd string) ([]SessionInfo, error) {
 			if !strings.HasSuffix(path, ".db") || seenPaths[path] || !info.Mode().IsRegular() || !singleLink(info) {
 				return nil
 			}
-			// Listing is read-only discovery: validate and inspect through a
-			// query-only connection without journal changes or schema migration.
-			sessionInfo, include, inspectErr := inspectSQLiteSession(path, cwd, info.ModTime().UnixMilli())
+			// Listing is read-only discovery. Reuse unchanged successful inspections;
+			// misses use a query-only connection without schema migration.
+			sessionInfo, include, inspectErr := inspectInventorySession(path, cwd, info.ModTime().UnixMilli())
 			if inspectErr != nil || !include {
 				return nil // skip corrupt, partial, foreign, and root-only files
 			}

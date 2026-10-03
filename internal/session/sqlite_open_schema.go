@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -154,16 +155,20 @@ func subagentChildSessionPaths(path string) (map[string]bool, error) {
 }
 
 func validateSQLiteSessionDB(db *sql.DB) error {
+	return validateSQLiteSessionDBContext(context.Background(), db)
+}
+
+func validateSQLiteSessionDBContext(ctx context.Context, db *sql.DB) error {
 	var version, count int
 	var id, cwd, name, tip string
 	var createdAt int64
-	if err := db.QueryRow(`SELECT count(*) FROM session_meta`).Scan(&count); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM session_meta`).Scan(&count); err != nil {
 		return fmt.Errorf("session: invalid sqlite session metadata: %w", err)
 	}
 	if count != 1 {
 		return fmt.Errorf("session: invalid sqlite session metadata rows: %d", count)
 	}
-	if err := db.QueryRow(`SELECT version, session_id, created_at, cwd, name, branch_tip FROM session_meta WHERE singleton = 1`).
+	if err := db.QueryRowContext(ctx, `SELECT version, session_id, created_at, cwd, name, branch_tip FROM session_meta WHERE singleton = 1`).
 		Scan(&version, &id, &createdAt, &cwd, &name, &tip); err != nil {
 		return fmt.Errorf("session: invalid sqlite session metadata: %w", err)
 	}
@@ -176,7 +181,7 @@ func validateSQLiteSessionDB(db *sql.DB) error {
 	var seq int64
 	var parentID, entryType, summary, metaKey, metaValue string
 	var message []byte
-	if err := db.QueryRow(`SELECT seq, parent_id, entry_type, message, summary, meta_key, meta_value FROM entries WHERE id = 'root'`).
+	if err := db.QueryRowContext(ctx, `SELECT seq, parent_id, entry_type, message, summary, meta_key, meta_value FROM entries WHERE id = 'root'`).
 		Scan(&seq, &parentID, &entryType, &message, &summary, &metaKey, &metaValue); err != nil {
 		return fmt.Errorf("session: invalid sqlite session root: %w", err)
 	}
@@ -184,7 +189,7 @@ func validateSQLiteSessionDB(db *sql.DB) error {
 		return errors.New("session: invalid sqlite session root")
 	}
 	var tipCount int
-	if err := db.QueryRow(`SELECT count(*) FROM entries WHERE id = ?`, tip).Scan(&tipCount); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM entries WHERE id = ?`, tip).Scan(&tipCount); err != nil {
 		return fmt.Errorf("session: invalid sqlite session tip: %w", err)
 	}
 	if tipCount != 1 {

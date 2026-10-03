@@ -37,7 +37,12 @@ for model-requested input lives in [Model-requested user input](user-input.md).
 
 The server runs inside the `snow` process with the current user's OS
 privileges. It reads command objects from stdin and writes a single
-newline-delimited stream to stdout.
+newline-delimited stream to stdout. Process stdin must be an exclusively owned
+pipe, a socket, a regular file, or `/dev/null`. Terminal and other character-device
+inputs are rejected at startup: readiness alone cannot make their blocking reads
+safely cancellable. Use a client pipe instead of typing RPC frames into a terminal.
+Stdin's shared status flags are not changed, including when a bidirectional socket
+also backs stdout.
 
 | Stream | Content |
 |---|---|
@@ -2723,7 +2728,9 @@ for definitive prompt completion. They should also:
 - EOF stops command admission, cancels RPC work and waits, releases
   user-input waiters, joins the active prompt and goroutines, then exits.
 - There is no `shutdown` command. Close stdin, signal the process, or cancel
-  the embedding context.
+  the embedding context. CLI signal cancellation interrupts an idle inherited
+  stdin pipe even when the client keeps its writer open; EOF is not required
+  to release the read and begin shutdown.
 
 ## Permission model
 

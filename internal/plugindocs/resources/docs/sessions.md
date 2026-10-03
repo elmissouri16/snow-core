@@ -50,6 +50,15 @@ Inside the TUI, use `/sessions` or `/resume` to switch conversations. In a
 headless mode, `snow resume` without a path selects the newest indexed session
 because Snow cannot display a picker.
 
+On macOS and Linux, repeated listings within the same Snow process reuse
+unchanged database inspections. Each listing still discovers current files and
+checks the database, WAL, and rollback-journal metadata, so external additions,
+removals, replacements, and writes invalidate the affected results. This bounded
+cache is not a persistent index: the first listing in a new process still
+inspects every eligible database, and deep histories can make that scan costly.
+Discovery does not migrate databases; actual opens and deletions retain their
+own file-identity checks.
+
 To permanently delete a session, select it in the picker, press `d`, and
 confirm with Enter. Snow refuses to delete the active session or a database
 open in another Snow process.
