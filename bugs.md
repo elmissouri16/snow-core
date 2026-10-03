@@ -1,5 +1,14 @@
 # Known bugs
 
+## BUG-253: Expired ChatGPT OAuth token blocks its own refresh
+
+- **Status:** Resolved — expired stored credentials refresh before validation.
+- **Severity:** Medium
+- **Surface:** ChatGPT subscription authentication
+- **Evidence:** A stored ChatGPT access token past its expiry failed the generic auth service's `Validate` call before `NeedsRefresh` and OAuth token rotation could run. The five-minute proactive refresh and HTTP 401 retry did not help once an idle Snow session crossed the access-token expiry, so the user had to sign in again despite having a refresh token.
+- **Fix:** Resolve stored credentials due for refresh before validating their access token, then validate the resolved credential. Explicit overrides are not silently replaced with stored credentials; expired credentials without a refresh token still require login.
+- **Verification:** A local OAuth-server regression test confirms expired tokens rotate and persist once, then resolve without refreshing again; explicit expired overrides remain invalid. `go test ./...`, `go vet ./...`, and `git diff --check` passed.
+
 ## BUG-252: Resume inventory slows as project sessions accumulate
 
 - **Status:** Open — avoidable startup and rendering costs removed; full inventory scanning remains.

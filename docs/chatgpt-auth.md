@@ -111,8 +111,9 @@ contract used by Codex, Pi, and OpenCode. Tokens are never shown in the picker.
 
 Runtime resolution goes through Snow's generic auth service, which delegates
 token exchange to the ChatGPT OAuth driver. Tokens that expire within five
-minutes are refreshed under a provider-specific cross-process refresh lock,
-while the global auth-store lock is held only for the fresh read and
+minutes, including tokens already expired while Snow was idle, are refreshed
+before access-token validation under a provider-specific cross-process refresh
+lock, while the global auth-store lock is held only for the fresh read and
 compare-and-swap write. This keeps unrelated credential operations responsive
 during network I/O and atomically persists rotated refresh tokens.
 

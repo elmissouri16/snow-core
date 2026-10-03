@@ -249,13 +249,21 @@ func (s *Service) Resolve(ctx context.Context, providerID string) (Credential, e
 		}
 		return Credential{Provider: providerID}, nil
 	}
+	// A stored OAuth access token may already be expired. Refresh it before
+	// validation, which otherwise rejects the token before rotation can run.
+	// Explicit credentials are not backed by the store and cannot be refreshed.
+	if driver.NeedsRefresh(credential, s.now()) {
+		if _, explicit := s.explicitCredential(providerID); !explicit {
+			credential, err = s.refresh(ctx, providerID, credential, RefreshExpiring)
+			if err != nil {
+				return Credential{}, err
+			}
+		}
+	}
 	if err := driver.Validate(credential); err != nil {
 		return Credential{}, err
 	}
-	if !driver.NeedsRefresh(credential, s.now()) {
-		return credential, nil
-	}
-	return s.refresh(ctx, providerID, credential, RefreshExpiring)
+	return credential, nil
 }
 
 func (s *Service) RefreshRejected(ctx context.Context, providerID string, rejected Credential) (Credential, error) {
