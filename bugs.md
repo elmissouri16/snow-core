@@ -3324,7 +3324,7 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
 
 ## BUG-064: ChatGPT catalog compatibility hides GPT-6 Astra
 
-- **Status:** Resolved; compatibility pin reverified 2026-09-23.
+- **Status:** Resolved; catalog compatibility pin updated 2026-10-03.
 - **Surface:** ChatGPT subscription model discovery and the shared model picker.
 - **Evidence:** Two read-only requests using the same Snow OAuth credential and
   `originator=snow` returned different catalogs: `client_version=0.147.0`
@@ -3332,13 +3332,15 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
   `visibility=list`. Version `0.153.4` matched the installed Codex client when
   the defect was first fixed. On 2026-09-23, the official npm `latest` dist-tag,
   the official GitHub release tag, and the installed Codex CLI all reported
-  `0.156.1`, while Snow still advertised `0.153.4`. Refreshing a cache cannot
-  reveal a model omitted by an older compatibility contract.
+  `0.156.1`, while Snow still advertised `0.153.4`. On 2026-10-03, the official
+  npm `latest` dist-tag, the official GitHub release tag, and the installed
+  Codex CLI reported `0.160.0`, while Snow advertised `0.156.1`. Refreshing
+  a cache cannot reveal a model omitted by an older compatibility contract.
 - **Related defect:** ChatGPT had a 15-minute disk cache but did not expose its
   expiry to the app's retained catalog snapshot, so an open process can keep
   an old inventory until forced refresh or restart.
 - **Resolution:** Advanced the tested catalog contract first to `0.153.4` and
-  then to the current official Codex `0.156.1`; existing version validation
+  then to official Codex `0.156.1` and `0.160.0`; existing version validation
   rejects caches from older contracts. The ChatGPT adapter now publishes expiry
   and content revisions through the authenticated wrapper
   to the app loader. Cache reads retain their original deadline, 304 responses
@@ -3361,6 +3363,10 @@ Verified 2026-09-06 with isolated temporary `SNOW_HOME` and `GOCACHE`:
   set split across `./internal/...` and `./cmd/... ./pkg/...`, `go vet ./...`,
   the same targeted race suite, all 70 Python support tests, the benchmark
   guard, and `git diff --check`; no credentialed live-provider smoke was run.
+  The `0.160.0` bump passed focused ChatGPT/app tests, `go test ./internal/...
+  ./pkg/...`, `go test ./cmd/snow -count=1`, `go vet ./...`, and
+  `git diff --check`. `go test ./...` timed out twice at the command runner's
+  two-minute limit; no credentialed live-provider smoke was run for this bump.
 
 ## BUG-065: Modified Enter accepts composer completions
 
