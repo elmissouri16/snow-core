@@ -102,7 +102,7 @@ When intentionally changing a covered path:
    stable median.
 4. Never raise limits automatically or merely to make CI green.
 5. Record material improvements or intentional tradeoffs in
-   [`IMPLEMENTATION.md`](../IMPLEMENTATION.md#performance-evidence-2026-08-24).
+   [`docs/architecture.md`](architecture.md#performance-evidence-2026-08-24).
 
 The generous timing ceilings automatically catch catastrophic slowdowns;
 smaller timing regressions still require local profiling. Use repeated runs and

@@ -32,7 +32,7 @@ async function exportFixture(directory) {
   return urls;
 }
 const expectedAssertions = 109, expectedVisualAssertions = 29, expectedThumbnailAssertions = 32;
-const screenshotDirectory = join(repository, "dist", "compact-composer");
+const screenshotDirectory = join(repository, "build", "dist", "compact-composer");
 // The original functional schedule plus fresh visual/evidence pages remain bounded.
 const timeoutMS = 480000;
 

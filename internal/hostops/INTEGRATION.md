@@ -40,7 +40,7 @@ or UI. Focused verification is recorded below; full integration remains separate
   activation are separate. Success does not prove the pathname remains bound to
   the original inode; revalidate before registration. Never activate implicitly.
 
-In `cmd/snow/cli.go`, before Cobra/app/config initialization and before ordinary
+In `internal/cli/cli.go`, before Cobra/app/config initialization and before ordinary
 error rendering:
 
 ```go
@@ -49,7 +49,7 @@ if handled, code := runHostCloneHelperEarly(os.Args[1:]); handled {
 }
 ```
 
-The new `cmd/snow/host_clone_helper.go` provides that hook. The private entry is
+The new `internal/cli/host_clone_helper.go` provides that hook. The private entry is
 `--host-clone-helper-only` with exactly no other arguments. fd3 must be the child
 folder, fd4 a read-only liveness pipe. Strict <=16 KiB stdin JSON contains only
 private fixed execution composition, deadline and operation binding; this is not
@@ -101,13 +101,13 @@ private scratch is removed; no cache/config/install cleanup occurs.
 ## Focused verification
 
 ```sh
-gofmt -w internal/hostops/*.go pkg/protocol/rpc_host_operations.go cmd/snow/host_clone_helper*.go
+gofmt -w internal/hostops/*.go pkg/protocol/rpc_host_operations.go internal/cli/host_clone_helper*.go
 go test ./internal/hostops
-go test ./cmd/snow -run 'TestHostCloneHelper' -count=1
-go test -race ./internal/hostops ./cmd/snow -run 'TestHostCloneHelper|TestPrepare|TestStartClone|TestCloneGate|TestLeaf|TestAnonymous|TestOutputBudget' -count=1
+go test ./internal/cli -run 'TestHostCloneHelper' -count=1
+go test -race ./internal/hostops ./internal/cli -run 'TestHostCloneHelper|TestPrepare|TestStartClone|TestCloneGate|TestLeaf|TestAnonymous|TestOutputBudget' -count=1
 ```
 
-Execution-dependent fixtures live only in `cmd/snow/host_clone_helper*_test.go`.
+Execution-dependent fixtures live only in `internal/cli/host_clone_helper*_test.go`.
 They use an absolute fictional Git executable with the production same-binary
 helper, not Git/network/provider credentials. Unit cases cover exact grants,
 existing destinations, replaced parent/child bindings, strict bounded payloads,

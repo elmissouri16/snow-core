@@ -115,7 +115,7 @@ try {
       assertions += result.results.length; failures += result.failures.length;
       console.log(JSON.stringify({fixture: fixture.name, width, height, theme, ...result}));
       if (process.env.SNOW_TOOL_ROW_EVIDENCE === "1") {
-        const evidence = join(root, "dist/tool-row-evidence");
+        const evidence = join(root, "build/dist/tool-row-evidence");
         await mkdir(evidence, {recursive: true});
         for (const open of [false, true]) {
           await evaluate(`toolRowChecks.target.open = ${open}; toolRowChecks.target.scrollIntoView({block: "center"})`);

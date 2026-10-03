@@ -12,7 +12,7 @@ const artifacts = process.env.SNOW_HOST_CONTROLS_ARTIFACTS ? resolve(process.env
 const exited = child => new Promise(resolve => {child.once('exit', resolve); child.once('error', resolve);});
 async function compile(binary) {
   await new Promise((resolve, reject) => {
-    const child = spawn('go', ['test', '-p', '1', '-c', '-o', binary, './cmd/snow'], {cwd: repository, env: {...process.env, GOMAXPROCS: '2'}, stdio: ['ignore', 'pipe', 'pipe'], timeout: 120000});
+    const child = spawn('go', ['test', '-p', '1', '-c', '-o', binary, './internal/cli'], {cwd: repository, env: {...process.env, GOMAXPROCS: '2'}, stdio: ['ignore', 'pipe', 'pipe'], timeout: 120000});
     let output = '';
     for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => {output = (output + chunk).slice(-65536);});
     child.once('error', reject); child.once('close', code => code === 0 ? resolve() : reject(Error('Fixture compile failed: ' + output)));

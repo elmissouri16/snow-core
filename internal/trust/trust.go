@@ -1,6 +1,6 @@
 // Package trust implements the project trust decision store. Trust gates
 // loading of project-local resources (.snow/config.json, plugins); it is an
-// input-loading guard, NOT a sandbox (see IMPLEMENTATION.md §8.4).
+// input-loading guard, NOT a sandbox (see docs/security.md).
 package trust
 
 import (

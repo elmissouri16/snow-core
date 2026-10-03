@@ -3,7 +3,7 @@ set -eu
 
 pages_script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 pages_repo_root=$(dirname -- "$pages_script_dir")
-pages_output=${1:-"$pages_repo_root/_pages_source"}
+pages_output=${1:-"$pages_repo_root/build/pages/source"}
 
 pages_fail() {
 	printf 'pages builder: %s\n' "$*" >&2
@@ -40,20 +40,20 @@ pages_copy_tracked() {
 }
 
 for pages_site_file in \
-	site/_config.yml \
-	site/_includes/navigation.html \
-	site/_layouts/default.html \
-	site/_layouts/home.html \
-	site/assets/css/style.css \
-	site/assets/js/copy-code.js \
-	site/assets/js/guide.js \
-	site/index.md \
-	site/404.html \
-	site/examples/index.md \
-	site/examples/sdk/index.md \
-	site/pkg/snowsdk/index.md
+	docs/site/_config.yml \
+	docs/site/_includes/navigation.html \
+	docs/site/_layouts/default.html \
+	docs/site/_layouts/home.html \
+	docs/site/assets/css/style.css \
+	docs/site/assets/js/copy-code.js \
+	docs/site/assets/js/guide.js \
+	docs/site/index.md \
+	docs/site/404.html \
+	docs/site/examples/index.md \
+	docs/site/examples/sdk/index.md \
+	docs/site/pkg/snowsdk/index.md
 do
-	pages_site_destination=${pages_site_file#site/}
+	pages_site_destination=${pages_site_file#docs/site/}
 	pages_copy_file_as "$pages_site_file" "$pages_site_destination"
 done
 

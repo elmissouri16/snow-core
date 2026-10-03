@@ -56,7 +56,7 @@ runtime-only responsive matrix passes 84 reports.
 | Private remote operation (Phase 4) | Ordinary unconfigured `snow --mode web` now selects the first active private IPv4 address (otherwise an IPv6 ULA), binds both it and `127.0.0.1` on port 7331, and serves the shared manager directly on both exact origins with pairing and no certificate/proxy/setup step. Local and LAN origins use separate exact Host/Origin boundaries and host-only cookie names; offline hosts serve loopback directly. This transport is explicitly unencrypted and unsupported on public networks. TLS, certificate/CA, saved-profile, DNS-origin, trusted-proxy, Tailscale forwarding, browser API-key entry, and hidden network overrides were removed. Wildcard/public/DNS listeners remain unavailable. Complete real same-LAN phone/desktop and Tailscale acceptance before release claims. |
 | Resource limits and recovery | Focused acceptance now covers two independently active project workers and proves that one worker's crash leaves the other's original instance, pending approval and live control path usable through definitive completion. The production-browser workflow exercises the same behavior earlier in its sequence, but its complete gate is currently blocked by BUG-243 during a later recovery scenario. Finish the Phase 4 aggregate-admission, slow-client, process/stream bounds, manager-death and restart-reconciliation acceptance work. Preserve the current two-live-project cap and never replay prompts, approvals or uncertain jobs automatically. Existing local guards are not proof of the complete remote reliability gate. |
 | Frontend migration/coverage reconciliation | The production frontend now uses React islands plus the first-party bounded `SnowNavigation` controller; the former third-party navigation runtime and retired classic scripts are removed. Continue auditing browser and source-extractor entrypoints for React parity, and map production-manager coverage for grouped cross-project navigation/lifecycle and committed workspace New/Stop/removal journeys. Component/exported-page fixtures alone do not certify those mutations. See [frontend boundaries](web-frontend.md). |
-| Known reproducible defects | BUG-086, BUG-175, [BUG-180](../bugs.md#bug-180-sidebar-navigation-and-row-controls-lose-focus-and-list-state) and BUG-218 are resolved. Continue treating the complete eight-report permission/sidebar matrix as the regression boundary for React navigation focus and retained state. |
+| Known reproducible defects | BUG-086, BUG-175, [BUG-180](bugs.md#bug-180-sidebar-navigation-and-row-controls-lose-focus-and-list-state) and BUG-218 are resolved. Continue treating the complete eight-report permission/sidebar matrix as the regression boundary for React navigation focus and retained state. |
 | Capabilities not delivered by this increment | Automatic worker recovery and saved media rendering remain planned. Browser OAuth, extension/subagent enablement, worktree forks, general Git writes, editors, PTYs, preview fleets and workspace destruction are not provided by the current manager; several require separate scope approval rather than filling in a missing button. |
 | Release and real-environment acceptance | Run the reusable CI gate and the canonical [release runbook](releases.md#next-release-runbook), including changelog/artifacts and secret-free manual provider smoke. Real private-network phone/desktop journeys, other browser-engine/device acceptance and release approval are not established by loopback fixtures. Do not publish or move a tag as part of this checkpoint. |
 | Running-manager adoption | The latest UI was built and installed locally, but the already-running manager was not restarted. Restart it explicitly and refresh the browser when it is safe to interrupt its work. A Git commit or binary replacement alone does not update a running process. |
@@ -95,7 +95,7 @@ frontend tests, typecheck, and the reproducible production build pass. The
 post-cleanup native host-control matrix passed 176 assertions across four
 width/theme reports, and the React-pages matrix passed 192 assertions across 26
 scenarios. The latest `go test ./...` rerun passed every package, including the cell tracked as the
-intermittent [BUG-221](../bugs.md#bug-221-worker-loss-project-operation-fixture-leaves-fictional-git-observable); that single pass does not by itself close the recorded intermittent defect.
+intermittent [BUG-221](bugs.md#bug-221-worker-loss-project-operation-fixture-leaves-fictional-git-observable); that single pass does not by itself close the recorded intermittent defect.
 
 These checks do not retroactively rerun every browser suite or establish race,
 live-provider, physical-device, reusable-CI or release acceptance for this exact
@@ -174,7 +174,7 @@ pair. The searchable-picker workflow suite passes **1,736
 assertions** across seven widths and both themes; the full responsive matrix
 passes **2,058 reports / 38,804 assertions**. Short 240px viewports retain a
 visible search field above scrolling results. Evidence is in
-`dist/model-picker-full-layout/` and `dist/model-picker-screenshots/` (320px dark).
+`build/dist/model-picker-full-layout/` and `build/dist/model-picker-screenshots/` (320px dark).
 These are local Chromium fixture checks, not live-provider or physical-keyboard
 certification.
 
@@ -230,7 +230,7 @@ network exposure is added by this redesign.
 
 ### Current workspace/session navigation contract
 
-`design-plans/workspace-session-flow.md` replaces the catalog-first web navigation
+`docs/design/workspace-session-flow.md` replaces the catalog-first web navigation
 with one conversation surface and independent workspace/session groups. The
 workspace-name link navigates; its disclosure only expands a lazy session list.
 Several groups remain expanded across native workspace replacements, with
@@ -305,7 +305,7 @@ Direct GETs, reloads and modified clicks never switch or activate a runtime.
   Startup settings disclosure. Settings retains actual trust revocation.
 
 Workflow verification status and reproduced integration defects are tracked in
-`bugs.md` (BUG-181 through BUG-184); historical matrix counts below are not a claim
+`docs/bugs.md` (BUG-181 through BUG-184); historical matrix counts below are not a claim
 that they were rerun against every later working-tree edit.
 
 ### Current implementation contract: snapshot SSE and presentation polish
@@ -422,7 +422,7 @@ protocol. The current implementation is intentionally smaller:
 
 Sources: `internal/web/{conversation,runtime,runtime_stream,stream,markdown}.go`,
 `internal/web/static/{app,stream,attention,scroll,menus,conversation,visibility}.js`,
-and their templates/styles/tests. `cmd/snow/web_stream_fixture_test.go` supplies
+and their templates/styles/tests. `internal/cli/web_stream_fixture_test.go` supplies
 the real agent/RPC fixture outside `internal/web`; no app/agent/session-internal
 imports or second loop are added to web. Public RPC/private provider contracts
 are unchanged by snapshot SSE. Direct loopback is still the only supported
@@ -736,7 +736,7 @@ startup request, not arbitrary reads or mutations. This is full execution eviden
 for that fixture matrix, not whole-product visual parity. Smoke/selected-width
 runs and partial screenshots do not replace the full gate. See the runner
 READMEs for prerequisites, evidence output and bounded-run options, and
-`IMPLEMENTATION.md#testing-and-verification` for the canonical matrix.
+`docs/architecture.md#testing-and-verification` for the canonical matrix.
 
 These are bounded increments, not completion of every phase gate below. Remote
 HTTPS/proxies, automatic worker recovery, saved media history, worktree forks,
@@ -820,7 +820,7 @@ Recommended technical choices:
 The current architecture calls a graphical application a non-goal. Treat this
 as a deliberate expansion of supported **surfaces**, not a rewrite of the core
 mission. The first implementation change must clarify the wording in
-`AGENTS.md` and `IMPLEMENTATION.md`: an optional web surface is permitted;
+`AGENTS.md` and `docs/architecture.md`: an optional web surface is permitted;
 graphical dependencies remain outside core packages, while turn execution
 stays inside the existing agent loop, reached through RPC workers. Do not
 silently pretend the current roadmap already promises a web application.
@@ -1037,7 +1037,7 @@ The current port follows upstream DeepSeek Harness components at revision
 running Settings/model menus and built-in synthetic conversation fixture. The
 first landing-only approximation was rejected: its large mixed workflow form
 and fixed live-composer dimensions were not representative of Harness. Source
-contracts are recorded in `design-plans/harness-{conversation,task-menus,settings}-port.md`.
+contracts are recorded in `docs/design/harness-{conversation,task-menus,settings}-port.md`.
 Current composition:
 
 - Canvas `#151517`, sidebar `#1b1b1c`, composer `#2c2c2e`, primary text
@@ -1116,12 +1116,12 @@ full layout run passed **2,016 reports / 37,442 assertions**, including
 seven widths, light/dark, 740/360/240px heights). Checks include text glyph-line
 wrapping, internal scrolling, persistent reachable Close, menu-to-dialog focus
 return, collapsed footer containment and header/drag-handle hit testing after
-layout changes. Evidence: `dist/runtime-ui-full-layout/layout-report.json` and
-`dist/runtime-ui-responsive/layout-report.json` (local generated artifacts).
+layout changes. Evidence: `build/dist/runtime-ui-full-layout/layout-report.json` and
+`build/dist/runtime-ui-responsive/layout-report.json` (local generated artifacts).
 
 A separate 320px dark run with `--runtime-only --screenshots` records each of the
 six dialogs both open and scrolled at all three heights, before dismissal, in
-`dist/runtime-ui-open-screenshots/`. The runner now supports this open-state
+`build/dist/runtime-ui-open-screenshots/`. The runner now supports this open-state
 capture directly rather than capturing only the closed post-test conversation.
 These screenshots and geometry tests do not certify physical mobile keyboards,
 platform zoom, other browser engines, live providers or release readiness.
@@ -1164,8 +1164,8 @@ session, and Forget trust. A plain project URL after reload deliberately has no
 saved-session selection; it must not silently resume the last conversation.
 Registry reopen, migration, identity, corruption, revocation and HTTP admission
 tests pass, including focused race checks, full Go/vet, JS/Python tests and the
-benchmark guard. Local evidence is in `dist/trust-{responsive,full-layout}/`;
-320px dark startup screenshots are in `dist/trust-startup-screenshots/`.
+benchmark guard. Local evidence is in `build/dist/trust-{responsive,full-layout}/`;
+320px dark startup screenshots are in `build/dist/trust-startup-screenshots/`.
 
 ### Layout
 
@@ -1248,7 +1248,7 @@ that the manager may call directly. RPC handlers remain their control boundary.
 
 | Existing responsibility | Reuse point and implementation implication |
 |---|---|
-| CLI options and surface dispatch | `cmd/snow/cli.go`: `buildOptions`, `runInteractiveOptions`; currently accepts print/json/rpc and otherwise enters TUI. Add web dispatch before any app construction. |
+| CLI options and surface dispatch | `internal/cli/cli.go`: `buildOptions`, `runInteractiveOptions`; currently accepts print/json/rpc and otherwise enters TUI. Add web dispatch before any app construction. |
 | Runtime wiring | `internal/rpc/main.go` constructs `app.New`; workers receive a fixed project CWD and validated startup options. Introduce opt-in lazy startup without changing ordinary RPC behavior. |
 | Project trust | `internal/app/options.go`: `InspectProjectTrust`; `trust_preflight_test.go` verifies preflight, headless denial and symlink retarget behavior. Do this before app startup. |
 | Configuration layering | `internal/app/startup_config.go`; project model selection, explicit overrides, trust and extension loading remain app-owned. |
@@ -1347,7 +1347,7 @@ when a backend does not implement Snow-specific branches/goals/permissions.
 Suggested cohesive files/directories:
 
 ```text
-cmd/snow/web.go                  composition and host-only admin helpers
+internal/cli/web.go                  composition and host-only admin helpers
 pkg/agentclient/                 backend contracts and reusable typed client
 pkg/agentclient/rpc/             bounded JSONL codec and Snow command mapping
 internal/web/server.go          listeners, timeouts, shutdown, route assembly
@@ -2112,7 +2112,7 @@ core changes, land it with TUI/RPC/SDK parity tests first.
 
 ### Phase 1: authenticated shell and mode
 
-Owned areas: `cmd/snow/web.go`, new web server/auth/security/static/template
+Owned areas: `internal/cli/web.go`, new web server/auth/security/static/template
 files, operator configuration and targeted CLI tests.
 
 Deliver embedded assets, local listener, mode validation, pairing/login/logout,
@@ -2263,7 +2263,7 @@ Proposed implementation verification commands, once packages exist:
 
 ```sh
 gofmt -w <changed-go-files>
-go test ./cmd/snow ./pkg/agentclient/... ./internal/web/... ./internal/manager/...
+go test ./internal/cli ./pkg/agentclient/... ./internal/web/... ./internal/manager/...
 go test ./internal/app ./internal/agent ./internal/session ./internal/rpc ./pkg/snowsdk
 go test -race ./pkg/agentclient/... ./internal/web/... ./internal/manager/...
 go test -race ./internal/app ./internal/agent ./internal/session ./internal/rpc ./pkg/snowsdk
@@ -2272,7 +2272,7 @@ go vet ./...
 python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 python3 scripts/check_benchmarks.py
 (cd examples/sdk && go test ./... && go run .)
-go build -o ./snow ./cmd/snow
+go build -o build/bin/snow ./cmd/snow
 ```
 
 Add browser and manager load-test commands to the canonical verification matrix
@@ -2420,7 +2420,7 @@ private configuration were sent in those documentation queries.
 
 ## Related documents
 
-- [Architecture and roadmap](../IMPLEMENTATION.md)
+- [Architecture and roadmap](architecture.md)
 - [Security model](security.md)
 - [Session storage internals](session-storage-internals.md)
 - [RPC reference](rpc.md)

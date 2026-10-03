@@ -77,23 +77,25 @@ Pages route.
 
 ## Source and build
 
-Canonical guides live under `docs/`. Site presentation lives under `site/`:
+Canonical guides live under `docs/`. Site presentation lives under `docs/site/`:
 
 | Path | Responsibility |
 |---|---|
-| `site/_config.yml` | Jekyll metadata, base URL, and Markdown settings |
-| `site/_layouts/` | Shared guide and homepage structures |
-| `site/_includes/navigation.html` | Shared desktop and mobile navigation |
-| `site/assets/css/style.css` | Responsive and print presentation |
-| `site/assets/js/guide.js` | Progressive page outline for long guides |
-| `site/assets/js/copy-code.js` | Copy buttons for code examples |
-| `site/index.md` | Three reading paths and the builder entry point |
+| `docs/site/_config.yml` | Jekyll metadata, base URL, and Markdown settings |
+| `docs/site/_layouts/` | Shared guide and homepage structures |
+| `docs/site/_includes/navigation.html` | Shared desktop and mobile navigation |
+| `docs/site/assets/css/style.css` | Responsive and print presentation |
+| `docs/site/assets/js/guide.js` | Progressive page outline for long guides |
+| `docs/site/assets/js/copy-code.js` | Copy buttons for code examples |
+| `docs/site/index.md` | Three reading paths and the builder entry point |
 | `scripts/build-pages.sh` | Explicit public staging allowlist |
 
-`scripts/build-pages.sh` creates a fresh staging directory. It copies the site
-shell, the allowlisted guides, and the tracked Go SDK example, then adds Jekyll
-front matter to staged Markdown copies. It does not rewrite canonical sources
-and refuses to replace an existing output directory.
+`scripts/build-pages.sh` creates a fresh staging directory, defaulting to
+`build/pages/source/`. It copies the site shell, the allowlisted guides, and the
+tracked Go SDK example, then adds Jekyll front matter to staged Markdown copies.
+It does not rewrite canonical sources and refuses to replace an existing output
+directory. Rendered output belongs in `build/pages/site/`; neither tree is source
+or tracked by Git.
 
 The builder does not stage repository indexes, protocol schemas, architecture,
 contributor instructions, release records, audits, research, implementation
@@ -153,7 +155,7 @@ Render it with the same pinned `actions/jekyll-build-pages` image or workflow
 used by CI, then validate the result:
 
 ```sh
-python3 scripts/check-pages-output.py ./_site --base-path /snow-core
+python3 scripts/check-pages-output.py ./build/pages/site --base-path /snow-core
 ```
 
 Also inspect the homepage and representative guides at desktop and mobile
@@ -177,7 +179,7 @@ filesystem protections.
 ### The homepage shows the repository index
 
 Confirm that Pages uses **GitHub Actions**, not branch deployment from
-`main /docs`. The generated homepage comes from `site/index.md`.
+`main /docs`. The generated homepage comes from `docs/site/index.md`.
 
 ### The builder rejects its output directory
 
@@ -192,7 +194,7 @@ Do not copy the entire repository into the artifact.
 
 ### Styling or navigation is missing
 
-Keep `baseurl: /snow-core` in `site/_config.yml` and use Jekyll's `relative_url`
+Keep `baseurl: /snow-core` in `docs/site/_config.yml` and use Jekyll's `relative_url`
 filter for assets and site routes.
 
 ## Related documents

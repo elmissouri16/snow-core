@@ -13,7 +13,7 @@ import {runScenarios} from "./scenarios.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url)), root = resolve(here, "../../../..");
 const temporary = await mkdtemp(join(tmpdir(), "snow-chat-width-"));
-const evidence = process.env.SNOW_CHAT_WIDTH_EVIDENCE === "1" ? join(root, "dist/chat-width-evidence") : null;
+const evidence = process.env.SNOW_CHAT_WIDTH_EVIDENCE === "1" ? join(root, "build/dist/chat-width-evidence") : null;
 let chrome, client, server, timer, sessionId, scriptID, assertions = 0;
 const reports = [], failures = [], requests = [], captures = [];
 try {

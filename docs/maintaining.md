@@ -6,7 +6,10 @@ This index collects architecture, release procedures, and design history;
 
 ## Maintainer guides
 
-- [Architecture and roadmap](../IMPLEMENTATION.md) — package boundaries,
+- [Repository layout](repository-layout.md) — researched Go layout decisions,
+  source ownership, stable import paths, and maintenance commands.
+- [Design plans](design/README.md) — indexed UI handoffs and design history.
+- [Architecture and roadmap](architecture.md) — package boundaries,
   interfaces, decisions, phased roadmap, verification, and open risks.
 - [Agent working guide](../AGENTS.md) — repository-specific coding rules,
   security constraints, and verification commands.
@@ -84,7 +87,8 @@ To reduce drift, use these documents as the primary references:
 | Feature-specific behavior | The matching guide in this directory |
 | Contributor workflow and must-load repository rules | [`AGENTS.md`](../AGENTS.md) |
 | Web frontend tooling, generated assets, and rendering ownership | [`web-frontend.md`](web-frontend.md) |
-| Package architecture, dependency direction, and roadmap | [`IMPLEMENTATION.md`](../IMPLEMENTATION.md) |
+| Repository layout and source placement conventions | [`repository-layout.md`](repository-layout.md) |
+| Package architecture, dependency direction, and roadmap | [`docs/architecture.md`](architecture.md) |
 | Current implementation details | Source code and tests |
 
 ## Plugin documentation snapshot

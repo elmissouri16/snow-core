@@ -78,7 +78,7 @@ do not replace the full harness layout or existing tool-row/browser suites.
 SNOW_TOOL_TIMELINE_EVIDENCE=1 node scripts/tests/browser/tool-timeline/run.mjs
 ```
 
-This saves 16 open/closed PNGs under `dist/tool-timeline-evidence/`: one pair per
+This saves 16 open/closed PNGs under `build/dist/tool-timeline-evidence/`: one pair per
 fixture, width and theme. Live screenshots capture the two-user-turn chronology
 before the adversarial bounds phase. They are supporting material for manual
 review, not an assertion that visual review was performed.

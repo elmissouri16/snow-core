@@ -40,6 +40,9 @@ PUBLIC_DOCUMENTS = (
 )
 INTERNAL_DOCUMENTS = (
     "README.md",
+    "architecture.md",
+    "bugs.md",
+    "repository-layout.md",
     "chatgpt-auth.md",
     "rpc.md",
     "user-input.md",
@@ -110,6 +113,10 @@ class PagesBuildTests(unittest.TestCase):
         ):
             self.assertTrue((self.output / relative_path).exists(), relative_path)
 
+        self.assertIn(
+            "edit_path: docs/site/404.html",
+            (self.output / "404.html").read_text(encoding="utf-8"),
+        )
         staged_docs = sorted(
             path.name for path in (self.output / "docs").glob("*.md")
         )
@@ -136,7 +143,7 @@ class PagesBuildTests(unittest.TestCase):
         staged_alias = (self.output / "examples" / "index.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn("edit_path: site/examples/index.md", staged_alias)
+        self.assertIn("edit_path: docs/site/examples/index.md", staged_alias)
         layout = (self.output / "_layouts" / "default.html").read_text(
             encoding="utf-8"
         )
@@ -230,7 +237,7 @@ class PagesBuildTests(unittest.TestCase):
 
     def test_home_and_navigation_are_user_focused(self) -> None:
         navigation = (
-            REPOSITORY_ROOT / "site" / "_includes" / "navigation.html"
+            REPOSITORY_ROOT / "docs" / "site" / "_includes" / "navigation.html"
         ).read_text(encoding="utf-8")
         expected_navigation = (
             (
@@ -280,9 +287,9 @@ class PagesBuildTests(unittest.TestCase):
         self.assertNotIn("All documentation", navigation)
 
         home_layout = (
-            REPOSITORY_ROOT / "site" / "_layouts" / "home.html"
+            REPOSITORY_ROOT / "docs" / "site" / "_layouts" / "home.html"
         ).read_text(encoding="utf-8")
-        homepage = (REPOSITORY_ROOT / "site" / "index.md").read_text(
+        homepage = (REPOSITORY_ROOT / "docs" / "site" / "index.md").read_text(
             encoding="utf-8"
         )
         self.assertIn("/docs/getting-started.html", home_layout)
@@ -354,7 +361,7 @@ class PagesBuildTests(unittest.TestCase):
             self.assertIn(setup_detail, mcp)
 
         stylesheet = (
-            REPOSITORY_ROOT / "site" / "assets" / "css" / "style.css"
+            REPOSITORY_ROOT / "docs" / "site" / "assets" / "css" / "style.css"
         ).read_text(encoding="utf-8")
         print_block = stylesheet[stylesheet.index("@media print") :]
         self.assertRegex(
@@ -388,7 +395,7 @@ class PagesBuildTests(unittest.TestCase):
         self.assertIn("- '.github/workflows/ci.yml'", workflow)
         self.assertIn("- 'LICENSE'", workflow)
         self.assertIn("./scripts/build-pages.sh", workflow)
-        self.assertIn("scripts/check-pages-output.py ./_site", workflow)
+        self.assertIn("scripts/check-pages-output.py ./build/pages/site", workflow)
         self.assertIn("actions/jekyll-build-pages@", workflow)
         self.assertIn("actions/upload-pages-artifact@", workflow)
         self.assertIn("actions/deploy-pages@", workflow)
@@ -398,7 +405,7 @@ class PagesBuildTests(unittest.TestCase):
         self.assertNotIn("name: Documentation build (Linux)", workflow)
         self.assertNotIn("./scripts/build-pages.sh", workflow)
         self.assertNotIn("actions/jekyll-build-pages@", workflow)
-        self.assertNotIn("scripts/check-pages-output.py ./_site", workflow)
+        self.assertNotIn("scripts/check-pages-output.py ./build/pages/site", workflow)
 
 
 if __name__ == "__main__":

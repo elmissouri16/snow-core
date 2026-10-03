@@ -82,7 +82,7 @@ text-preserving sent thumbnails, text-only Edit/Reuse restrictions, forbidden
 sent blob URL fallback, no spontaneous replay and no persistent draft storage.
 
 The CDP runner saves deterministic viewport PNGs and measured geometry outside its
-temporary profile in **`dist/compact-composer/`**. Every visual viewport/theme has:
+temporary profile in **`build/dist/compact-composer/`**. Every visual viewport/theme has:
 
 - `empty-WIDTHxHEIGHT-THEME.png`
 - `files-WIDTHxHEIGHT-THEME.png` (`@` listing, no file bodies read)
@@ -99,7 +99,7 @@ and two animation frames; public fixture data and viewport scale are fixed.
 No pixel hashes are enforced across platform/font rasterizers. Visual failures
 retain evidence and the runner continues the matrix before exiting nonzero.
 The temporary exported assets and isolated Chrome profile are still removed on
-completion or failure; screenshots and JSON remain in `dist/compact-composer/`.
+completion or failure; screenshots and JSON remain in `build/dist/compact-composer/`.
 
 The suite directly loads `../conversation-workflow/fixture.js`, reusing its
 production-shaped snapshot DTOs, in-memory fetch recorder, accelerated poll timer
@@ -194,9 +194,9 @@ GOMAXPROCS=2 GOFLAGS='-p=2' SNOW_COMPOSER_NARROW_HEIGHT=1 \
   node scripts/tests/browser/composer-context/run.mjs
 ```
 
-Logs are retained at `dist/thumbnail-short-matrix.log` and
-`dist/thumbnail-full-context.log`. All four viewport sizes (320×900, 1280×900,
-320×480, 320×240) ran in both dark and light themes. `dist/compact-composer/`
+Logs are retained at `build/dist/thumbnail-short-matrix.log` and
+`build/dist/thumbnail-full-context.log`. All four viewport sizes (320×900, 1280×900,
+320×480, 320×240) ran in both dark and light themes. `build/dist/compact-composer/`
 contains **40 screenshots**, including 16 draft/sent image screenshots, plus
 8 thumbnail measurement reports and 8 compact-layout measurement reports.
 

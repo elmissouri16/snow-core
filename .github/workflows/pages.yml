@@ -7,11 +7,9 @@ on:
     paths:
       - '.github/workflows/pages.yml'
       - '.github/workflows/ci.yml'
-      - 'site/**'
       - 'docs/**'
       - 'README.md'
       - 'SECURITY.md'
-      - 'IMPLEMENTATION.md'
       - 'AGENTS.md'
       - 'CHANGELOG.md'
       - 'LICENSE'
@@ -26,11 +24,9 @@ on:
     paths:
       - '.github/workflows/pages.yml'
       - '.github/workflows/ci.yml'
-      - 'site/**'
       - 'docs/**'
       - 'README.md'
       - 'SECURITY.md'
-      - 'IMPLEMENTATION.md'
       - 'AGENTS.md'
       - 'CHANGELOG.md'
       - 'LICENSE'
@@ -65,22 +61,22 @@ jobs:
           python-version: '3.9'
 
       - name: Prepare documentation source
-        run: ./scripts/build-pages.sh "$GITHUB_WORKSPACE/_pages_source"
+        run: ./scripts/build-pages.sh "$GITHUB_WORKSPACE/build/pages/source"
 
       - name: Build with Jekyll
         uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697 # v1
         with:
-          source: ./_pages_source
-          destination: ./_site
+          source: ./build/pages/source
+          destination: ./build/pages/site
 
       - name: Validate rendered documentation
-        run: python3 scripts/check-pages-output.py ./_site --base-path /snow-core
+        run: python3 scripts/check-pages-output.py ./build/pages/site --base-path /snow-core
 
       - name: Upload GitHub Pages artifact
         if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
-          path: ./_site
+          path: ./build/pages/site
 
   deploy:
     name: Deploy documentation

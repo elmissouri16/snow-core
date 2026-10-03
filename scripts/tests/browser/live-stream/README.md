@@ -26,7 +26,7 @@ context-aware gated fake provider EventStream
   -> real Chrome running the production browser assets
 ```
 
-`cmd/snow/web_stream_fixture_test.go` contains all implementation-dependent
+`internal/cli/web_stream_fixture_test.go` contains all implementation-dependent
 fixture code. No `internal/*` implementation import is added under `internal/web`
 or `pkg/agentclient`. The test-only worker intercepts the exact manager-owned RPC
 arguments before Go's testing flag parser. Catalog requests use the real
@@ -152,7 +152,7 @@ is included in the artifacts.
 Fast Go-only fixture checks (no browser):
 
 ```sh
-go test ./cmd/snow -run '^TestWebStreamFixture' -count=1
+go test ./internal/cli -run '^TestWebStreamFixture' -count=1
 ```
 
 The long-lived fixture skips unless its explicit environment is set, so ordinary

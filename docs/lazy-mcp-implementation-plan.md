@@ -862,7 +862,7 @@ Update:
 - `docs/mcp.md` for current behavior after implementation;
 - `docs/configuration.md` for fields and defaults;
 - `docs/security.md` for bootstrap and cache boundaries;
-- `IMPLEMENTATION.md` for architecture and verification status;
+- `docs/architecture.md` for architecture and verification status;
 - CLI help and SDK references for additive public fields.
 
 ## Implementation phases
@@ -984,8 +984,8 @@ Expected outcomes:
 Run affected checks from the repository root:
 
 ```sh
-gofmt -w pkg/mcp/*.go internal/mcp/*.go internal/app/*.go cmd/snow/*.go
-go test ./pkg/mcp ./internal/mcp ./internal/app ./cmd/snow
+gofmt -w pkg/mcp/*.go internal/mcp/*.go internal/app/*.go internal/cli/*.go
+go test ./pkg/mcp ./internal/mcp ./internal/app ./internal/cli
 go test -race ./internal/mcp ./internal/app ./internal/agent
 go test ./...
 go vet ./...
@@ -1097,6 +1097,6 @@ Defer these features until the basic lazy lifecycle is stable:
   `search_tools` behavior.
 - [Security model](security.md) — process privileges, trust, permissions, and
   bounded external content.
-- [Architecture and roadmap](../IMPLEMENTATION.md) — package boundaries and
+- [Architecture and roadmap](architecture.md) — package boundaries and
   full verification matrix.
 - [Configuration](configuration.md) — current Snow configuration reference.

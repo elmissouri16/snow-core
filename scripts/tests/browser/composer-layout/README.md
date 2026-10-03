@@ -18,7 +18,7 @@ control visibility behavior. The maximum textarea height is always read from the
 
 For the dedicated 320px attachment/mention workflow, paragraph-length skills and
 retained screenshots, use `../composer-context/run.mjs`; its README documents the
-separate functional/visual assertion counts and `dist/compact-composer/` artifacts.
+separate functional/visual assertion counts and `build/dist/compact-composer/` artifacts.
 
 Latest verification: this focused command passes **252 assertions / 12 reports**.
 The full harness and composer-context narrow checks remain separate gates.

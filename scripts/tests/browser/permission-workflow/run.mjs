@@ -14,7 +14,7 @@ if (args.length && (args.length !== 2 || args[0] !== "--output-dir" || !args[1].
 const artifacts = args.length ? resolve(args[1]) : join(repository, ".snow/browser/permission-workflow");
 async function compile(binary) {
   await new Promise((resolve, reject) => {
-    const child = spawn("go", ["test", "-c", "-o", binary, "./cmd/snow"], {cwd: repository, stdio: ["ignore", "pipe", "pipe"], timeout: 120000});
+    const child = spawn("go", ["test", "-c", "-o", binary, "./internal/cli"], {cwd: repository, stdio: ["ignore", "pipe", "pipe"], timeout: 120000});
     let output = "";
     for (const stream of [child.stdout, child.stderr]) stream.on("data", chunk => { output = (output + chunk).slice(-65536); });
     child.once("error", reject);

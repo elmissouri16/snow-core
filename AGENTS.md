@@ -19,7 +19,7 @@ import app/agent/session internals. Startup and passive browsing start no runtim
 explicit browser activation launches workers through the RPC client boundary.
 
 Before a change, read `README.md` plus the relevant source and tests. Use
-`IMPLEMENTATION.md` for architecture, package maps, decisions, and roadmap;
+`docs/architecture.md` for architecture, package maps, decisions, and roadmap;
 `docs/README.md` for user guides, `docs/maintaining.md` for documentation
 ownership, `docs/security.md`
 for the expanded threat model, and `docs/releases.md` for release gates. When
@@ -47,12 +47,12 @@ update the canonical document.
 ## Architecture constraints
 
 ```text
-cmd/snow → app → {tui | print | rpc}
+cmd/snow → cli → app → {tui | print | rpc}
 app → agent → {provider, tools, session, permission, context, compact}
 provider adapters → auth + protocol
 tui → app facades + protocol
 snowsdk → app + protocol; never bubbletea
-cmd/snow → web (optional shell; no app construction)
+cli → web (optional shell; no app construction)
 web manager → client boundary → RPC workers → app (explicit activation only)
 ```
 
@@ -73,10 +73,13 @@ web manager → client boundary → RPC workers → app (explicit activation onl
   arbitrary numbered chunks solely to satisfy the cap.
 - Keep the Go requirement in `go.mod` and `README.md` synchronized (currently
   the Go 1.27 line while 1.27rc3 is the available toolchain).
+- Put local binaries, compiled test executables, release/evidence artifacts, and
+  Pages output under ignored `build/`, not beside source at the repository root.
+  Keep architecture, the bug tracker, design plans, and site sources under `docs/`.
 
 ## Runtime invariants
 
-- `cmd/snow` builds `app.Options`; `internal/app.New` owns runtime wiring.
+- `internal/cli` builds `app.Options`; `internal/app.New` owns runtime wiring.
 - `internal/buildinfo.Version` is the linked default copied through
   `app.Options.BuildVersion`; keep CLI, RPC, MCP, and SDK metadata on
   that one effective value.
@@ -117,8 +120,8 @@ web manager → client boundary → RPC workers → app (explicit activation onl
 
 ## Change workflow
 
-1. Read this guide, `README.md`, root `bugs.md`, and the relevant source and
-   tests. Record newly discovered reproducible defects in `bugs.md`, update an
+1. Read this guide, `README.md`, `docs/bugs.md`, and the relevant source and
+   tests. Record newly discovered reproducible defects in `docs/bugs.md`, update an
    existing entry instead of duplicating it, and do not remove or resolve an
    entry until its fix is verified. Report security-sensitive defects through
    `SECURITY.md` rather than disclosing them in the public tracker.
@@ -155,23 +158,23 @@ Use affected-area checks where applicable:
 ```sh
 go test -race ./internal/...
 go test -race ./internal/subagent ./internal/agent ./internal/app ./internal/session ./internal/rpc ./pkg/snowsdk
-go test ./internal/agent ./cmd/snow -count=1
+go test ./internal/agent ./internal/cli ./cmd/snow -count=1
 (cd examples/sdk && go test ./... && go run .)
-go build -o ./snow ./cmd/snow
+go build -o build/bin/snow ./cmd/snow
 govulncheck ./...
 ```
 
 The normal suite must remain network-free. Provider integration tests use local
 mocked servers; real-provider checks require credentials and remain manual. Use
-the expanded matrix in `IMPLEMENTATION.md#testing-and-verification` when a
+the expanded matrix in `docs/architecture.md#testing-and-verification` when a
 change affects SDKs, RPC, providers, TUI lifecycle, concurrency, or packaging.
 
 ## Related documents
 
 - `README.md` — project overview, development baseline, and user entry points.
-- `IMPLEMENTATION.md` — architecture, package map, decisions, full verification
+- `docs/architecture.md` — architecture, package map, decisions, full verification
   matrix, roadmap, and known gaps.
-- `bugs.md` — canonical tracker for known reproducible defects, investigation
+- `docs/bugs.md` — canonical tracker for known reproducible defects, investigation
   evidence, remediation requirements, and verified resolution status.
 - `docs/README.md` — task-oriented documentation index.
 - `docs/maintaining.md` — maintainer guides and canonical ownership map.

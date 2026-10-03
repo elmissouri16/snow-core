@@ -5,7 +5,7 @@ node scripts/tests/browser/manager-workflows/run.mjs
 ```
 
 This is a production integration gate, **not an exported-HTML fixture**. It
-compiles and launches `cmd/snow`'s opt-in `TestWebLiveStreamFixture`, which runs:
+compiles and launches `internal/cli`'s opt-in `TestWebLiveStreamFixture`, which runs:
 
 ```text
 native Chrome -> production HTTP/assets/SSE -> RuntimeManager -> real RPC worker

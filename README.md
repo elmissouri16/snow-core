@@ -166,7 +166,7 @@ and in-progress migration boundaries.
 From the repository root:
 
 ```sh
-go build -o snow ./cmd/snow
+go build -o build/bin/snow ./cmd/snow
 go test ./...
 go vet ./...
 python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
@@ -183,7 +183,7 @@ building Go:
 
 ```sh
 (cd internal/web/frontend && npm ci --ignore-scripts && npm run build && npm test && npm run check)
-go build -o snow ./cmd/snow
+go build -o build/bin/snow ./cmd/snow
 ```
 
 `npm run check` builds into a temporary directory and compares filenames and
@@ -195,7 +195,13 @@ source-level ports and earlier native-browser evidence are not acceptance of the
 latest generated artifact.
 
 Read [AGENTS.md](AGENTS.md) for repository rules and affected-area checks.
-[Architecture and roadmap](IMPLEMENTATION.md) explains package boundaries and
+[Repository layout](docs/repository-layout.md) explains source placement:
+`cmd/snow` is the thin executable entry point, `internal/cli` owns CLI commands
+and tests, `internal/` holds private runtime packages, and `pkg/` preserves
+public SDK/contracts. Architecture, the bug tracker, design handoffs, and
+website sources live under `docs/`. Generated binaries, compiled tests, release
+artifacts, and Pages output live under ignored `build/`, not beside source.
+[Architecture and roadmap](docs/architecture.md) explains package boundaries and
 remaining work. [Maintainer guides](docs/maintaining.md) covers releases,
 performance, documentation, and design history. Provider tests use local mocks;
 real-provider checks remain manual. The live-stream fixture drives the real

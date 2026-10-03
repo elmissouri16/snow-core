@@ -8,7 +8,7 @@ RPC response, real network provider, or user manager connection. Port 7331 is
 explicitly rejected.
 
 The fixture is
-`cmd/snow/web_runtime_controls_browser_fixture_test.go`. It reuses the existing
+`internal/cli/web_runtime_controls_browser_fixture_test.go`. It reuses the existing
 private-HOME execution fixture's HTTP transport helpers, with independent
 initialization so the manager captures only this fixture's worker environment. A
 fake provider gates fictional responses. Seeded SQLite history uses ordinary
@@ -84,7 +84,7 @@ node scripts/tests/browser/manager-runtime-controls/run.mjs
 ```
 
 To avoid rebuilding while another agent owns a compiler/cache slot, the parent
-can supply its already compiled `go test -c ./cmd/snow` binary:
+can supply its already compiled `go test -c ./internal/cli` binary:
 
 ```sh
 SNOW_RUNTIME_CONTROLS_BINARY=/absolute/private/path/snow-fixture.test \

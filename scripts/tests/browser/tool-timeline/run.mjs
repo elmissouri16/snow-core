@@ -118,7 +118,7 @@ try {
       await evaluate('toolTimelineChecks.check(toolTimelineChecks.target.open, "Real Space reopens the same disclosure")');
       await evaluate("toolTimelineChecks.retain()");
       if (process.env.SNOW_TOOL_TIMELINE_EVIDENCE === "1") {
-        const evidence = join(root, "dist/tool-timeline-evidence");
+        const evidence = join(root, "build/dist/tool-timeline-evidence");
         await mkdir(evidence, {recursive: true});
         for (const open of [false, true]) {
           await evaluate(`toolTimelineChecks.target.open = ${open}; toolTimelineChecks.target.scrollIntoView({block: "center"})`);

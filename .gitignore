@@ -1,3 +1,7 @@
+# All supported local build, test, release, and Pages output lives here.
+/build/
+
+# Legacy output paths: keep old commands from accidentally staging artifacts.
 /snow
 /dist/
 /_pages_source/

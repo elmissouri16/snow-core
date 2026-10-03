@@ -142,7 +142,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         )
         for source in sources:
             self.assertIn(source, build)
-        self.assertIn('cp LICENSE README.md "dist/$root/"', build)
+        self.assertIn('cp LICENSE README.md "build/dist/$root/"', build)
         self.assertIn('-le 1048576', build)
         # Exercise the actual workflow shell, not a duplicate implementation.
         start = build.index('          cp LICENSE README.md')
@@ -153,7 +153,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
             original = b"Snow root copyright and license\n"
             (root / "LICENSE").write_bytes(original)
             (root / "README.md").write_text("README\n", encoding="utf-8")
-            output = root / "dist" / "release"
+            output = root / "build" / "dist" / "release"
             output.mkdir(parents=True)
             for index, source in enumerate(sources):
                 path = root / source

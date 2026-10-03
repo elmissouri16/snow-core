@@ -39,7 +39,8 @@ From the project directory, open the session picker:
 snow resume
 ```
 
-Open a known database directly when needed:
+Open a known database directly when needed; this bypasses the project-wide
+session picker scan:
 
 ```sh
 snow resume /absolute/path/to/session.db

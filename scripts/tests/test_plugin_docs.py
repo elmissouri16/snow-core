@@ -87,7 +87,7 @@ class PluginDocsTests(unittest.TestCase):
 
     def test_policy_is_tool_allowlist_not_skill_migration(self):
         for path in (BUNDLE / "README.md", REPO / "docs/plugins.md", REPO / "docs/skills.md",
-                     REPO / "docs/tool-routing.md", REPO / "IMPLEMENTATION.md"):
+                     REPO / "docs/tool-routing.md", REPO / "docs/architecture.md"):
             with self.subTest(path=path):
                 text = " ".join(path.read_text().split())
                 for required in ("snow_plugin_docs", "skills.overrides.snow-js-plugin",

@@ -8,7 +8,7 @@ Requires this checkout's Go toolchain, Node 22+ and installed Chrome/Chromium
 (`SNOW_CHROME_BIN` may select its executable). No npm dependencies.
 
 The default matrix is 320×740 and 1280×740, dark/light. Each report compiles/runs
-the opt-in `cmd/snow` `TestWebAccessFixture` against real production `web.Run`,
+the opt-in `internal/cli` `TestWebAccessFixture` against real production `web.Run`,
 HTTP routes, HTML, JavaScript and CSS. Two independent Chrome browser contexts
 pair through native pointer/input form submission; no session-cookie injection,
 mock fetch, synthetic DOM controls, asset server or intercepted response exists.

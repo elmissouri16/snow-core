@@ -2,7 +2,7 @@
 
 This guide defines the visual and structural conventions for every document in
 the snow-core repository. All documentation — the project `README.md`, this
-`docs/` directory, and `IMPLEMENTATION.md` — must follow these rules so the set
+`docs/` directory, and `docs/architecture.md` — must follow these rules so the set
 reads as one cohesive, professional publication.
 
 > **Audience:** documentation contributors and agents that rewrite or extend
@@ -118,8 +118,8 @@ catalogs, event types. Rules:
 Example:
 
 ```sh
-go build ./cmd/snow
-./snow -p "list files"
+go build -o build/bin/snow ./cmd/snow
+./build/bin/snow -p "list files"
 ```
 
 Inline code covers commands (`snow resume`), flags (`--permission`), files

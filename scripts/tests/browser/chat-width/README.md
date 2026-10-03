@@ -27,7 +27,7 @@ upward-event exclusion; these do not claim
 native wheel-unit or browser zoom coverage. Public inspector requests remain
 mocked and are isolated from that width-only audit.
 
-Screenshots are opt-in and written only to `dist/chat-width-evidence`; temporary
+Screenshots are opt-in and written only to `build/dist/chat-width-evidence`; temporary
 fixture assets and the isolated browser profile are removed after each run.
 This is a focused feature regression, not a replacement for the full layout
 matrix or transport tests.

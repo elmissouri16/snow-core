@@ -200,7 +200,7 @@ node scripts/tests/browser/stream-client/run.mjs
 Native browser fixtures require Go and installed Chrome/Chromium; set
 `SNOW_CHROME_BIN` for a nonstandard location. Additional manager access,
 host-control, runtime-control, conversation and layout suites cover their
-respective boundaries; see [architecture verification](../IMPLEMENTATION.md#testing-and-verification)
+respective boundaries; see [architecture verification](architecture.md#testing-and-verification)
 and the [web acceptance record](web-manager-implementation-plan.md#expanded-controls-acceptance-evidence).
 Package tests or a reduced browser smoke run do not replace those gates.
 
@@ -271,7 +271,7 @@ portal and renders status inline. Checks for that baseline passed:
   conversation archive with exact native form fields and retained workspace
   archive/security confirmations.
 - All **132** frontend package tests, reproducible assets/notices,
-  `go test ./internal/web ./cmd/snow`, and `go vet ./internal/web ./cmd/snow`.
+  `go test ./internal/web ./internal/cli`, and `go vet ./internal/web ./internal/cli`.
 
 These checks are not a full current-artifact layout, provider, repository/race,
 CI or release gate.

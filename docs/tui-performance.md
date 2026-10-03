@@ -270,7 +270,7 @@ repeated full-history JSON decoding.
 Local medians on an Apple M3 Pro (Go 1.27rc3, three default-duration samples)
 compare a fresh run of pre-migration commit `8fad893` with the corrected v2
 implementation. Benchmarks exercise the root `View`, composer edits, and drag
-frames. [Raw samples and medians](../benchmarks/results/2026-09-10-charm-v2-rendering/)
+frames. [Raw samples and medians](../benchmarks/results/2026-09-10-charm-v2-rendering)
 are checked in for review.
 
 | Fixture | Before | v2 |
@@ -303,8 +303,8 @@ go test -race ./internal/tui -count=1
 go test ./...
 go vet ./...
 python3 scripts/check_benchmarks.py
-go build -o ./snow ./cmd/snow
-python3 scripts/smoke_tui_terminal.py --binary ./snow
+go build -o build/bin/snow ./cmd/snow
+python3 scripts/smoke_tui_terminal.py --binary ./build/bin/snow
 ```
 
 The PTY smoke uses an isolated fake provider and explicit untrusted-project
@@ -324,7 +324,7 @@ input, modal replacement, abort, and clean alternate-screen restoration on exit.
 - [Using Snow](using-snow.md)
 - [Configuration](configuration.md)
 - [Sessions](sessions.md)
-- [Architecture and roadmap](../IMPLEMENTATION.md)
+- [Architecture and roadmap](architecture.md)
 - [README](../README.md)
 
 ### Stable-draft follow-up

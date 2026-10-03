@@ -105,7 +105,10 @@ class RenderedPagesValidationTests(unittest.TestCase):
         for relative_path in (
             ".github/workflows/pages.yml",
             "benchmarks/performance-limits.json",
+            "build/bin/snow",
+            "docs/site/_config.yml",
             "design-plans/site-redesign.md",
+            "docs/design/site-redesign.md",
             "pkg/protocol/schema/rpc/v1/agent-event.schema.json",
         ):
             self._write(relative_path, "repository-only\n")
@@ -115,7 +118,10 @@ class RenderedPagesValidationTests(unittest.TestCase):
         expected_paths = sorted(check_pages_output.FORBIDDEN_PUBLIC_PATHS) + [
             ".github/workflows/pages.yml",
             "benchmarks/performance-limits.json",
+            "build/bin/snow",
+            "docs/site/_config.yml",
             "design-plans/site-redesign.md",
+            "docs/design/site-redesign.md",
             "pkg/protocol/schema/rpc/v1/agent-event.schema.json",
         ]
         for relative_path in expected_paths:

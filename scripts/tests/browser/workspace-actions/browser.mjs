@@ -12,7 +12,7 @@ import {chromeBinary, connect, debuggingURL} from "../live-stream/cdp.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url)), root = resolve(here, "../../../..");
 const temporary = await mkdtemp(join(tmpdir(), "snow-workspace-actions-"));
-const evidence = process.env.SNOW_WORKSPACE_EVIDENCE === "0" ? null : join(root, "dist/workspace-action-evidence");
+const evidence = process.env.SNOW_WORKSPACE_EVIDENCE === "0" ? null : join(root, "build/dist/workspace-action-evidence");
 let chrome, client, server, timer, sessionId, assertions = 0;
 const reports = [], failures = [], captures = [], serverRequests = [];
 try {

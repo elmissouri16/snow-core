@@ -128,7 +128,7 @@ external browser requests and any server-side POST.
 
 Screenshots of the **open** workspace menu, row-opened removal confirmation,
 Stop/New confirmation and URL-opened removal confirmation go to
-`dist/workspace-action-evidence/`, alongside `report.json`; failures also receive
+`build/dist/workspace-action-evidence/`, alongside `report.json`; failures also receive
 screenshots. `SNOW_WORKSPACE_EVIDENCE=0` disables persistent evidence. All evidence
 contains public mocked fixture content, not real runtime/project data.
 

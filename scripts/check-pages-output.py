@@ -27,6 +27,8 @@ FORBIDDEN_PUBLIC_PATHS = {
     "bugs.html",
     "LICENSE",
     "docs/README.html",
+    "docs/architecture.html",
+    "docs/bugs.html",
     "docs/chatgpt-auth.html",
     "docs/rpc.html",
     "docs/user-input.html",
@@ -34,6 +36,7 @@ FORBIDDEN_PUBLIC_PATHS = {
     "docs/sdk-reference.html",
     "docs/releases.html",
     "docs/pages.html",
+    "docs/repository-layout.html",
     "docs/style-guide.html",
     "docs/performance.html",
     "docs/code-audit.html",
@@ -47,8 +50,11 @@ FORBIDDEN_PUBLIC_PATHS = {
 }
 FORBIDDEN_PUBLIC_PREFIXES = (
     ".github/",
+    "build/",
+    "docs/site/",
     "benchmarks/",
     "design-plans/",
+    "docs/design/",
     "pkg/protocol/schema/rpc/v1/",
 )
 

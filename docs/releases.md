@@ -36,6 +36,11 @@ history remains append-only under the runtime invariants documented elsewhere.
 
 ## Supported targets
 
+The existing release workflow stages binaries, archives, and checksums under
+ignored `build/dist/`. This is a checkout output location only: published archive
+names, the three-file archive layout, installer verification, and required
+release gates are unchanged.
+
 Alpha binary archives are produced for:
 
 | Operating system | Architecture | Archive target |
@@ -216,7 +221,7 @@ git diff -- CHANGELOG.md README.md docs/ .github/workflows/
 ```
 
 Use the additional affected-area commands in `AGENTS.md` and
-`IMPLEMENTATION.md` when the release changes those areas. Run manual
+`docs/architecture.md` when the release changes those areas. Run manual
 live-provider/authentication smokes outside CI and record only secret-free
 outcomes. Do not run multiple resource-intensive Go verification commands
 concurrently on the same workstation; resource contention can produce
@@ -414,4 +419,4 @@ removal is required to contain active harm.
 - [Security reporting policy](../SECURITY.md)
 - [Security model](security.md)
 - [Documentation site](pages.md)
-- [Architecture and verification](../IMPLEMENTATION.md)
+- [Architecture and verification](architecture.md)

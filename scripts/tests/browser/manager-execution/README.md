@@ -20,7 +20,7 @@ composer edit finishes; it does not change the response, authority or mutation p
 The default matrix uses **four independent fixtures**: 320/1280 pixels ×
 dark/light, height 740. Each fixture has a private 0700 temporary root, HOME,
 project, session database, Chrome profile and production HTTP listener on a
-random loopback port. The runner compiles `./cmd/snow` once and launches only
+random loopback port. The runner compiles `./internal/cli` once and launches only
 `TestWebManagerExecutionBrowserFixture` in each cell. The real runtime manager,
 RPC subprocess, App/Agent scheduler, approval broker and process supervisor run.
 Provider responses alone are fictional and gated.
@@ -92,7 +92,7 @@ clicking `[data-process-stop-confirm]`; no `window.confirm` is used.
   metadata and visibility must be cleared. Page remains within viewport width.
 
 Plan/Deny stop rejection is covered by the real HTTP tests in
-`cmd/snow/web_manager_execution_process_test.go`, not duplicated here. The
+`internal/cli/web_manager_execution_process_test.go`, not duplicated here. The
 fixture emits a fixed plain readiness marker, so the browser checks actual
 plain-text rendering and byte bounds but does **not** claim adversarial HTML or
 32 KiB truncation payload coverage.

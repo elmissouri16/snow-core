@@ -41,9 +41,11 @@ New to Snow? Follow [Getting started](getting-started.md), then
 ## Maintain and contribute
 
 Start with [AGENTS.md](../AGENTS.md) for the change workflow, or
-[Architecture and roadmap](../IMPLEMENTATION.md) for the codebase structure.
+[Architecture and roadmap](architecture.md) for the codebase structure.
 The [maintainer index](maintaining.md) holds release procedures, performance
-checks, documentation ownership, and historical research.
+checks, documentation ownership, and historical research. See
+[Repository layout](repository-layout.md) for source placement and Go layout
+rationale, and [Design plans](design/README.md) for indexed design handoffs.
 For browser UI changes, use [Web frontend development](web-frontend.md) for the
 React/Vite build, embedded assets, workbench, and migration ownership boundaries.
 
@@ -52,6 +54,6 @@ past decisions and may describe work that has since changed.
 
 ## Related documents
 
-- [Known bugs](../bugs.md): reproducible defects and verified fixes.
+- [Known bugs](bugs.md): reproducible defects and verified fixes.
 - [Changelog](../CHANGELOG.md): release history.
 - [Security reporting](../SECURITY.md): private vulnerability disclosure.

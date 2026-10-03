@@ -22,7 +22,7 @@ local scripted fake provider
 ```
 
 The implementation-dependent fixture lives in
-`cmd/snow/web_permission_fixture{,_helpers}_test.go`, not in `internal/web` or
+`internal/cli/web_permission_fixture{,_helpers}_test.go`, not in `internal/web` or
 `pkg/agentclient`. No second agent loop, simulated permission event, fake RPC
 reply, or fabricated public snapshot is used. The only tool is the existing
 builtin `write`, under `ask` with no extra allowed roots. A test-only decorator
@@ -94,7 +94,7 @@ bounded and synced independently of reached markers, so repeated execution
 cannot disappear behind an overwritten marker. Cleanup removes only this
 runner's temporary directory and stops only its own fixture/Chrome children.
 
-Ordinary `go test ./cmd/snow` skips the interactive browser fixture but runs
+Ordinary `go test ./internal/cli` skips the interactive browser fixture but runs
 network-free tests for exact worker argument/CWD guards, context cancellation,
 real broker-to-write admission and both execution gate boundaries.
 

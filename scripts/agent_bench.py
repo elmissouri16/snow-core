@@ -77,7 +77,7 @@ def load_tasks(path: Path) -> list[dict[str, Any]]:
 
 def copy_workspace(source: Path, destination: Path) -> None:
     ignored = shutil.ignore_patterns(
-        ".git", ".snow", ".codex", "node_modules", ".venv", "venv", "dist", "target",
+        ".git", ".snow", ".codex", "node_modules", ".venv", "venv", "build", "dist", "target",
         "agent-bench-results.json", "bench-runs", "*-runs", "*-logs",
     )
     shutil.copytree(source, destination, ignore=ignored)

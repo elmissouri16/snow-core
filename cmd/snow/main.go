@@ -1,7 +1,8 @@
-// Command snow is the snow-core CLI: interactive TUI, print/JSON modes, and
-// the JSONL RPC control plane.
+// Command snow starts the Snow command-line interface.
 package main
 
-import "github.com/elmissouri16/snow-core/internal/buildinfo"
+import "github.com/elmissouri16/snow-core/internal/cli"
 
-var version = buildinfo.Version
+func main() {
+	cli.Main()
+}

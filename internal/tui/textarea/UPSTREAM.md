@@ -28,8 +28,8 @@ so changes can be audited against the pinned source; do not edit them directly.
 From the repository root, reproduce or verify the snapshot:
 
 ```sh
-go run scripts/sync_textarea.go -source "$(go list -m -f '{{.Dir}}' charm.land/bubbles/v2)"
-go run scripts/sync_textarea.go -check -source "$(go list -m -f '{{.Dir}}' charm.land/bubbles/v2)"
+go run ./cmd/sync-textarea -source "$(go list -m -f '{{.Dir}}' charm.land/bubbles/v2)"
+go run ./cmd/sync-textarea -check -source "$(go list -m -f '{{.Dir}}' charm.land/bubbles/v2)"
 go test ./internal/tui/textarea/... ./internal/tui
 ```
 

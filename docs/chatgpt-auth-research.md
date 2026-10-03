@@ -65,6 +65,6 @@ token, and rejects a login whose returned claim belongs to a different account.
 
 - [ChatGPT authentication](chatgpt-auth.md) — current user-facing login and
   account behavior
-- [Architecture and roadmap](../IMPLEMENTATION.md) — provider boundaries and
+- [Architecture and roadmap](architecture.md) — provider boundaries and
   current implementation status
 - [Security model](security.md) — credential storage and network controls

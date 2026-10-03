@@ -4,7 +4,7 @@ Run from the repository root with Node 22+, Go, and installed Chrome/Chromium:
 
 ```sh
 node scripts/tests/browser/tool-rows/run.mjs
-# Optional open/closed screenshot evidence in dist/tool-row-evidence/:
+# Optional open/closed screenshot evidence in build/dist/tool-row-evidence/:
 SNOW_TOOL_ROW_EVIDENCE=1 node scripts/tests/browser/tool-rows/run.mjs
 ```
 
