@@ -8,9 +8,13 @@ permalink: /examples/
 # Snow examples
 
 The published documentation includes the maintained standalone Go SDK example.
-Use it to open a Snow session, stream events, and close the session cleanly.
+Node JS/TS subprocess examples are available in the repository, with local
+tarball installation until the npm package is published. Both integrations
+stream public events and close their owned runtime cleanly.
 
 - [Go SDK example]({{ '/examples/sdk/' | relative_url }})
+- [Node JS/TS examples](https://github.com/elmissouri16/snow-core/tree/main/examples/sdk-node)
+- [Node SDK guide](https://github.com/elmissouri16/snow-core/blob/main/docs/node-sdk.md)
 - [Go SDK guide]({{ '/docs/sdk.html' | relative_url }})
 
 ## Related documents

@@ -4,7 +4,7 @@ A coding agent for your terminal. Work through a change, inspect the tools it
 runs, and pick up the conversation later. Choose your model provider and keep
 sessions on your machine.
 
-Snow is written in Go. Its terminal UI, command-line modes, and embeddable SDK
+Snow is written in Go. Its terminal UI, command-line modes, and SDK integrations
 share one streaming agent loop.
 
 [Documentation](https://elmissouri16.github.io/snow-core/) ·
@@ -79,8 +79,10 @@ snow --mode json --permission deny -p "summarize recent changes"
 ```
 
 For applications, use the [Go SDK](docs/sdk.md) and its
-[runnable example](examples/sdk), or control a long-lived process through
-[JSONL RPC](docs/rpc.md). All execution surfaces share tools, permissions, and
+[runnable example](examples/sdk), or the [Node JS/TS SDK](docs/node-sdk.md) and
+[examples](examples/sdk-node) to own an installed Snow subprocess. The Node
+package is not published yet; its guide uses a locally built tarball. You can
+also control a long-lived process directly through [JSONL RPC](docs/rpc.md). All execution surfaces share tools, permissions, and
 sessions. The optional [local web manager preview](docs/using-snow.md#try-the-local-web-manager-shell)
 starts with `snow --mode web`: browse folders on the Snow host, register projects,
 read saved sessions, and explicitly activate RPC-backed conversations with live
@@ -158,7 +160,8 @@ loopback tests.
 
 Source builds require the Go 1.27 line; the available toolchain is Go 1.27rc3.
 Ordinary Go builds use checked-in, embedded web assets and do not require Node.
-Editing the React frontend requires Node >=22.12.0 (CI pins 24.16.0) and npm.
+Developing the Node SDK or React frontend requires Node >=22.12.0 and npm
+(frontend CI pins 24.16.0).
 See [Web frontend development](docs/web-frontend.md) for the pinned React 19.3,
 TypeScript 7 and Vite 8 toolchain, generated-asset workflow, standalone workbench,
 and in-progress migration boundaries.

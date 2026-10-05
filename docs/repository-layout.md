@@ -1,7 +1,7 @@
 # Repository layout
 
 Snow is one Go module containing a command-line application and public embedding
-contracts, plus a standalone SDK example module. Organize by package responsibility
+contracts, a separate Node JS/TS subprocess SDK, and standalone examples. Organize by package responsibility
 and dependency direction, not by a universal application template.
 
 ## Layout
@@ -29,7 +29,8 @@ and dependency direction, not by a universal application template.
 │   ├── plugin/               # extension contracts
 │   ├── protocol/             # standard-library-only messages/events/schemas
 │   └── snowsdk/              # embeddable Go SDK
-├── examples/                 # standalone SDK module and plugin examples
+├── sdk/node/                 # JS/TS subprocess client; separate pinned npm package
+├── examples/                 # Go/Node SDK and plugin examples
 ├── docs/
 │   ├── architecture.md       # package map, architecture, and roadmap
 │   ├── bugs.md               # reproducible defects and verification evidence
@@ -39,6 +40,7 @@ and dependency direction, not by a universal application template.
 ├── benchmarks/               # allocation limits and recorded measurements
 └── build/                    # ignored local output; never source or dependencies
     ├── bin/                  # locally built snow executable
+    ├── sdk-node/package/     # staged ESM/CJS package and declarations
     ├── tests/                # compiled *.test executables
     ├── dist/                 # release archives and browser evidence
     └── pages/
@@ -84,6 +86,10 @@ For Snow, those recommendations mean:
   lives at `cmd/sync-textarea`, so normal Go test/vet traversal compiles it. Its
   generated snapshot stays beside the TUI that owns it; shell and Python tools
   remain under `scripts/`.
+- **Keep Node integration separate from Go internals.** `sdk/node` launches an
+  installed/explicit Snow binary and consumes public RPC; it never implements an
+  agent loop in JavaScript. Its npm development dependencies and lockfile stay
+  with that package; generated distributable output stays under `build/`.
 - **Keep assets with their owner.** Web frontend sources, templates, and embedded
   assets remain under `internal/web`; ordinary Go builds need no Node tooling.
   Design plans live under `docs/design` and are not published in the curated
@@ -97,6 +103,8 @@ Source and generated output must not compete at the root. Use these paths:
 |---|---|
 | Local binary | `build/bin/snow` |
 | Compiled Go test executable | `build/tests/<package>.test` |
+| Node SDK staged package | `build/sdk-node/package/` |
+| Node SDK tarballs | `build/dist/` |
 | Release archives and browser evidence | `build/dist/` |
 | Pages staging source | `build/pages/source/` |
 | Rendered Pages site | `build/pages/site/` |
@@ -142,4 +150,5 @@ go build -o build/bin/snow ./cmd/snow
 The CLI browser runners continue using their existing `node
 scripts/tests/browser/<suite>/run.mjs` commands. See [AGENTS.md](../AGENTS.md)
 for race, SDK, installation, and affected-area checks, and
-[Web frontend development](web-frontend.md) for asset verification.
+[Web frontend development](web-frontend.md) for asset verification and
+[Node SDK](node-sdk.md#development-and-verification) for the npm package checks.

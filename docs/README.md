@@ -32,6 +32,7 @@ New to Snow? Follow [Getting started](getting-started.md), then
 
 | Task | Guide | Complete reference |
 |---|---|---|
+| Control a subprocess from JS/TS | [Node SDK](node-sdk.md) · [Examples](../examples/sdk-node) | [JSONL RPC](rpc.md) |
 | Embed in Go | [Go SDK](sdk.md) · [Example](../examples/sdk) | [SDK reference](sdk-reference.md) |
 | Control Snow from another process | [CLI modes](using-snow.md#choose-a-runtime-mode) | [JSONL RPC](rpc.md) |
 | Write a JavaScript or Go plugin | [Plugins](plugins.md) | [SDK reference](sdk-reference.md) |

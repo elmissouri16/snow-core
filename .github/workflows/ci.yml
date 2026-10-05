@@ -67,6 +67,95 @@ jobs:
           "$SNOW_CHROME_BIN" --version
           node scripts/tests/browser/react-pages/run.mjs
 
+  node-sdk:
+    name: Node SDK (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: '22'
+          - os: ubuntu-latest
+            node: '24.16.0'
+          - os: macos-latest
+            node: '24.16.0'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: sdk/node/package-lock.json
+
+      - name: Set up Go for subprocess integration
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.0-rc.3'
+          check-latest: true
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Build Snow subprocess
+        run: go build -trimpath -o build/bin/snow ./cmd/snow
+
+      - name: Install locked SDK development dependencies
+        working-directory: sdk/node
+        run: npm ci --ignore-scripts
+
+      - name: Verify generated public protocol types
+        working-directory: sdk/node
+        run: npm run generate:check
+
+      - name: Typecheck SDK
+        working-directory: sdk/node
+        run: npm run typecheck
+
+      - name: Build ESM and CommonJS SDK package
+        working-directory: sdk/node
+        run: npm run build
+
+      - name: Test SDK
+        working-directory: sdk/node
+        run: npm test
+
+      - name: Test real Snow subprocess integration
+        shell: bash
+        run: SNOW_BIN="$PWD/build/bin/snow" npm --prefix sdk/node run test:integration
+
+      - name: Verify and pack SDK tarball
+        working-directory: sdk/node
+        run: npm run pack
+
+      - name: Install packed SDK into examples without lifecycle scripts
+        working-directory: examples/sdk-node
+        shell: bash
+        run: |
+          version="$(node -p "require('../../sdk/node/package.json').version")"
+          npm install --ignore-scripts --no-save --package-lock=false "../../build/dist/elmissouri16-snow-sdk-$version.tgz"
+
+      - name: Typecheck standalone TypeScript example
+        run: sdk/node/node_modules/.bin/tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node --typeRoots sdk/node/node_modules/@types examples/sdk-node/example.ts
+
+      - name: Run credential-free ESM, CommonJS, and TypeScript examples
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$PWD"
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          export SNOW_EXECUTABLE="$root/build/bin/snow"
+          export SNOW_HOME="$work/home"
+          export SNOW_PROVIDER=fake
+          cd "$work"
+          node "$root/examples/sdk-node/example.mjs"
+          node "$root/examples/sdk-node/example.cjs"
+          node --experimental-strip-types "$root/examples/sdk-node/example.ts"
+
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

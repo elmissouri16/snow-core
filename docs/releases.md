@@ -2,7 +2,7 @@
 
 This guide defines Snow's alpha versioning, compatibility, verification, and
 binary distribution policy. It applies to the Go CLI, JSONL RPC protocol, and
-Go SDK in this repository.
+Go SDK, and separately packaged Node JS/TS SDK in this repository.
 
 > **Note:** Alpha releases are suitable for evaluation and early integration.
 > Public APIs, RPC details, configuration, and persisted formats may change
@@ -16,6 +16,7 @@ Go SDK in this repository.
 - [Release requirements](#release-requirements)
 - [Next-release runbook](#next-release-runbook)
 - [Publish an alpha](#publish-an-alpha)
+- [Node package release policy](#node-package-release-policy)
 - [Artifacts and checksums](#artifacts-and-checksums)
 - [Support and rollback](#support-and-rollback)
 - [Related documents](#related-documents)
@@ -136,6 +137,8 @@ The gate includes:
 
 - formatting and `go vet` on Linux;
 - all Go tests and standalone SDK tests on Linux and macOS;
+- Node SDK generation, typecheck, build, unit/integration and tarball/example
+  checks on Ubuntu Node 22/24 and macOS Node 24;
 - focused native installer coverage on macOS;
 - the full support-script suite on Linux;
 - the Linux production-build and credential-free lifecycle smoke;
@@ -377,6 +380,41 @@ the next alpha number.
 Do not move or recreate a published tag. A not-yet-ready provenance check or
 transient hosted-runner failure may be rerun for the same tag; fix tagged code
 or workflow defects on a new commit and use the next alpha number.
+
+## Node package release policy
+
+`@elmissouri16/snow-sdk` is currently an unpublished checkout package at
+`0.1.0-dev`. Local builds stage ESM, CommonJS, declarations, README, and license
+under `build/sdk-node/package`; `npm run pack` in `sdk/node` builds and creates
+the tarball under `build/dist`. The package tests verify offline installation,
+metadata, imports, and declarations from that tarball. The package has zero runtime dependencies,
+requires Node >=22.12.0, and contains no Snow binary, downloader, or install
+hooks. Installing a local tarball with `--ignore-scripts` is the supported
+checkout path. Do not imply registry installation works before publication.
+
+A future npm publication requires separate maintainer authorization. It is not
+part of the binary alpha-tag workflow, and this change adds no npm publish
+automation. For an authorized publication:
+
+1. Follow the same immutable alpha release and exact-commit CI/Documentation
+   provenance gates above; do not create an independent version line.
+2. Use the Snow alpha version with its leading `v` removed for the npm package
+   (`v0.1.0-alpha.N` becomes `0.1.0-alpha.N`). Update source and lockfile version
+   together and record compatibility/breaking changes in the same changelog.
+3. Confirm registry identity, ownership/access for the exact scope/package,
+   registry destination, and availability of the new immutable version before
+   publishing. Verify authorized credentials privately; never print tokens.
+4. Run the Node CI matrix, generation drift check, typecheck, build, unit and
+   real subprocess integrations, and `npm run pack`. Inspect the packed file
+   allowlist, metadata, ESM/CJS imports, declarations, license, absence of runtime
+   dependencies/install hooks, and credential-free examples from the tarball.
+5. Publish only the verified tarball with explicit authorization and a reviewed
+   prerelease distribution tag. Record its version, registry integrity, exact
+   source commit, and verification evidence in release notes.
+
+Never overwrite a published npm version or move its source tag. Fix defects
+with the next alpha. Binary installers and existing GitHub release artifacts,
+checksums, and publication gates are unchanged.
 
 ## Artifacts and checksums
 

@@ -13,6 +13,8 @@ This index collects architecture, release procedures, and design history;
   interfaces, decisions, phased roadmap, verification, and open risks.
 - [Agent working guide](../AGENTS.md) — repository-specific coding rules,
   security constraints, and verification commands.
+- [Node SDK](node-sdk.md) — JS/TS subprocess integration, local package build,
+  generated protocol declarations, and Node verification.
 - [Web frontend development](web-frontend.md) — pinned React/Vite tooling,
   embedded assets, standalone workbench, verification, and migration boundaries.
 - [Release policy](releases.md) — alpha versioning, CI gates, artifacts,
@@ -69,6 +71,7 @@ To reduce drift, use these documents as the primary references:
 | Runtime configuration | [`configuration.md`](configuration.md) |
 | Go embedding quickstart | [`sdk.md`](sdk.md) |
 | Complete Go SDK behavior | [`sdk-reference.md`](sdk-reference.md) |
+| Node JS/TS SDK usage and development | [`node-sdk.md`](node-sdk.md) and `sdk/node` |
 | Foreign-process control | [`rpc.md`](rpc.md) |
 | JavaScript extension API | [`plugin-extensions.md`](plugin-extensions.md) and `pkg/plugin` |
 | Branch-aware JS workflows, restrictions, lifecycle, and reload | [`plugin-workflows.md`](plugin-workflows.md) |

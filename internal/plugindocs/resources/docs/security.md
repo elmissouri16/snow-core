@@ -11,6 +11,7 @@ reduce accidental or injected damage, but they do not create a sandbox.
 ## On this page
 
 - [Understand the boundary](#understand-the-boundary)
+- [Own a Node SDK subprocess](#own-a-node-sdk-subprocess)
 - [Choose a permission mode](#choose-a-permission-mode)
 - [Review project trust](#review-project-trust)
 - [Protect files and processes](#protect-files-and-processes)
@@ -467,6 +468,32 @@ worktree and original object store with host OS privileges: pre/post identity an
 no-link checks do not contain another host process racing filesystem changes.
 This is a read-only view, not a Git process sandbox. At most four project-view
 HTTP requests and two Git inspections are admitted without queuing.
+
+## Own a Node SDK subprocess
+
+The [Node SDK](https://github.com/elmissouri16/snow-core/blob/main/docs/node-sdk.md)
+launches an installed/explicit Snow executable with
+no shell and defaults to `deny`. It does not download/install a binary or run
+npm install hooks. ESM/CJS packaging and typed RPC requests do not constrain
+Snow's OS privileges or bypass normal configuration, trust, and permission
+checks. A `tools` allowlist is not process containment; `tools: []` is rejected,
+not a disable-all switch. Configured extensions are not implicitly disabled.
+
+With `ask`, deliberately service `permission_request` events through a trusted
+host broker. Never automatically approve to unblock a stream. Model questions
+are separate `user_input_request` events; answers do not grant tool authority.
+Continuously drain the bounded event iterator and treat payload text as
+untrusted before rendering or acting on it. Do not log launch environments,
+credentials, complete tool results, or private provider state.
+
+An explicit `env` replaces the child environment rather than merging it. Review
+what you pass and preserve required paths deliberately. RPC timeout or signal
+cancellation of a local request wait does not prove remote execution stopped;
+do not automatically retry mutations with uncertain outcomes. Lifecycle abort
+closes the owned transport; prompt abort is explicit and active-run-scoped.
+Bounded close ends stdin, escalates direct-child termination, and reaps that
+child. It is neither a descendant-process supervisor nor an OS sandbox; use an
+external container, VM, or OS policy for process-tree containment.
 
 ## Choose a permission mode
 

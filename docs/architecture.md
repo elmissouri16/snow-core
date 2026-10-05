@@ -3,7 +3,7 @@
 This document is the architecture reference for snow-core: a small, modular Go
 coding-agent harness that provides one streaming agent loop behind an
 interactive terminal UI, print/JSONL/RPC command-line modes, and an embeddable
-pure-Go SDK. It records design goals, the package and dependency map, the core
+pure-Go SDK, with a separate Node JS/TS subprocess client. It records design goals, the package and dependency map, the core
 loop, providers, tools, sessions, extensions, the security model, the testing
 strategy, the phased roadmap, and condensed research decisions. User-facing
 behavior is documented under `docs/`; day-to-day operating guidance lives in
@@ -140,7 +140,8 @@ keeps UI dependencies out of core packages.
 │   ├── protocol/            # dependency-light public messages/events/models
 │   │   └── schema/          # network-free Draft 2020-12 wire schemas
 │   └── snowsdk/             # public embeddable API; no TUI dependency
-├── examples/                # standalone Go SDK module and plugin examples
+├── sdk/node/                # typed JS/TS client over owned subprocess RPC
+├── examples/                # Go/Node SDK and plugin examples
 ├── docs/                    # user/maintainer guides, architecture, bug tracker
 │   ├── design/              # design handoffs and historical plans
 │   └── site/                # curated documentation-site source
@@ -190,6 +191,7 @@ keeps UI dependencies out of core packages.
 | `pkg/protocol` | Dependency-light public messages/events/models |
 | `pkg/protocol/schema` | Network-free Draft 2020-12 wire schemas |
 | `pkg/snowsdk` | Public embeddable API; no TUI dependency |
+| `sdk/node` | Dependency-free JS/TS client over an installed Snow RPC subprocess |
 | `pkg/agentclient/rpc` | Bounded JSONL client over an owned deadline-capable connection; no process launcher |
 | `internal/web` | HTTP-only trusted-LAN plus localhost manager, private project registry, RPC catalog/control/live-worker adapters, exact Host/Origin and pairing boundaries, durable host-operation admission, instance-bound public-snapshot SSE, sanitized Markdown, durable owner-bound public tool history, explicit recovery hints without replay, bounded read-only file/Git inspector; no TLS/proxy/profile stack, app/agent/session imports, or second agent loop |
 
@@ -232,6 +234,7 @@ app → agent → {provider, tools, session, permission, context, compact}
 provider adapters → auth + protocol
 tui → app facades + protocol
 snowsdk → app + protocol; never bubbletea
+Node SDK → owned subprocess JSONL RPC → snow (no Go internals or JS agent loop)
 cli → web (local-only shell, no app construction)
 cli → rpc control → {hostcontrol → config/auth, hostops} (no app)
 web → agentclient process/RPC → external workers (no hostcontrol/hostops internals)
@@ -1678,12 +1681,13 @@ footer. See `docs/tui-performance.md`.
 - JSON mode: `snow --mode json -p "..."` emits JSONL `protocol.AgentEvent`
   lines for piping.
 - RPC mode: versioned JSONL over stdin/stdout (see the next section).
-- SDK: in-process `pkg/snowsdk`.
+- SDK: in-process `pkg/snowsdk`; `sdk/node` controls an owned Snow subprocess.
 
 ## Public API surface
 
 The stable public surface is `pkg/snowsdk`, `pkg/protocol`, and other
-dependency-light `pkg/*` contracts.
+dependency-light `pkg/*` contracts, plus the separately packaged Node SDK over
+the public RPC boundary.
 
 ### Go SDK
 
@@ -1726,6 +1730,28 @@ func (s *Session) Close() error
 
 `pkg/snowsdk` embeds the same agent loop as the CLI and never imports
 bubbletea. See `docs/sdk.md`.
+
+### Node JS/TS SDK
+
+`sdk/node` builds `@elmissouri16/snow-sdk` for Node >=22.12.0, with ESM,
+CommonJS, and generated TypeScript declarations, and zero runtime dependencies.
+It launches an installed/explicit Snow executable, verifies `rpc_ready`, drains
+bounded JSONL output, correlates responses, and exposes one ordered event
+iterator. There is no JavaScript provider/tool/agent loop. The CLI retains
+runtime wiring, normal configuration/trust, permissions, and session storage.
+
+High-level prompt handles distinguish admission from definitive same-ID
+`prompt_completed` results; abort is explicit and active-run-scoped. Typed
+advanced RPC returns remote failure envelopes, while convenience methods throw
+`RemoteRpcError`. Local request timeout does not cancel remote execution.
+Default permission is `deny`; `ask` requires a deliberately serviced host
+approval broker. Shutdown is bounded EOF/direct-child termination and reaping,
+not descendant supervision or a sandbox. The package neither downloads Snow
+nor exposes high-level account/failover or provider-private continuity transfer.
+
+The development package is `0.1.0-dev`, not yet published to npm. Build output
+is staged under `build/sdk-node/package`, with tarballs under `build/dist`.
+See [Node SDK](node-sdk.md) and [examples](../examples/sdk-node).
 
 ### RPC protocol
 
@@ -1892,7 +1918,11 @@ formatting, vet, the full support-script suite, the production build and
 credential-free lifecycle smoke, SDK example execution, the deterministic
 performance-regression guard, serialized `go test -race -p 1 ./internal/... ./pkg/snowsdk`,
 cgo-disabled builds for all four release targets, and the pinned `govulncheck`
-reachable-code scan. Real-provider checks remain manual.
+reachable-code scan. A separate Node SDK matrix runs Node 22/24 on Ubuntu and
+Node 24 on macOS: locked install without lifecycle scripts, protocol-generation
+drift checks, typechecking, ESM/CJS build, unit/subprocess integration tests,
+local tarball verification, and credential-free JS/TS examples. It does not
+replace frontend or Go gates. Real-provider checks remain manual.
 `.github/workflows/release-alpha.yml` accepts only
 `vMAJOR.MINOR.PATCH-alpha.N` tags, peels each annotated tag to its commit,
 requires that commit to be on `main`, and fails closed unless GitHub records
@@ -2325,6 +2355,7 @@ that is fully covered elsewhere is referenced rather than repeated.
 - [Security model](security.md) — consolidated privilege and threat boundaries
 - [Security reporting](../SECURITY.md) — private vulnerability disclosure policy
 - [Release policy](releases.md) — alpha versioning, verification, artifacts, and rollback
+- [Node SDK](node-sdk.md) — JS/TS subprocess integration and npm development
 - [SDK](sdk.md) — concise public Go SDK quickstart
 - [SDK reference](sdk-reference.md) — complete lifecycle and API reference
 - [Sessions](sessions.md) — user workflows for resume, branches, and forks

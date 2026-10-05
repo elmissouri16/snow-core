@@ -1,0 +1,25 @@
+{
+  "name": "@elmissouri16/snow-sdk",
+  "version": "0.1.0-dev",
+  "description": "Dependency-free Node.js client for Snow's JSONL RPC protocol",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=22.12.0" },
+  "repository": { "type": "git", "url": "git+https://github.com/elmissouri16/snow-core.git", "directory": "sdk/node" },
+  "scripts": {
+    "generate": "node scripts/generate.mjs",
+    "generate:check": "node scripts/generate.mjs --check",
+    "typecheck": "tsc --noEmit",
+    "build": "node scripts/build.mjs",
+    "test": "node scripts/test.mjs",
+    "test:integration": "node scripts/test.mjs --integration",
+    "pack": "node scripts/pack.mjs",
+    "check": "npm run generate:check && npm run typecheck && npm run build && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "esbuild": "0.28.2",
+    "json-schema-to-typescript": "16.0.0",
+    "typescript": "7.0.2"
+  }
+}

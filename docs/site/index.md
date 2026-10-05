@@ -13,6 +13,6 @@ permalink: /
   </div>
 </section>
 <section class="developer-strip" aria-labelledby="developer-title">
-  <div><h2 id="developer-title">Go SDK and RPC</h2><p>Embed Snow in Go or automate it over JSONL RPC.</p></div>
-  <div class="developer-links"><a href="{{ '/docs/sdk.html' | relative_url }}">Go SDK documentation <span aria-hidden="true">→</span></a><a href="https://github.com/elmissouri16/snow-core/blob/main/docs/README.md">Advanced references on GitHub <span aria-hidden="true">↗</span></a></div>
+  <div><h2 id="developer-title">SDKs and RPC</h2><p>Embed Snow in Go or control a subprocess from JavaScript and TypeScript.</p></div>
+  <div class="developer-links"><a href="{{ '/docs/sdk.html' | relative_url }}">Go SDK documentation <span aria-hidden="true">→</span></a><a href="https://github.com/elmissouri16/snow-core/blob/main/docs/node-sdk.md">Node JS/TS SDK <span aria-hidden="true">↗</span></a><a href="https://github.com/elmissouri16/snow-core/blob/main/docs/README.md">Advanced references on GitHub <span aria-hidden="true">↗</span></a></div>
 </section>

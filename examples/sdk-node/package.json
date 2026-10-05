@@ -1,0 +1,12 @@
+{
+  "name": "snow-node-sdk-example",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.12.0" },
+  "scripts": {
+    "start": "node example.mjs",
+    "start:cjs": "node example.cjs",
+    "start:ts": "node --experimental-strip-types example.ts"
+  }
+}
