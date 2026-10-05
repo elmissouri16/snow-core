@@ -472,11 +472,20 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			m.pickChatGPTAuth = false
+			m.loginChatGPTAccount = ""
 			m.clearLoginNavigation()
 			if msg.err != nil {
 				m.pushLine(styleError.Render(msg.err.Error()))
 			} else {
-				m.pushLine(styleFooter.Render("chatgpt: " + chatgpt.FormatStatus(msg.status)))
+				label := "chatgpt"
+				if msg.account != "" {
+					label += " account " + msg.account
+				}
+				m.pushLine(styleFooter.Render(label + ": " + chatgpt.FormatStatus(msg.status)))
+				if msg.account != "" && msg.account != m.app.SelectedChatGPTAccount() {
+					m.pushLine(styleFooter.Render("Saved without switching. Use /account " + msg.account + " to select, or /account prefer " + msg.account + " to make preferred."))
+				}
+				return m, m.reconcileChatGPTLogin(msg.account)
 			}
 		}
 	case logoutDoneMsg:
@@ -643,6 +652,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.layout()
+	case accountSessionMsg:
+		return m.applyAccountSession(msg)
+	case accountCatalogMsg:
+		return m.applyAccountCatalog(msg)
 	case modelListMsg:
 		if msg.generation != m.pickerGeneration || !m.modelModalVisible() {
 			return m, nil

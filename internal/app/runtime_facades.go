@@ -136,6 +136,10 @@ func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
 	}
 	a.stateMu.Lock()
 	p, ok := a.Providers[id]
+	selectedAccount := ""
+	if runtime, authenticated := p.(*provider.Authenticated); authenticated && id == "chatgpt" {
+		selectedAccount = runtime.Account()
+	}
 	a.stateMu.Unlock()
 	if !ok {
 		return fmt.Errorf("app: provider %q is not available", id)
@@ -177,8 +181,12 @@ func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
 	a.stateMu.Lock()
 	currentProvider, stillConfigured := a.Providers[id]
 	active := a.ProviderID == id
+	accountChanged := false
+	if runtime, authenticated := currentProvider.(*provider.Authenticated); authenticated && selectedAccount != "" {
+		accountChanged = runtime.Account() != selectedAccount
+	}
 	a.stateMu.Unlock()
-	if !stillConfigured || currentProvider != p {
+	if !stillConfigured || currentProvider != p || accountChanged {
 		return fmt.Errorf("app: provider %q configuration changed during model refresh", id)
 	}
 
@@ -201,6 +209,9 @@ func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
 			break
 		}
 		if refreshedActive == nil && modelCatalogAuthoritative(p) {
+			if id == "chatgpt" {
+				return fmt.Errorf("app: active model %q is unavailable to the selected ChatGPT account; choose an available model explicitly", current.ID)
+			}
 			for i := range models {
 				if !models[i].SupportsThinkingLevel(level) {
 					continue

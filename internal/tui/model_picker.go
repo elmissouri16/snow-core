@@ -162,7 +162,7 @@ func (m *Model) handleHeaderMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 }
 
 func (m *Model) headerControlsBlocked() bool {
-	return m.trustPending || m.sessionOpLoading || m.loginModalVisible() ||
+	return m.pickAccount || m.trustPending || m.sessionOpLoading || m.loginModalVisible() ||
 		m.pickThinking || m.pickSettings || m.pickKeybindings || m.pickHelp || m.pickFork ||
 		m.pickSession || m.pickTree || m.pickInfo || m.pickPermissionMode || m.permPending ||
 		m.userInputPending || m.confirmGoalReplace || m.planPrompt || m.compVisible || m.skillVisible ||

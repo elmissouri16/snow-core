@@ -2,9 +2,11 @@ package chatgpt
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -106,7 +108,7 @@ func TestCatalogExpiryRevalidationAndFailureRetry(t *testing.T) {
 	if err == nil || len(models) != 1 || models[0].ID != "gpt-6-astra" || p.ModelCatalogStale() {
 		t.Fatalf("same-account outage fallback=%+v err=%v", models, err)
 	}
-	cached, ok := p.loadCatalogCache("acct")
+	cached, ok := p.loadCatalogCache("acct", auth.AccountIdentity(credential))
 	if !ok || !cached.FetchedAt.Equal(now.Add(-catalogFreshness)) {
 		t.Fatal("failed discovery renewed the disk cache")
 	}
@@ -118,5 +120,80 @@ func TestCatalogExpiryRevalidationAndFailureRetry(t *testing.T) {
 	models, err = p.ListModelsWithCredential(t.Context(), credential)
 	if err == nil || len(models) != 0 || p.ModelCatalogRevision() == revision {
 		t.Fatalf("failed account switch retained prior inventory: models=%+v err=%v", models, err)
+	}
+}
+
+func TestCatalogAccountSwitchInvalidatesBeforeFetch(t *testing.T) {
+	var p *Provider
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("chatgpt-account-id") == "first-account" {
+			fmt.Fprint(w, `{"models":[{"slug":"first-account-model","visibility":"list"}]}`)
+			return
+		}
+		if p.DefaultModel().ID == "first-account-model" || !p.ModelCatalogStale() {
+			t.Error("account switch exposed prior inventory while discovery was pending")
+		}
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	p = New(Config{BaseURL: server.URL, HTTPClient: server.Client(), CacheRoot: t.TempDir()})
+	credential := auth.Credential{Type: auth.CredentialOAuth, Access: "access", AccountID: "first-account"}
+	if _, err := p.ListModelsWithCredential(t.Context(), credential); err != nil {
+		t.Fatal(err)
+	}
+	if p.DefaultModel().ID != "first-account-model" {
+		t.Fatal("initial catalog was not retained")
+	}
+	credential.AccountID = "second-account"
+	models, err := p.ListModelsWithCredential(t.Context(), credential)
+	if err == nil || len(models) != 0 || p.DefaultModel().ID == "first-account-model" {
+		t.Fatalf("failed switch retained another account's catalog: models=%+v err=%v", models, err)
+	}
+}
+
+func TestCatalogEarlierAccountRequestCannotRestoreInventory(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{}, 1)
+	defer close(release)
+	var firstCalls atomic.Int32
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		account := r.Header.Get("chatgpt-account-id")
+		if account == "first" && firstCalls.Add(1) == 2 {
+			close(started)
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				return nil, r.Context().Err()
+			}
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header),
+			Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"models":[{"slug":"%s-model","visibility":"list"}]}`, account)))}, nil
+	})}
+	p := New(Config{HTTPClient: client, CacheRoot: t.TempDir()})
+	first := auth.Credential{Type: auth.CredentialOAuth, Access: "access", AccountID: "first"}
+	if _, err := p.ListModelsWithCredential(t.Context(), first); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.RefreshModelsWithCredential(t.Context(), first)
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first account refresh did not start")
+	}
+	second := first
+	second.AccountID = "second"
+	if _, err := p.ListModelsWithCredential(t.Context(), second); err != nil {
+		t.Fatal(err)
+	}
+	release <- struct{}{}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if p.DefaultModel().ID != "second-model" {
+		t.Fatalf("late earlier-account request restored catalog: default=%s", p.DefaultModel().ID)
 	}
 }

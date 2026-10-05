@@ -29,6 +29,9 @@ type LimitError struct {
 	Provider string
 	Status   int
 	Message  string
+	// Kind and ResetsAt carry verified structured quota metadata, not estimates.
+	Kind     string
+	ResetsAt time.Time
 }
 
 // RetryKind distinguishes temporary transport outages from temporary provider

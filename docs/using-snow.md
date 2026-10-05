@@ -144,7 +144,7 @@ follow-up for work that can wait until the current response completes.
 Type `/` to open command completion. The essential commands are:
 
 In `/model`, type to search and press **Ctrl+R** to refresh provider catalogs.
-Opening the picker also refreshes expired Zen catalogs automatically. Cached
+Opening the picker also refreshes expired ChatGPT catalogs automatically. Cached
 models remain visible while discovery runs.
 
 | Command | Purpose |
@@ -156,7 +156,8 @@ models remain visible while discovery runs.
 | `/settings` | Open common model, UI, permission, capability, and update settings |
 | `/keybindings` | Inspect or edit global/project shortcuts |
 | `/permissions [mode]` | Inspect or set `ask`, `allow`, or `deny` |
-| `/login`, `/logout` | Manage provider credentials |
+| `/login`, `/logout` | Manage credentials; `/login chatgpt NAME` saves a separate named login |
+| `/account [name]` | Inspect or select ChatGPT accounts; `/account prefer NAME` saves the preferred alias |
 | `/default`, `/plan [prompt]` | Select collaboration mode |
 | `/goal [--budget N] [objective]` | Inspect or create a Thread Goal |
 | `/compact`, `/context` | Compact or inspect model context |
@@ -168,6 +169,44 @@ models remain visible while discovery runs.
 | `/trust [allow or deny]` | Inspect or update project trust |
 | `/debug [status or action]` | Inspect or control diagnostic capture |
 | `/quit` | Exit Snow |
+
+**Select a ChatGPT account.**
+
+Create additional aliases in the CLI with `snow login chatgpt --account NAME`.
+`snow accounts` (or `snow auth accounts chatgpt`) lists stored aliases and local
+authentication status without refreshing credentials or fetching models.
+`snow auth use chatgpt NAME` sets the global preference for future runtimes;
+`snow --provider chatgpt --account NAME` overrides it for one launch. Without
+an explicit selection or preference, the runtime uses `default`. CLI
+login/logout/auth check without `--account` always manage `default`.
+
+With ChatGPT active, `/account` opens a local-only picker. Use the arrow keys
+and Enter, or `/account NAME`, to select a stored account while idle and with
+no active subagents. Selection applies only to this runtime and refreshes the
+selected account's model catalog in the background. `/login` and `/logout`
+then use that alias. To add another account without leaving the TUI, use
+`/login chatgpt NAME` and authorize the other ChatGPT account. Saving does not
+switch the current runtime or replace its existing login. In `/account`, press
+**p** on an alias to make it preferred for future runs, or use
+`/account prefer NAME`; Enter still selects only for this runtime.
+The picker distinguishes authentication expiration from quota observed in this
+runtime; it does not verify active subscriptions or show estimated balances.
+
+Encrypted ChatGPT history cannot transfer to a different known identity.
+Selecting another account carries a bounded plain-text working-state checkpoint
+into a fresh account-bound context when saved private continuity requires it;
+no separate `/new` step is needed. You can continue the task rather than start
+with blank context. The exact previous conversation remains in `/sessions`.
+Logging into a replacement identity under the selected alias in the TUI uses the
+same handoff; token rotation and detached named login do not reset the context.
+If credentials changed externally, reselect the desired alias with `/account NAME`.
+The TUI does not replay thinking, images, provider-private blocks, or old account
+binding, discard/write unsaved `--no-session` history, or treat unrelated errors
+as a reason to create a new context. Child runtimes keep their
+creation-time account. Automatic rotation/failover is unavailable; nonempty
+fallback options are rejected. Dedicated web and public SDK/RPC account
+management remain deferred. See [ChatGPT authentication](https://github.com/elmissouri16/snow-core/blob/main/docs/chatgpt-auth.md)
+for alias rules and legacy/inherited-history restrictions.
 
 Use `/allow`, `/allow always`, or `/deny` only for the permission request that
 is currently visible. The shell permission picker names these choices **Allow once**,

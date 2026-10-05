@@ -134,9 +134,14 @@ type Options struct {
 	BuildVersion         string
 	// Updater overrides the release updater for tests and embedded TUI hosts.
 	// Constructing App never invokes it; only explicit app calls perform work.
-	Updater                 UpdateService
-	AuthPath                string
-	Provider                string
+	Updater  UpdateService
+	AuthPath string
+	Provider string
+	// Account selects a saved ChatGPT OAuth alias for this runtime only.
+	Account string
+	// AccountFallback is reserved for verified upstream quota failover. Nonempty
+	// values currently fail closed rather than rotate accounts on guessed errors.
+	AccountFallback         []string
 	Model                   string
 	APIKey                  string
 	Permission              string   // ask|allow|deny

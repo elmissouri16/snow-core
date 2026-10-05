@@ -345,7 +345,7 @@ func (m *Model) overlayUpdateOffer(frame string) string {
 }
 
 func (m *Model) anyUpdateBlockingModalVisible() bool {
-	return m.trustPending || m.permPending || m.userInputPending || m.loginModalVisible() || m.modelModalVisible() ||
+	return m.pickAccount || m.trustPending || m.permPending || m.userInputPending || m.loginModalVisible() || m.modelModalVisible() ||
 		m.thinkingModalVisible() || m.keybindingsModalVisible() || m.settingsModalVisible() || m.helpModalVisible() ||
 		m.processFleetOpen || m.subagentFleetOpen || m.confirmGoalReplace || m.planPrompt || m.pickFork ||
 		m.pickSession || m.pickTree || m.pickInfo || m.pickPermissionMode || m.sessionOpLoading

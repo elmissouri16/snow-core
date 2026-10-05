@@ -468,6 +468,9 @@ func Load(path string) (Config, error) {
 	if err := cfg.Processes.Validate(); err != nil {
 		return cfg, err
 	}
+	if err := cfg.ChatGPTAccounts.Validate(); err != nil {
+		return cfg, err
+	}
 	if err := cfg.Retry.Validate(); err != nil {
 		return cfg, err
 	}
@@ -664,6 +667,9 @@ func LoadProjectExtensions(path string) (ProjectExtensions, error) {
 
 // Save writes the config file (creating parent dirs).
 func Save(path string, cfg Config) error {
+	if err := cfg.ChatGPTAccounts.Validate(); err != nil {
+		return err
+	}
 	if path == "" {
 		return errors.New("config: empty path")
 	}

@@ -20,6 +20,7 @@ const (
 // as provider.Credential for adapters.
 type Credential struct {
 	Provider  string         `json:"-"`
+	Account   string         `json:"-"` // runtime alias, distinct from upstream AccountID
 	Type      CredentialType `json:"type"`
 	Key       string         `json:"key,omitempty"`
 	Access    string         `json:"access,omitempty"`
@@ -56,6 +57,12 @@ type Store interface {
 	Update(provider string, fn UpdateFunc) (Credential, bool, error)
 	// Path returns the store file path (for diagnostics; never print secrets).
 	Path() string
+}
+
+// AccountStore optionally enumerates persisted account aliases, including
+// "default" only when its storage entry exists. It never performs network I/O.
+type AccountStore interface {
+	Accounts(providerID string) ([]string, error)
 }
 
 // RefreshLockStore optionally serializes provider token refreshes separately

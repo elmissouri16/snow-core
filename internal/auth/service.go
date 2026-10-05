@@ -43,6 +43,7 @@ type Descriptor struct {
 // Status is a safe, normalized authentication status.
 type Status struct {
 	ProviderID  string
+	Account     string
 	State       AuthState
 	Method      CredentialType
 	Refreshable bool
@@ -82,6 +83,7 @@ var (
 	ErrUnknownProvider = errors.New("auth: unknown provider")
 	ErrLoginRequired   = errors.New("auth: login required")
 	ErrNotRefreshable  = errors.New("auth: credential is not refreshable")
+	ErrAccountChanged  = errors.New("auth: account identity changed or cannot be verified; start a new request")
 )
 
 // Service centralizes provider-scoped credential precedence and lifecycle.
@@ -185,6 +187,7 @@ func (s *Service) SetExplicit(providerID string, credential Credential) {
 		return
 	}
 	credential.Provider = providerID
+	credential.Account = "default"
 	s.explicit[providerID] = cloneCredential(credential)
 }
 
@@ -195,37 +198,57 @@ func (s *Service) explicitCredential(providerID string) (Credential, bool) {
 	return cloneCredential(credential), ok
 }
 
-func (s *Service) candidate(providerID string, descriptor Descriptor) (Credential, bool) {
-	if credential, ok := s.explicitCredential(providerID); ok {
-		return credential, true
+func (s *Service) candidate(providerID, account, key string, descriptor Descriptor) (Credential, bool) {
+	if account == "default" {
+		if credential, ok := s.explicitCredential(providerID); ok {
+			return bindAccount(credential, providerID, account), true
+		}
 	}
 	if s.store != nil {
-		if credential, ok := s.store.Get(providerID); ok && credential.Valid() {
-			credential.Provider = providerID
-			return credential, true
+		if credential, ok := s.store.Get(key); ok && credential.Valid() {
+			return bindAccount(credential, providerID, account), true
 		}
 	}
-	for _, name := range descriptor.Environment {
-		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
-			return Credential{Provider: providerID, Type: CredentialAPIKey, Key: value}, true
+	if account == "default" {
+		for _, name := range descriptor.Environment {
+			if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+				return Credential{Provider: providerID, Account: account, Type: CredentialAPIKey, Key: value}, true
+			}
 		}
 	}
-	return Credential{Provider: providerID}, false
+	return Credential{Provider: providerID, Account: account}, false
+}
+
+func bindAccount(credential Credential, providerID, account string) Credential {
+	credential.Provider = providerID
+	credential.Account = account
+	return credential
 }
 
 // Status performs local inspection only. It never refreshes or contacts a provider.
-func (s *Service) Status(_ context.Context, providerID string) (Status, error) {
+func (s *Service) Status(ctx context.Context, providerID string) (Status, error) {
+	return s.StatusAccount(ctx, providerID, "default")
+}
+
+// StatusAccount performs local inspection of one account without network I/O.
+func (s *Service) StatusAccount(_ context.Context, providerID, account string) (Status, error) {
+	key, err := AccountKey(providerID, account)
+	if err != nil {
+		return Status{}, err
+	}
+	account = normalizeAccount(account)
 	driver, err := s.driver(providerID)
 	if err != nil {
 		return Status{}, err
 	}
 	descriptor := normalizeDescriptor(driver.Descriptor())
-	credential, ok := s.candidate(providerID, descriptor)
+	credential, ok := s.candidate(providerID, account, key, descriptor)
 	if !ok {
-		return Status{ProviderID: providerID, State: StateMissing, Summary: "not configured"}, nil
+		return Status{ProviderID: providerID, Account: account, State: StateMissing, Summary: "not configured"}, nil
 	}
 	status, err := driver.Inspect(credential)
 	status.ProviderID = providerID
+	status.Account = account
 	if err != nil {
 		status.State = StateInvalid
 		if status.Summary == "" {
@@ -237,23 +260,33 @@ func (s *Service) Status(_ context.Context, providerID string) (Status, error) {
 }
 
 func (s *Service) Resolve(ctx context.Context, providerID string) (Credential, error) {
+	return s.ResolveAccount(ctx, providerID, "default")
+}
+
+// ResolveAccount resolves and, when needed, refreshes only the selected account.
+func (s *Service) ResolveAccount(ctx context.Context, providerID, account string) (Credential, error) {
+	key, err := AccountKey(providerID, account)
+	if err != nil {
+		return Credential{}, err
+	}
+	account = normalizeAccount(account)
 	driver, err := s.driver(providerID)
 	if err != nil {
 		return Credential{}, err
 	}
 	descriptor := normalizeDescriptor(driver.Descriptor())
-	credential, ok := s.candidate(providerID, descriptor)
+	credential, ok := s.candidate(providerID, account, key, descriptor)
 	if !ok {
 		if descriptor.Required {
 			return Credential{}, fmt.Errorf("%w for %s", ErrLoginRequired, providerID)
 		}
-		return Credential{Provider: providerID}, nil
+		return Credential{Provider: providerID, Account: account}, nil
 	}
 	// A stored OAuth access token may already be expired. Refresh it before
 	// validation, which otherwise rejects the token before rotation can run.
 	// Explicit credentials are not backed by the store and cannot be refreshed.
 	if driver.NeedsRefresh(credential, s.now()) {
-		if _, explicit := s.explicitCredential(providerID); !explicit {
+		if _, explicit := s.explicitCredential(providerID); account != "default" || !explicit {
 			credential, err = s.refresh(ctx, providerID, credential, RefreshExpiring)
 			if err != nil {
 				return Credential{}, err
@@ -270,7 +303,7 @@ func (s *Service) RefreshRejected(ctx context.Context, providerID string, reject
 	if _, err := s.driver(providerID); err != nil {
 		return Credential{}, err
 	}
-	if _, explicit := s.explicitCredential(providerID); explicit {
+	if _, explicit := s.explicitCredential(providerID); normalizeAccount(rejected.Account) == "default" && explicit {
 		return Credential{}, fmt.Errorf("%w for %s", ErrNotRefreshable, providerID)
 	}
 	if rejected.Type != CredentialOAuth || strings.TrimSpace(rejected.Refresh) == "" {
@@ -280,6 +313,11 @@ func (s *Service) RefreshRejected(ctx context.Context, providerID string, reject
 }
 
 func (s *Service) refresh(ctx context.Context, providerID string, supplied Credential, reason RefreshReason) (Credential, error) {
+	key, err := AccountKey(providerID, supplied.Account)
+	if err != nil {
+		return Credential{}, err
+	}
+	account := normalizeAccount(supplied.Account)
 	driver, err := s.driver(providerID)
 	if err != nil {
 		return Credential{}, err
@@ -288,11 +326,15 @@ func (s *Service) refresh(ctx context.Context, providerID string, supplied Crede
 		return Credential{}, fmt.Errorf("%w for %s: no persistent credential store", ErrLoginRequired, providerID)
 	}
 	refresh := func() (Credential, error) {
-		current, exists := s.store.Get(providerID)
+		current, exists := s.store.Get(key)
+		current = bindAccount(current, providerID, account)
 		if !exists {
 			return Credential{}, fmt.Errorf("%w for %s", ErrLoginRequired, providerID)
 		}
 		if reason == RefreshRejected && !sameCredential(current, supplied) {
+			if providerID == "chatgpt" && !sameAccountIdentity(current, supplied) {
+				return Credential{}, ErrAccountChanged
+			}
 			if err := driver.Validate(current); err != nil {
 				return Credential{}, err
 			}
@@ -305,11 +347,23 @@ func (s *Service) refresh(ctx context.Context, providerID string, supplied Crede
 		if err != nil {
 			return Credential{}, err
 		}
-		resolved, exists, err := s.store.Update(providerID, func(latest Credential, latestExists bool) (Credential, bool, error) {
+		if providerID == "chatgpt" && !sameCredential(next, current) {
+			currentIdentity, nextIdentity := AccountIdentity(current), AccountIdentity(next)
+			// A proactive refresh cannot replace an established identity. A
+			// rejection retry additionally requires positive identity continuity
+			// before replaying the original request under a changed token.
+			if currentIdentity != "" && currentIdentity != nextIdentity || reason == RefreshRejected && !sameAccountIdentity(next, supplied) {
+				return Credential{}, ErrAccountChanged
+			}
+		}
+		resolved, exists, err := s.store.Update(key, func(latest Credential, latestExists bool) (Credential, bool, error) {
 			if !latestExists {
 				return latest, false, nil
 			}
 			if !sameCredential(latest, current) {
+				if providerID == "chatgpt" && reason == RefreshRejected && !sameAccountIdentity(latest, supplied) {
+					return Credential{}, false, ErrAccountChanged
+				}
 				return latest, false, nil
 			}
 			return next, true, nil
@@ -320,27 +374,36 @@ func (s *Service) refresh(ctx context.Context, providerID string, supplied Crede
 		if !exists {
 			return Credential{}, fmt.Errorf("%w for %s: credential removed during refresh", ErrLoginRequired, providerID)
 		}
-		return resolved, nil
+		return bindAccount(resolved, providerID, account), nil
 	}
+	var resolved Credential
+	err = s.withCredentialLock(key, func() error {
+		var inner error
+		resolved, inner = refresh()
+		return inner
+	})
+	return resolved, err
+}
+
+func (s *Service) withCredentialLock(key string, fn func() error) error {
 	if coordinator, ok := s.store.(RefreshLockStore); ok {
-		var resolved Credential
-		err := coordinator.WithRefreshLock(providerID, func() error {
-			var inner error
-			resolved, inner = refresh()
-			return inner
-		})
-		return resolved, err
+		return coordinator.WithRefreshLock(key, fn)
 	}
 	s.refreshMu.Lock()
-	lock := s.refreshes[providerID]
+	lock := s.refreshes[key]
 	if lock == nil {
 		lock = &sync.Mutex{}
-		s.refreshes[providerID] = lock
+		s.refreshes[key] = lock
 	}
 	s.refreshMu.Unlock()
 	lock.Lock()
 	defer lock.Unlock()
-	return refresh()
+	return fn()
+}
+
+func sameAccountIdentity(left, right Credential) bool {
+	identity := AccountIdentity(left)
+	return identity != "" && identity == AccountIdentity(right)
 }
 
 func sameCredential(left, right Credential) bool {
@@ -348,33 +411,66 @@ func sameCredential(left, right Credential) bool {
 }
 
 func (s *Service) Login(ctx context.Context, providerID string, request LoginRequest, interaction Interaction) (Status, error) {
+	return s.LoginAccount(ctx, providerID, "default", request, interaction)
+}
+
+// LoginAccount validates and saves a credential to one account alias. The same
+// upstream ChatGPT identity cannot be stored under multiple aliases.
+func (s *Service) LoginAccount(ctx context.Context, providerID, account string, request LoginRequest, interaction Interaction) (Status, error) {
+	key, err := AccountKey(providerID, account)
+	if err != nil {
+		return Status{}, err
+	}
+	account = normalizeAccount(account)
 	driver, err := s.driver(providerID)
 	if err != nil {
 		return Status{}, err
+	}
+	if account != "default" && s.store != nil {
+		if _, ok := s.store.(AccountStore); !ok {
+			return Status{}, errors.New("auth: named account login requires a store with account enumeration")
+		}
 	}
 	credential, err := driver.Login(ctx, request, interaction)
 	if err != nil {
 		return Status{}, err
 	}
-	credential.Provider = providerID
+	credential = bindAccount(credential, providerID, account)
 	if err := driver.Validate(credential); err != nil {
 		return Status{}, err
 	}
 	if s.store == nil {
 		return Status{}, errors.New("auth: login requires a persistent credential store")
 	}
-	if err := s.store.Put(providerID, credential); err != nil {
+	err = s.withCredentialLock("login:"+providerID, func() error {
+		if providerID == "chatgpt" {
+			if err := s.rejectDuplicateAccount(driver, account, credential); err != nil {
+				return err
+			}
+		}
+		return s.store.Put(key, credential)
+	})
+	if err != nil {
 		return Status{}, err
 	}
-	return s.Status(ctx, providerID)
+	return s.StatusAccount(ctx, providerID, account)
 }
 
-func (s *Service) Logout(_ context.Context, providerID string) error {
+func (s *Service) Logout(ctx context.Context, providerID string) error {
+	return s.LogoutAccount(ctx, providerID, "default")
+}
+
+// LogoutAccount removes only the selected stored credential.
+func (s *Service) LogoutAccount(_ context.Context, providerID, account string) error {
+	key, err := AccountKey(providerID, account)
+	if err != nil {
+		return err
+	}
 	if _, err := s.driver(providerID); err != nil {
 		return err
 	}
 	if s.store == nil {
 		return nil
 	}
-	return s.store.Delete(providerID)
+	return s.store.Delete(key)
 }

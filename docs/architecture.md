@@ -425,7 +425,8 @@ and lifecycle.
 For a provider, the first match wins:
 
 1. Explicit API key or SDK option (`--api-key`, `Options.Credential`).
-2. The `auth.json` entry for that provider.
+2. The `auth.json` entry for that provider/account (`chatgpt` for default,
+   `chatgpt/account/<name>` for a named ChatGPT alias).
 3. A known environment fallback (`OPENCODE_API_KEY`).
 4. Otherwise, interactive `/login` (TUI) or a typed login-required error
    (headless).
@@ -433,13 +434,13 @@ For a provider, the first match wins:
 The agent does not resolve credentials. `auth.Service` resolves the
 credential, then the authenticated provider runtime supplies it to the
 registered transport for both model discovery and inference. A remote OAuth
-rejection can request one guarded provider-scoped refresh; API keys are not
+rejection can request one guarded provider/account-scoped refresh; API keys are not
 refreshable. Never print `Key`, `Access`, or `Refresh` values.
 
 ### Auth service and store
 
 `auth.Service` is the single owner of explicit/store/environment precedence,
-provider isolation, status, login/logout, persistence, refresh locking and
+provider/account isolation, status, login/logout, persistence, refresh locking and
 compare-and-swap token rotation, and reusable API-key or provider-local OAuth
 drivers. Auth stores are in-memory or atomic `~/.snow/auth.json` with `0600`
 permissions and redacting JSON.
@@ -449,11 +450,12 @@ type CredentialType string // api_key | oauth
 
 type Credential struct {
     Provider  string         `json:"-"`
+    Account   string         `json:"-"` // local alias, distinct from AccountID
     Type      CredentialType `json:"type"`
     Key       string         `json:"key,omitempty"`
     Access    string         `json:"access,omitempty"`
     Refresh   string         `json:"refresh,omitempty"`
-    Expires   int64          `json:"expires,omitempty"` // unix seconds
+    Expires   int64          `json:"expires,omitzero"` // unix seconds
     AccountID string         `json:"accountId,omitempty"`
     Extra     map[string]any `json:"extra,omitempty"`
 }
@@ -593,7 +595,7 @@ excluded, and provider errors redact active keys.
 
 `internal/provider/chatgpt` performs a side-effect-free credential check,
 browser PKCE and device-code login, compatible Codex/Pi/OpenCode credential
-imports, guarded automatic refresh, an origin-and-account-scoped ETag model
+imports, guarded automatic refresh, an origin-and-workspace/user-identity-scoped ETag model
 cache, and hardened Codex Responses SSE streaming with branch-scoped prompt
 affinity, zstd compression, structured retry advice and error diagnostics, and
 mandatory terminal events. The central agent retry coordinator schedules
@@ -605,13 +607,15 @@ receives the code on `localhost:1455/auth/callback`, or accepts the full
 callback URL when the port is occupied or the browser is remote. The code is
 exchanged for access/refresh tokens, `auth.json` is written atomically with
 mode `0600`, JWT/account metadata is validated without persisting the ID
-token, and the authenticated catalog is refreshed with only a same-account
-backend cache as its outage fallback. The pre-login bundled model list carries
+token. Default CLI login refreshes the authenticated catalog with only a
+same-account backend cache as its outage fallback; named CLI login does not
+fetch the default account's catalog. The pre-login bundled model list carries
 no guessed thinking efforts; selectable efforts and defaults appear only after
 backend discovery. ChatGPT discovery excludes Codex's `ultra` host preset
 because it enables host-side proactive multi-agent behavior and is not accepted
 as a Responses `reasoning.effort`. Before `Chat`, credentials expiring within five minutes
-are refreshed under the cross-process auth-store lock; a pre-stream 401
+are refreshed under an account-scoped cross-process refresh lock; the auth-store
+lock covers only fresh reads and compare-and-swap writes. A pre-stream 401
 permits one guarded forced refresh and retry. WebSocket continuation remains
 deferred.
 
@@ -624,6 +628,56 @@ preserves its original deadline; ETag revalidation renews freshness, and
 failed refreshes retain only a same-account compatible cache with a one-minute
 picker retry interval. `/model` reloads expired snapshots and Ctrl+R forces a
 refresh without changing the active selection.
+
+Named ChatGPT accounts are discovered from credential-store enumeration, not a
+configuration registry. `auth.Service` centralizes account-key validation,
+local status, account-scoped login/logout/resolution/refresh, and duplicate
+upstream-identity rejection. Runtime selection is `Options.Account`/CLI
+`--account`, global-only `chatgpt_accounts.preferred`, then legacy `default`;
+management commands without `--account` always target default. `/account`
+provides a manual idle-boundary TUI selector; opening its inventory is local-only,
+while explicit selection invalidates the old catalog and starts selected-account
+discovery. A typed continuity-only rejection allows the TUI to prepare a fresh
+store and commit it with the requested account through the normal app session
+lifecycle. The admitted transition validates credentials and an empty target,
+then seeds a bounded local working-state checkpoint from allowlisted visible
+content in the source's logical context. Complete original turns remain in the
+source; the target receives only text, never private blocks, thinking, image
+bytes, partial tool exchanges, or old account binding. The account commits only
+after fallible session operations. Selected-alias TUI login replacement enters
+the same handoff; same-identity refresh and detached login do not. Generation/
+source guards reject stale UI results; other errors never trigger this transition,
+and ephemeral history is neither discarded nor silently persisted. `/login chatgpt NAME` delegates scoped acquisition to
+`App.LoginChatGPTAccount` and saves without selecting it; only selected-alias
+login refreshes the runtime catalog. `/account prefer NAME` and the picker's
+**p** action persist the global preference without changing active selection.
+Child runtimes snapshot the selected alias; they do not follow later
+parent or global preference changes.
+
+Authentication expiration and observed quota are separate state. The
+credential-bound runtime records recognized quota failures only for the exact
+identity that received them; it neither probes balances nor infers remaining
+credit. Structured HTTP 429 `error.type=usage_limit_reached` is terminal with
+optional validated Unix-seconds `resets_at`; generic 429 remains retryable.
+This recognition follows official Codex source pinned at
+[447eac3b81183b32c1a09f5fba9617abfacbebe3](https://github.com/openai/codex/tree/447eac3b81183b32c1a09f5fba9617abfacbebe3).
+Automatic account failover remains explicitly unimplemented: nonempty
+`Options.AccountFallback`, `--account-fallback`, or global configured fallback
+fails closed. Upstream usage allowance and cross-account continuity are
+unverified; terms/help HTTP 403 research responses do not establish permission
+or prohibition. Dedicated web and public SDK/RPC account-management controls
+are also deferred; manager startup rejects account override flags.
+
+The shared request guard binds a known credential identity in durable session
+metadata before ChatGPT requests, including compaction. Saved opaque continuity
+cannot cross that binding on resume, branch/fork navigation, or manual account
+selection. Legacy unbound opaque ChatGPT history is permitted only on default
+with a known identity. Direct inherited children copy a known parent binding;
+legacy-restored or recursive inherited continuity without verified provenance
+fails closed (`fork_turns=none` creates independent context). The guard preserves
+append-only history rather than deleting encrypted state to enable a switch.
+See [ChatGPT authentication](chatgpt-auth.md#quota-observations-and-continuity)
+for operator guidance.
 
 ### Fake
 

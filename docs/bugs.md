@@ -1,5 +1,50 @@
 # Known bugs
 
+## BUG-268: Selected-account login leaves an incompatible ChatGPT conversation active
+
+- **Status:** Resolved — verified with selected-login identity replacement and subsequent mocked provider requests.
+- **Severity:** Medium
+- **Surface:** TUI ChatGPT OAuth completion and the next provider request.
+- **Evidence:** After a conversation has account-bound private continuity, logging into a different upstream identity under the selected alias reports success but leaves the original conversation active. The next request correctly fails its continuity guard. Manual `/account` selection previously handled this with an empty new conversation, but selected-alias login completion did not enter that transition at all. `TestSelectedChatGPTLoginReconcilesReplacedIdentity` reproduces the missing transition without network access to a real provider.
+- **Resolution:** Explicit selected-alias login replacement enters the admitted account/session handoff. A bounded local plain-text working checkpoint carries visible task/tool context into a fresh account-bound session; full original history remains untouched. Allowlisted input excludes private block fields, thinking, images, and executable tool exchanges. Incomplete source turns and unsaved sources remain protected. Same-identity rotation, detached named login, failed login, and existing active/queued-work gates do not reset the context. Every handoff requires model proof for the replacement identity, even under the same default alias.
+- **Verification:** `go test ./internal/app ./internal/tui -count=1 -timeout=90s` and focused handoff regressions passed. Mocked first requests after account switching and selected-login replacement carry the task checkpoint without private text/arguments/data. Exact source messages compare equal after reopening; incomplete turns and failed transitions preserve both selections. A withdrawn-model replacement is rejected before transport without model substitution.
+
+## BUG-267: TUI ChatGPT login silently ignores a supplied account alias
+
+- **Status:** Resolved — verified with named-login isolation regressions.
+- **Severity:** Medium
+- **Surface:** TUI `/login chatgpt NAME` parsing and OAuth credential persistence.
+- **Evidence:** `/login` accepted two arguments but the ChatGPT branch opened authorization without consuming the second. Supplying a named alias therefore still targeted the selected account, potentially replacing its credential instead of saving a separate login.
+- **Resolution:** Validate and snapshot the target alias before authorization, show it in the chooser/progress card, and delegate to app/auth account-scoped persistence. Saving another alias does not select it, alter global preference, refresh another account's catalog, or overwrite default credentials. Duplicate upstream identities remain rejected. Preference is a separate explicit `/account prefer NAME` or picker **p** action.
+- **Verification:** `go test ./internal/tui -count=1` and focused app/TUI race regressions passed. Mocked authorization verifies named storage, default preservation, duplicate rejection, cancellation, invalid aliases, preference persistence, picker labels, and failed-write preservation.
+
+## BUG-266: ChatGPT account selection reports unrelated provider discovery failures
+
+- **Status:** Resolved — verified with a TUI account-selection regression.
+- **Severity:** Low
+- **Surface:** TUI `/account` background catalog discovery.
+- **Evidence:** Selecting an authenticated ChatGPT alias called the all-provider catalog loader. An unavailable configured LM Studio profile therefore produced `account selected; model catalog: lm-studio: openai-compatible: model discovery request failed`, even when ChatGPT discovery succeeded. A local mocked ChatGPT catalog plus an inactive failing OpenAI-compatible endpoint reproduces the unrelated request/error path.
+- **Resolution:** Account selection loads only ChatGPT's catalog through the app facade, then publishes combined cached picker snapshots without changing the selected model. General model browsing retains all-provider discovery and its partial-error behavior.
+- **Verification:** `go test ./internal/tui -run TestAccountSelectionRefreshesCatalogAsyncWithoutChoosingModel -count=1` and `go test ./internal/app ./internal/tui` passed. The regression verifies zero inactive-provider requests/errors during account selection and separately verifies that explicit all-provider browsing exercises the failing fixture.
+
+## BUG-265: Account catalog refresh can retain a prior account's inventory
+
+- **Status:** Resolved — verified with account-change and out-of-order catalog regressions.
+- **Severity:** Medium
+- **Surface:** ChatGPT transport's retained model catalog during explicit account changes.
+- **Evidence:** The transport kept one in-memory model inventory; discovery for a different account could leave the earlier account's models visible while pending, and a late earlier-account response could overwrite the current inventory. Named-account routing makes the previously implicit single-account assumption invalid.
+- **Resolution:** Scope retained records, disk cache paths, stale fallback, and conditional ETags by stable workspace/user identity, clear inventory before a different-identity fetch, and ignore late records for another active identity. Version-1 workspace-only caches are invalidated. Distinct users in one workspace cannot inherit each other's catalog. The authenticated runtime additionally owns an identity-scoped catalog, refreshes same-ID capabilities, and verifies requested-model/effort availability for named/switched accounts without substituting models. A changed context window requires explicit model reselection so preflight and compaction cannot silently keep the prior account's budgets.
+- **Verification:** `go test ./internal/provider/chatgpt` and `go test -race ./internal/provider/chatgpt` passed with pending-refresh and out-of-order account regressions.
+
+## BUG-264: Structured ChatGPT quota exhaustion is treated as temporary throttling
+
+- **Status:** Resolved — verified with structured HTTP 429 classification regressions.
+- **Severity:** Medium
+- **Surface:** ChatGPT pre-stream HTTP error classification and automatic goal retry scheduling.
+- **Evidence:** HTTP 429 previously followed temporary rate-limit handling even when its bounded JSON body supplied a verified terminal Codex quota signal. The official Codex parser at commit `447eac3b81183b32c1a09f5fba9617abfacbebe3` recognizes `error.type == "usage_limit_reached"`, `usage_not_included`, and structured quota/billing codes; generic 429 is not evidence of exhausted subscription quota.
+- **Resolution:** Recognize those exact structured fields as terminal `LimitError` metadata. Accept a valid optional absolute Unix-seconds reset for `usage_limit_reached`; keep unknown/malformed/generic 429 retryable. Do not classify by message text or `code == "usage_limit_reached"` alone, and do not apply the HTTP contract to streamed failures. Automatic account rotation remains unavailable.
+- **Verification:** `go test ./internal/provider/chatgpt` and `go test -race ./internal/provider/chatgpt` passed, covering type/code distinctions, reset validation, bounded input, and diagnostic redaction.
+
 ## BUG-263: Generated Chat Completions tool-call IDs can collide with wire IDs
 
 - **Status:** Resolved — verified with focused, race, and built-binary localhost regressions.

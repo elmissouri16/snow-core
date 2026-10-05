@@ -17,6 +17,13 @@ func (m *Model) switchSession(st session.Store) error {
 	if err := m.app.SetSession(st); err != nil {
 		return err
 	}
+	m.resetSessionProjection()
+	return nil
+}
+
+// resetSessionProjection follows a committed app session transition. It also
+// serves the atomic session/account switch without rebinding the store twice.
+func (m *Model) resetSessionProjection() {
 	m.fenceRootTurnProjection()
 	m.startupResumeRequired = false
 	m.pickSession = false
@@ -77,7 +84,6 @@ func (m *Model) switchSession(st session.Store) error {
 		}
 		m.pushLine(styleFooter.Render(fmt.Sprintf("Resume %s goal? Use /goal resume to continue.", m.goal.Status)))
 	}
-	return nil
 }
 
 func (m *Model) inlineSessionKey() string {

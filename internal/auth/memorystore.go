@@ -6,9 +6,11 @@ import (
 
 // MemoryStore is a non-persistent Store for tests and SDK ephemeral use.
 type MemoryStore struct {
-	mu   sync.RWMutex
-	m    map[string]Credential
-	path string
+	mu        sync.RWMutex
+	m         map[string]Credential
+	path      string
+	refreshMu sync.Mutex
+	refreshes map[string]*sync.Mutex
 }
 
 // NewMemoryStore creates an empty in-memory store.
@@ -60,3 +62,31 @@ func (s *MemoryStore) Update(provider string, fn UpdateFunc) (Credential, bool, 
 
 // Path implements Store.
 func (s *MemoryStore) Path() string { return s.path }
+
+// Accounts enumerates only persisted aliases.
+func (s *MemoryStore) Accounts(providerID string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return storedAccounts(providerID, s.m), nil
+}
+
+// WithRefreshLock coordinates refresh and login across services sharing a store
+// without holding the credential map lock during network operations.
+func (s *MemoryStore) WithRefreshLock(key string, fn func() error) error {
+	if fn == nil {
+		return nil
+	}
+	s.refreshMu.Lock()
+	if s.refreshes == nil {
+		s.refreshes = make(map[string]*sync.Mutex)
+	}
+	lock := s.refreshes[key]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		s.refreshes[key] = lock
+	}
+	s.refreshMu.Unlock()
+	lock.Lock()
+	defer lock.Unlock()
+	return fn()
+}

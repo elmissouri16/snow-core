@@ -58,6 +58,16 @@ func (a *App) bindPermissionSession(st session.Store) error {
 // SetSession switches the active durable conversation store. The old store is
 // closed only after the agent accepts the new store.
 func (a *App) SetSession(st session.Store) error {
+	return a.setSession(context.Background(), st, "")
+}
+
+func (a *App) setSession(ctx context.Context, st session.Store, chatGPTAccount string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := a.Agent.QueueControlTransitionReady(); err != nil {
 		return err
 	}
@@ -73,7 +83,10 @@ func (a *App) SetSession(st session.Store) error {
 	}
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
-	unlockAdmission := a.Agent.LockAdmission()
+	unlockAdmission, admissionErr := a.Agent.LockAdmissionContext(ctx)
+	if admissionErr != nil {
+		return admissionErr
+	}
 	defer unlockAdmission()
 	if err := a.Agent.QueueControlTransitionReady(); err != nil {
 		return err
@@ -84,6 +97,24 @@ func (a *App) SetSession(st session.Store) error {
 	if st == nil {
 		return fmt.Errorf("app: session is nil")
 	}
+	var accountRuntime *provider.Authenticated
+	if chatGPTAccount != "" {
+		var err error
+		accountRuntime, _, err = a.chatGPTAccountSelectionAdmitted(ctx, chatGPTAccount)
+		if err != nil {
+			return err
+		}
+		messages, err := st.Messages()
+		if err != nil {
+			return err
+		}
+		if len(messages) != 0 || st == a.Session {
+			return errors.New("app: account transition requires a fresh session")
+		}
+		if err := a.seedChatGPTAccountHandoff(ctx, st); err != nil {
+			return err
+		}
+	}
 	if err := a.Goal.ValidateStore(st); err != nil {
 		return err
 	}
@@ -91,9 +122,12 @@ func (a *App) SetSession(st session.Store) error {
 		return err
 	}
 	change := a.pluginTransitionRequest("set_session", st)
-	ctx, cancel := pluginSessionChangeContext()
+	pluginCtx, cancel := pluginSessionChangeContext()
 	defer cancel()
-	if err := a.beforePluginSessionChange(ctx, change); err != nil {
+	if err := a.beforePluginSessionChange(pluginCtx, change); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	old := a.Session
@@ -148,6 +182,13 @@ func (a *App) SetSession(st session.Store) error {
 			}
 			return errors.Join(err, errors.Join(rollbackErrs...))
 		}
+	}
+	if accountRuntime != nil {
+		// The name was validated before any session mutation; SetAccount's
+		// only error path is invalid syntax. Commit after all fallible rebinding.
+		_ = accountRuntime.SetAccount(chatGPTAccount)
+		accountRuntime.RequireAccountModelValidation()
+		a.clearProviderCatalogLocked("chatgpt")
 	}
 	a.Agent.ResetTurnIdentityAdmitted()
 	a.Session = st

@@ -317,3 +317,15 @@ func (f *FileStore) withExclusiveLock(fn func() error) error {
 	defer unlockFile(lock)
 	return fn()
 }
+
+// Accounts enumerates persisted aliases. Unlike Get, corrupt-store errors are
+// returned so callers cannot treat a damaged store as an empty account list.
+func (f *FileStore) Accounts(providerID string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m, err := f.loadCached()
+	if err != nil {
+		return nil, err
+	}
+	return storedAccounts(providerID, m), nil
+}

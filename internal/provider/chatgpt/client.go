@@ -53,6 +53,7 @@ type Provider struct {
 	now               func() time.Time
 	modelsMu          sync.RWMutex
 	models            []modelRecord
+	catalogAccount    string
 	catalogRefreshAt  time.Time
 	catalogRevision   uint64
 	authRefreshMu     sync.RWMutex

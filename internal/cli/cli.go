@@ -63,6 +63,8 @@ func run() error {
 	root.PersistentFlags().String("rpc-startup", "eager", "RPC startup: eager|catalog|control (catalog and control never activate an agent)")
 	root.PersistentFlags().String("collaboration-mode", "", "collaboration mode: default|plan")
 	root.PersistentFlags().String("provider", "", "provider id or named OpenAI-compatible profile")
+	root.PersistentFlags().String("account", "", "ChatGPT account alias (uses global preferred account, then default)")
+	root.PersistentFlags().StringSlice("account-fallback", nil, "ChatGPT fallback aliases (automatic failover is not yet supported)")
 	root.PersistentFlags().String("model", "", "model id")
 	root.PersistentFlags().String("api-key", "", "explicit API key (overrides auth.json and env)")
 	root.PersistentFlags().String("permission", "", "permission mode: ask|allow|deny")
@@ -97,6 +99,7 @@ func run() error {
 	root.AddCommand(forkCmd())
 	root.AddCommand(forkWorktreeCmd())
 	root.AddCommand(authCmd())
+	root.AddCommand(accountsCmd())
 	root.AddCommand(loginCmd())
 	root.AddCommand(logoutCmd())
 	root.AddCommand(skillsCmd())
@@ -176,12 +179,12 @@ func authCmd() *cobra.Command {
 		Use:   "auth",
 		Short: "Inspect provider authentication",
 	}
-	cmd.AddCommand(authCheckCmd())
+	cmd.AddCommand(authCheckCmd(), accountsCmd(), authUseCmd())
 	return cmd
 }
 
 func authCheckCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "check <provider>",
 		Short: "Check whether a provider credential is configured",
 		Args:  cobra.ExactArgs(1),
@@ -203,20 +206,24 @@ func authCheckCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			status, err := service.Status(cmd.Context(), provider)
+			account, _ := cmd.Flags().GetString("account")
+			label := authAccountLabel(provider, account)
+			status, err := service.StatusAccount(cmd.Context(), provider, account)
 			if err != nil {
-				return fmt.Errorf("auth check %s: %w", provider, err)
+				return fmt.Errorf("auth check %s: %w", label, err)
 			}
 			if !status.Configured() {
-				return fmt.Errorf("auth check %s: not authenticated", provider)
+				return fmt.Errorf("auth check %s: not authenticated", label)
 			}
-			fmt.Printf("%s: %s\n", provider, status.Summary)
+			fmt.Fprintln(cmd.OutOrStdout(), label+": "+status.Summary)
 			if status.State == auth.StateExpired {
-				return fmt.Errorf("auth check %s: credential expired", provider)
+				return fmt.Errorf("auth check %s: credential expired", label)
 			}
 			return nil
 		},
 	}
+	cmd.Flags().String("account", "default", "ChatGPT account alias to inspect")
+	return cmd
 }
 
 // loginCmd stores API-key or OAuth credentials in auth.json.
@@ -227,6 +234,10 @@ func loginCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			provider := args[0]
+			account, _ := cmd.Flags().GetString("account")
+			if _, err := auth.AccountKey(provider, account); err != nil {
+				return err
+			}
 			authPath, _ := cmd.Flags().GetString("auth")
 			if authPath == "" {
 				_, authPath, _ = config.DefaultPaths()
@@ -285,12 +296,17 @@ func loginCmd() *cobra.Command {
 			}
 			loginCtx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer cancel()
-			status, err := service.Login(loginCtx, provider, auth.LoginRequest{Method: method}, cliAuthInteraction{openBrowser: !noOpen})
+			status, err := service.LoginAccount(loginCtx, provider, account, auth.LoginRequest{Method: method}, cliAuthInteraction{openBrowser: !noOpen})
 			if err != nil {
 				return err
 			}
 			if provider == chatgpt.ProviderID {
-				fmt.Println(provider + ": " + status.Summary)
+				fmt.Fprintln(cmd.OutOrStdout(), authAccountLabel(provider, account)+": "+status.Summary)
+				// The legacy catalog store is default-scoped. Never refresh a
+				// different account after a successful named login.
+				if account != "" && account != "default" {
+					return nil
+				}
 				catalog := chatgpt.New(chatgpt.Config{Store: store, CacheRoot: filepath.Join(config.GlobalDir(), "cache", "chatgpt-models")})
 				if models, catalogErr := catalog.RefreshModels(loginCtx); catalogErr == nil {
 					fmt.Printf("loaded %d ChatGPT models\n", len(models))
@@ -303,6 +319,7 @@ func loginCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().String("account", "default", "ChatGPT account alias to sign in (duplicate upstream identities are rejected)")
 	cmd.Flags().String("name", "", "save an OpenAI-compatible endpoint as this provider profile")
 	cmd.Flags().Bool("device-code", false, "use ChatGPT device-code login")
 	cmd.Flags().Bool("no-open", false, "do not launch a browser automatically")
@@ -362,6 +379,8 @@ func buildOptions(cmd *cobra.Command) (app.Options, error) {
 	opts := app.Options{BuildVersion: version,
 		CWD: mustCWD()}
 	opts.Provider, _ = cmd.Flags().GetString("provider")
+	opts.Account, _ = cmd.Flags().GetString("account")
+	opts.AccountFallback, _ = cmd.Flags().GetStringSlice("account-fallback")
 	opts.Model, _ = cmd.Flags().GetString("model")
 	opts.APIKey, _ = cmd.Flags().GetString("api-key")
 	opts.Permission, _ = cmd.Flags().GetString("permission")

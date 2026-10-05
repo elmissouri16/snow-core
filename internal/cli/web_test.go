@@ -14,6 +14,8 @@ import (
 func TestCLIWebRejectsUnsupportedFlagsBeforeStartup(t *testing.T) {
 	for _, args := range [][]string{
 		{"--mode", "web", "--provider", "fake"},
+		{"--mode", "web", "--account", "work"},
+		{"--mode", "web", "--account-fallback", "personal,default"},
 		{"--mode", "web", "--no-session"},
 		{"--mode", "web", "-p", "hello"},
 		{"--mode", "web", "--mcp", "/missing/manifest.json"},
