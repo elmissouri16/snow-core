@@ -58,6 +58,9 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Changed
 
+- The Web composer's permission shield now shows the session policy in the
+  icon itself (a green check for Allow, a red cross for Deny, an amber mark
+  for Ask), so the state stays visible at widths where its label collapses.
 - Clicks in the Web Manager answer instantly: every button and list row has a
   pressed state, a clicked sidebar session is highlighted with a spinner until
   its conversation is open, a slim progress bar appears for any navigation

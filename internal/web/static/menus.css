@@ -50,6 +50,10 @@
 .telemetry-menu .session-cost-note { grid-column: 1 / -1; margin: 0; }
 .telemetry-menu [data-known=false] { color: var(--muted); }
 .permission-policy-trigger { flex: none; }
+/* Permission state stays readable when the label is collapsed to the icon. */
+.permission-policy-trigger.is-policy-allow .policy-icon { color: var(--success); }
+.permission-policy-trigger.is-policy-deny .policy-icon { color: var(--danger); }
+.permission-policy-trigger.is-policy-ask .policy-icon { color: var(--warning); }
 .mode-short { display: none; }
 .permission-policy-dialog .checkbox-label { margin: 16px 0; align-items: flex-start; }
 @container (max-width: 460px) { .permission-policy-trigger [data-permission-policy-label] { display: none; } }

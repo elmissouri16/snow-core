@@ -18,9 +18,16 @@ export function Heading({c}: Props) {
 }
 export function Leading({c}: Props) {
   const mode = c.snapshot.mode, modeLabel = mode === 'plan' ? 'Plan Mode' : mode === 'default' ? 'Default' : 'Mode unknown';
-  const policy = c.controls.verified && ['idle', 'running', 'permission', 'input'].includes(c.snapshot.status) && isPolicy(c.snapshot.permission_mode) ? policies[c.snapshot.permission_mode] : 'Unknown';
+  const policyKey = c.controls.verified && ['idle', 'running', 'permission', 'input'].includes(c.snapshot.status) && isPolicy(c.snapshot.permission_mode) ? c.snapshot.permission_mode : null;
+  const policy = policyKey ? policies[policyKey] : 'Unknown';
   return <>
-    {c.policy && <Trigger c={c} kind="permission-policy" className="permission-policy-trigger" label={`Session permissions: ${policy}`} title={`Session permissions: ${policy} · not a sandbox`} disabled={!c.canSetPolicy()}><Icon name="shield" /><span data-permission-policy-label="">{policy}</span><Icon name="chevron" /></Trigger>}
+    {c.policy && <Trigger c={c} kind="permission-policy" className={`permission-policy-trigger is-policy-${policyKey || 'unknown'}`} label={`Session permissions: ${policy}`} title={`Session permissions: ${policy} · not a sandbox`} disabled={!c.canSetPolicy()}>
+      {/* The glyph carries the state because the label collapses at medium widths: a check for Allow, a cross for Deny, a mark for Ask. */}
+      <svg className="icon policy-icon" viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" data-permission-policy-glyph={policyKey || 'unknown'}>
+        <path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3Z" />
+        {policyKey === 'allow' ? <path d="m9 12 2.2 2.2L15.5 9.8" /> : policyKey === 'deny' ? <path d="m9.5 9.5 5 5m0-5-5 5" /> : policyKey === 'ask' ? <path d="M12 8.5v4m0 3h.01" /> : null}
+      </svg>
+      <span data-permission-policy-label="">{policy}</span><Icon name="chevron" /></Trigger>}
     {c.workflow ? <Trigger c={c} kind="mode" label={`Collaboration mode: ${modeLabel}`}><span data-mode-label="">{modeLabel}</span><span className="mode-short" data-mode-short="" aria-hidden="true">{mode === 'plan' ? 'Plan' : mode === 'default' ? 'Default' : 'Mode'}</span><Icon name="chevron" /></Trigger> : <span className="workspace-chip" title={c.projectPath}>{c.projectName}</span>}
   </>;
 }
