@@ -81,6 +81,7 @@ export function init({root, key, instance, request, changed = () => {}, error = 
         if (!alive() || !item || item.previewURL !== url || image.getAttribute('src') !== url || !container.contains(image)) return;
         releasePreview(item); item.previewFailed = true; paint(); },
       choose: choice => { if (query && validQuery(query) && rows.includes(choice) && !choice.disabled) choice.choose(); },
+      hover: index => { if (popupVisible && index >= 0 && index < rows.length) select(index, false); },
       addFiles, attach: () => { if (canAdd()) refs.input.current?.click(); }, menu: openPlusMenu,
       marker: marker => { if (!plusMenu || !canRead() || marker === '@' && draft.items.length >= 8) return; closePlusMenu(); insertMarker(marker); },
       menuKey: event => {
@@ -209,10 +210,12 @@ export function init({root, key, instance, request, changed = () => {}, error = 
     if (!reopen) close();
     return true;
   }
-  function select(index: number) {
+  /** Keyboard selection reveals the row; pointer hover and repositioning must not fight the user's own scrolling. */
+  function select(index: number, reveal = true) {
+    if (index === selected && !reveal) return;
     selected = index; publish();
     const popup = refs.popup.current, row = popup?.querySelectorAll<HTMLElement>('[role="option"]')[selected];
-    if (row && popup) {
+    if (reveal && row && popup) {
       if (row.offsetTop < popup.scrollTop) popup.scrollTop = row.offsetTop;
       else if (row.offsetTop + row.offsetHeight > popup.scrollTop + popup.clientHeight) popup.scrollTop = row.offsetTop + row.offsetHeight - popup.clientHeight;
     }
@@ -241,7 +244,6 @@ export function init({root, key, instance, request, changed = () => {}, error = 
     const actualHeight = Math.min(popup.offsetHeight, clearance, 320);
     popupStyle = {...popupStyle, top: `${Math.max(top, Math.min(below ? anchor : anchor - actualHeight, bottom - actualHeight))}px`};
     publish();
-    select(selected);
   }
   function show(current: Query, choices: Choice[], note = "", isHeading = false) {
     if (!validQuery(current)) return;
@@ -394,8 +396,15 @@ export function init({root, key, instance, request, changed = () => {}, error = 
     localError = ""; notify();
   }
   const reposition = () => { position(); positionMenu(); };
+  // Scrolling inside the popup or the add-context menu moves nothing else, so
+  // it must not re-anchor the popup (which previously snapped it back to the top).
+  const repositionOnScroll = (event: Event) => {
+    const target = event.target;
+    if (target instanceof Node && (refs.popup.current?.contains(target) || refs.menu.current?.contains(target))) return;
+    reposition();
+  };
   window.addEventListener?.("resize", reposition, options);
-  window.addEventListener?.("scroll", reposition, {...options, capture: true});
+  window.addEventListener?.("scroll", repositionOnScroll, {...options, capture: true});
   window.visualViewport?.addEventListener("resize", reposition, options);
   window.visualViewport?.addEventListener("scroll", reposition, options);
   if (window.ResizeObserver) {

@@ -16,7 +16,7 @@ export type Presentation = {
 };
 export type Actions = {
   remove(item: Item): void; previewError(item: Item, url: string, image: HTMLImageElement): void;
-  choose(choice: Choice): void; addFiles(files: FileList): void; attach(): void; menu(): void;
+  choose(choice: Choice): void; hover(index: number): void; addFiles(files: FileList): void; attach(): void; menu(): void;
   marker(marker: string): void; menuKey(event: KeyboardEvent<HTMLDivElement>): void;
 };
 export type Refs = {input: RefObject<HTMLInputElement | null>; attach: RefObject<HTMLButtonElement | null>; trigger: RefObject<HTMLButtonElement | null>; popup: RefObject<HTMLDivElement | null>; menu: RefObject<HTMLDivElement | null>};
@@ -34,7 +34,7 @@ export function ContextPanel({state: s, actions: a, refs}: {state: Presentation;
     <div id="composer-mentions" className="composer-mentions" data-composer-mentions role="listbox" aria-label="Commands, files, folders, and installed skills" hidden={!s.popupVisible} ref={refs.popup} style={s.popupStyle}>
       {s.message && <div className={s.heading ? 'composer-mention-heading' : 'composer-mention-note'}>{s.message}</div>}
       {s.rows.map((choice, index) => <div key={choice.id} id={choice.id} className="composer-mention-option" role="option" aria-selected={index === s.selected} aria-disabled={choice.disabled || undefined} data-composer-skills-retry={choice.retrySkills ? '' : undefined}
-        title={[choice.title || choice.label, choice.fullDescription ?? choice.description].filter(Boolean).join(' — ')} onMouseDown={event => event.preventDefault()} onClick={() => a.choose(choice)}>
+        title={[choice.title || choice.label, choice.fullDescription ?? choice.description].filter(Boolean).join(' — ')} onMouseDown={event => event.preventDefault()} onMouseMove={() => a.hover(index)} onClick={() => a.choose(choice)}>
         <MentionIcon kind={choice.folder ? 'folder' : s.marker === '$' ? 'skill' : s.marker === '/' ? 'command' : 'file'} />
         <span className="composer-mention-main"><span className="composer-mention-name" title={choice.label}>{choice.label}</span>
           {choice.description && <span className="composer-mention-description" title={choice.fullDescription ?? choice.description}>{choice.description}</span>}

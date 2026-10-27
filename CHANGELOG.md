@@ -31,6 +31,10 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Fixed
 
+- The Web composer's `$`, `/`, and `@` suggestion popup can be scrolled with the
+  mouse wheel or touch again; it no longer snaps back to the selected row on
+  every scroll, and hovering a row moves the selection without moving the list
+  (BUG-272).
 - Admit cross-site top-level navigations to the Web Manager (a typed URL,
   bookmark, or link from another site) instead of answering "Cross-site
   request rejected"; cross-site fetches, embeds, and forms stay rejected.

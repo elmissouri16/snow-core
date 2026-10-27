@@ -1,5 +1,14 @@
 # Known bugs
 
+## BUG-272: Scrolling the Web composer's suggestion popup snaps back to the selected row
+
+- **Status:** Resolved — verified in a headless browser against the running manager.
+- **Severity:** Medium
+- **Surface:** The `$`, `/`, and `@` suggestion popup above the Web composer whenever it holds more rows than fit (for example a long installed-skill list).
+- **Evidence:** The popup re-anchors itself on every captured `scroll` event, including the popup's own, and re-anchoring ended by revealing the keyboard-selected row. With row 0 selected, every wheel tick that moved the list was immediately undone, so the list jumped back to the top and could not be scrolled by mouse or touch.
+- **Resolution:** Scroll events that originate inside the popup or the add-context menu no longer reposition it; repositioning no longer reveals the selected row (only keyboard navigation does); hovering a row moves the selection without moving the list.
+- **Verification:** Headless check against the live manager: six wheel ticks left the list at the same offset after 600 ms, hover moved the selection in place, arrow keys still reveal, and page scrolling left the popup untouched. `npm test` (132) and `go test ./internal/web` pass.
+
 ## BUG-271: A runtime that started without a catalog never leaves the placeholder model
 
 - **Status:** Resolved — verified with an app regression.
