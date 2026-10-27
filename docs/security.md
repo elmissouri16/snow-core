@@ -303,6 +303,18 @@ Attention takeovers preserve prompt/question drafts in bounded tab memory and
 use the existing permission/question brokers. Stop cancels the whole turn;
 UI paging, recommended labels and collapse never grant authority or send answers.
 
+### On-device dictation
+
+Dictation runs the Whistle speech model in the browser with WebAssembly; the
+microphone stream stays in the page and only the transcript enters the draft.
+The model file is the one outbound download the manager ever makes, and only
+on an explicit, confirmed browser request: it fetches a pinned Hugging Face
+revision, verifies size and SHA-256 before keeping anything, stores the file
+under the manager directory, and serves it to paired browsers only. The CSP
+adds `'wasm-unsafe-eval'` (WebAssembly compilation, not script eval) and
+`worker-src 'self'`; `Permissions-Policy` allows the microphone for the
+manager's own origin only.
+
 Do not publish the manager to the public Internet. The ordinary
 **trusted-LAN HTTP** profile binds one assigned private address and exact
 `http://<address>:7331` origin automatically, plus an exact `127.0.0.1:7331`

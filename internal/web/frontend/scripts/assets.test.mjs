@@ -53,7 +53,7 @@ test('asset verification rejects symlinks instead of following them', async (t) 
 test('notices retain full license text and use validated locked installed versions', async (t) => {
   const root = await fixture(t);
   const lock = { packages: {} };
-  const packages = ['react', 'react-dom', 'scheduler'];
+  const packages = ['react', 'react-dom', 'scheduler', 'cactus-needle'];
   for (const [index, name] of packages.entries()) {
     const metadata = { name, version: `1.2.${index}`, license: 'MIT' };
     lock.packages[`node_modules/${name}`] = metadata;

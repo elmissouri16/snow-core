@@ -131,7 +131,7 @@ func TestReactBootstrapEmptyAndBounded(t *testing.T) {
 func TestReactGeneratedAssetRoutesAndHead(t *testing.T) {
 	s := testShell(t)
 	for name, mime := range map[string]string{
-		"app.js": "text/javascript; charset=utf-8", "THIRD-PARTY-NOTICES.txt": "text/plain; charset=utf-8",
+		"app.js": "text/javascript; charset=utf-8", "THIRD-PARTY-NOTICES.txt": "text/plain; charset=utf-8", "app.wasm": "application/wasm",
 	} {
 		w := request(t, s, http.MethodGet, "/static/generated/"+name, nil)
 		want, err := assets.ReadFile("static/generated/" + name)
@@ -142,7 +142,8 @@ func TestReactGeneratedAssetRoutesAndHead(t *testing.T) {
 			t.Fatalf("generated %s: status=%d MIME=%q", name, w.Code, w.Header().Get("Content-Type"))
 		}
 		csp := w.Header().Get("Content-Security-Policy")
-		if !strings.Contains(csp, "script-src 'self'") || strings.Contains(csp, "unsafe-") || w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("Cache-Control") != "no-cache" || w.Header().Get("ETag") == "" {
+		// 'wasm-unsafe-eval' admits WebAssembly compilation only; no script eval.
+		if !strings.Contains(csp, "script-src 'self' 'wasm-unsafe-eval'") || strings.Contains(strings.ReplaceAll(csp, "'wasm-unsafe-eval'", ""), "unsafe-") || w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("Cache-Control") != "no-cache" || w.Header().Get("ETag") == "" {
 			t.Fatalf("asset protections changed: %v", w.Header())
 		}
 	}

@@ -429,11 +429,20 @@ what is on screen, not the whole saved session.
 
 #### Dictation
 
-On the local URL in Chrome, Edge, or Safari, the microphone button in the
-composer dictates into the draft through the browser's own speech recognition.
-The browser, not Snow, handles the audio; the button is absent where speech
-recognition is unavailable or the origin is not a secure context (the
-trusted-LAN URL).
+The microphone button in the composer dictates into the draft with the
+Whistle speech model (Cactus Compute, Apache-2.0) running **inside the
+browser** with WebAssembly, so audio never leaves the device and no cloud
+speech service is involved. English, German, French, Spanish, Italian, Dutch
+and Polish are recognized automatically.
+
+The first click asks to download the 17 MB model. The host, not the browser,
+fetches it once from huggingface.co, verifies its pinned checksum, keeps it in
+the manager directory, and serves it to every paired browser; browsers cache
+it after the first load. Nothing is downloaded until you confirm. While you
+speak, confirmed words land in the draft and the current phrase follows them;
+click the button again to stop. The button is absent where the origin is not
+a secure context (the trusted-LAN URL) or the browser lacks WebAssembly
+workers or microphone capture.
 
 #### Live turn indicator
 

@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -78,6 +79,7 @@ func Run(ctx context.Context, opts Options, output io.Writer) error {
 		}
 		defer registry.Close()
 		shell.registry = registry
+		shell.speech = newSpeechStore(filepath.Join(registry.path, "models"))
 		if err := shell.restoreAccess(ctx, registry); err != nil {
 			return err
 		}

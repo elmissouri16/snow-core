@@ -355,7 +355,9 @@ func TestPairingAndPages(t *testing.T) {
 		if w.Header().Get("Referrer-Policy") != "same-origin" {
 			t.Fatal("normal browser form POSTs require same-origin referrer policy (BUG-090)")
 		}
-		if w.Header().Get("Cache-Control") != "no-store" || strings.Contains(w.Header().Get("Content-Security-Policy"), "unsafe-") {
+		// 'wasm-unsafe-eval' admits WebAssembly compilation for on-device
+		// dictation only; script eval stays forbidden.
+		if csp := w.Header().Get("Content-Security-Policy"); w.Header().Get("Cache-Control") != "no-store" || strings.Contains(strings.ReplaceAll(csp, "'wasm-unsafe-eval'", ""), "unsafe-") || !strings.Contains(csp, "worker-src 'self'") {
 			t.Fatal("missing sensitive cache/CSP protection")
 		}
 	}

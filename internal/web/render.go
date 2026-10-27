@@ -43,6 +43,7 @@ type shell struct {
 	registry       *Registry
 	catalog        Catalog
 	runtimes       RuntimeBackend
+	speech         *speechStore
 	hostSettings   HostSettingsBackend
 	operations     *ProjectOperations
 	projectControl sync.Mutex // Serial admission of activation versus registration removal.
@@ -154,6 +155,9 @@ func (s *shell) handlerForBoundary(boundary requestBoundary) http.Handler {
 	mux.HandleFunc("POST /projects/folders", s.hostFolders)
 	mux.HandleFunc("POST /projects/{project}/remove", s.removeProject)
 	mux.HandleFunc("POST /settings/projects-dir", s.saveProjectsDir)
+	mux.HandleFunc("GET /speech/status", s.speechStatus)
+	mux.HandleFunc("POST /speech/download", s.speechDownload)
+	mux.HandleFunc("GET /speech/model", s.speechModel)
 	mux.HandleFunc("GET /activity", s.managerActivity)
 	s.registerOrganizationRoutes(mux)
 	s.registerProcessControlRoutes(mux)
@@ -185,10 +189,12 @@ func (s *shell) handlerForBoundary(boundary requestBoundary) http.Handler {
 		// same-origin preserves our strict Origin check without external referrers.
 		w.Header().Set("Referrer-Policy", "same-origin")
 		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		// The microphone stays same-origin only: on-device dictation captures audio
+		// for the WebAssembly engine; no embedded document can ask for it.
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(self), geolocation=()")
 		// blob: is only for local composer object-URL previews; saved/sent images
 		// use authenticated same-origin reads. Data and external images stay blocked.
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'")
 		source, admitted := boundary.network.admit(r)
 		if !admitted || r.Host != boundary.host || r.URL.IsAbs() || len(r.Header.Values("Origin")) > 1 {
 			http.Error(w, "Unexpected host or origin", http.StatusForbidden)
@@ -337,8 +343,14 @@ var staticAssets = sync.OnceValue(func() map[string]*staticAsset {
 		panic(err)
 	}
 	for _, entry := range entries {
-		if name := entry.Name(); !entry.IsDir() && generatedChunkName(name) {
+		name := entry.Name()
+		switch {
+		case entry.IsDir():
+		case generatedChunkName(name):
 			types["generated/"+name] = "text/javascript; charset=utf-8"
+		case name == "app.wasm":
+			// The on-device dictation engine; compiled by the module worker.
+			types["generated/"+name] = "application/wasm"
 		}
 	}
 	built := make(map[string]*staticAsset, len(types))

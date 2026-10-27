@@ -24,6 +24,9 @@ export default defineConfig(({ command }) => ({
   define: { 'process.env.NODE_ENV': JSON.stringify(command === 'build' ? 'production' : 'development') },
   base: command === 'build' ? '/static/generated/' : '/',
   server: { host: '127.0.0.1', fs: { allow: [directory('.'), directory('../static')] } },
+  // The dictation engine runs in a module worker with a WebAssembly asset;
+  // both land flat in the generated folder under names the Go allowlist admits.
+  worker: { format: 'es', rollupOptions: { output: { entryFileNames: 'worker-[hash].js', chunkFileNames: 'worker-[name]-[hash].js', assetFileNames: 'app.[ext]' } } },
   build: {
     outDir: directory('../static/generated'),
     emptyOutDir: true,

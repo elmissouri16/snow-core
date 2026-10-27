@@ -2008,6 +2008,10 @@ which must be restarted before exercising the new build.
 The optional `RuntimeSubscriber`/`RuntimeSubscription` seam atomically registers
 an observer and snapshots under the runtime lock. One-slot wakeups coalesce
 revisions; no per-token queue, replay ring or manager event stream is introduced.
+`GET /speech/status`, `POST /speech/download` and `GET /speech/model` back
+on-device dictation (`speech.go`): the host stores the pinned Whistle model under
+the manager directory and the browser runs it through the `cactus-needle`
+WebAssembly package bundled into the frontend.
 `GET /projects/{p}/runtime/events?instance_id=...` emits LF-delimited SSE with
 display-safe public snapshots, initially and on newer revisions at 40 ms; after
 the first frame, messages and activities whose encoding is byte-identical to

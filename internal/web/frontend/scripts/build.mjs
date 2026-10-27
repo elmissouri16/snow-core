@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const frontendRoot = fileURLToPath(new URL('..', import.meta.url));
 export const generatedRoot = resolve(frontendRoot, '../static/generated');
-const runtimePackages = ['react', 'react-dom', 'scheduler'];
+const runtimePackages = ['react', 'react-dom', 'scheduler', 'cactus-needle'];
 
 // Use installed license texts, but reject metadata that diverges from npm ci's
 // lockfile. Build-tool licenses are not runtime bundle licenses.
