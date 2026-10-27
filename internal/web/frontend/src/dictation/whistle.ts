@@ -67,6 +67,8 @@ export async function* microphone(stream: MediaStream, signal: AbortSignal, chun
   processor.onaudioprocess = event => {
     if (signal.aborted) return;
     const samples = resample(event.inputBuffer.getChannelData(0).slice(), context.sampleRate);
+    // Web Audio does not clip; the engine requires finite samples in [-1, 1].
+    for (let i = 0; i < samples.length; i++) { const v = samples[i]!; samples[i] = Number.isFinite(v) ? (v > 1 ? 1 : v < -1 ? -1 : v) : 0; }
     pending.push(samples); pendingLength += samples.length;
     if (pendingLength >= target) {
       const chunk = new Float32Array(pendingLength); let offset = 0;

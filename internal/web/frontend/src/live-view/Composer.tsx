@@ -1,7 +1,7 @@
 import {useEffect, useImperativeHandle, useRef, useState, type Ref} from 'react';
 import {download, engine, microphone, resetEngine, status, supported} from '../dictation/whistle';
 import type {SpeechStatus} from '../dictation/whistle';
-import {flushSync} from 'react-dom';
+import {createPortal, flushSync} from 'react-dom';
 import type {ControlsState, TurnState} from './model';
 
 export interface Suggestions {controls?: string; expanded: boolean; activeDescendant?: string}
@@ -117,7 +117,8 @@ function Dictate({disabled}: {disabled: boolean}) {
     <button type="button" className={'quiet icon-button composer-mic' + (listening ? ' is-listening' : '')} data-composer-dictate="" aria-pressed={listening} aria-label={label} title={label} disabled={disabled} aria-busy={busy} onClick={() => void start()}>
       <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
     </button>
-    <dialog ref={dialog} id="speech-dialog" className="folder-dialog speech-dialog" aria-labelledby="speech-dialog-title" aria-busy={phase === 'downloading' || phase === 'loading'}
+    {/* Portaled out of the composer so its action-row button styles never apply here. */}
+    {createPortal(<dialog ref={dialog} id="speech-dialog" className="folder-dialog speech-dialog" aria-labelledby="speech-dialog-title" aria-busy={phase === 'downloading' || phase === 'loading'}
       onCancel={event => { event.preventDefault(); if (phase === 'consent' || phase === 'error') setPhase('idle'); else run.current?.abort(); }}>
       <div className="dialog-heading"><h2 id="speech-dialog-title">On-device dictation</h2>
         <button type="button" className="quiet" data-speech-cancel="" onClick={() => { if (phase === 'consent' || phase === 'error') setPhase('idle'); else run.current?.abort(); }}>Cancel</button></div>
@@ -130,7 +131,7 @@ function Dictate({disabled}: {disabled: boolean}) {
         {phase === 'consent' && <button type="button" className="button primary" data-speech-download="" onClick={() => void fetchModel()}>Download and start</button>}
         {phase === 'error' && <button type="button" className="button primary" data-speech-retry="" onClick={() => { setPhase('idle'); void start(); }}>Try again</button>}
       </div>
-    </dialog>
+    </dialog>, document.body)}
   </>;
 }
 export function Actions({view}: {view: ControlsState}) {
