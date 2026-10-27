@@ -55,8 +55,13 @@ function Dictate({disabled}: {disabled: boolean}) {
   const open = phase === 'consent' || phase === 'downloading' || phase === 'loading' || phase === 'error';
   useEffect(() => {
     const node = dialog.current; if (!node) return;
-    if (open && !node.open) node.showModal(); else if (!open && node.open) node.close();
-  }, [open]);
+    if (!open) { if (node.open) node.close(); return; }
+    // A cached model starts in well under a second; the progress view appears
+    // only when loading outlasts a glance, so a quick start never flashes it.
+    if (phase !== 'loading') { if (!node.open) node.showModal(); return; }
+    const timer = setTimeout(() => { if (!node.open) node.showModal(); }, 600);
+    return () => clearTimeout(timer);
+  }, [open, phase]);
   if (!available) return null;
   function write(committed: string, pending: string) {
     const prompt = document.getElementById('live-prompt') as HTMLTextAreaElement | null;
