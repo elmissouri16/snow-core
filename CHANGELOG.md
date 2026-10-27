@@ -56,6 +56,12 @@ also include the generated GitHub comparison for the tagged commit.
 - Message actions (edit & resend, use as new prompt, regenerate, copy) are
   icon buttons with tooltips and screen-reader labels, revealed on hover like
   the ChatGPT and Claude action rows, instead of text buttons.
+- Canvas: when the agent writes or edits a file, a pane opens beside the chat
+  on that file, keeps it current while the turn runs, and tabs the files
+  touched this session; `/canvas` and the conversation menu open it, and
+  "Open on edits" can turn the automatic behavior off. It is read-only and
+  reuses the inspector's bounded file reads; touched files come only from the
+  public result text of the write and edit tools.
 - Find in conversation: a search bar over the transcript (menu, `/find`, or
   ⌘/Ctrl+F in the chat) with highlighted matches, a match counter, and
   next/previous navigation.

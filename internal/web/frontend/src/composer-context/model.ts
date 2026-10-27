@@ -6,6 +6,7 @@ export const bytes = (text: string) => encoder.encode(text).length;
 export type ComposerCommand = Readonly<{name: string; description: string}>;
 export const composerCommands: readonly ComposerCommand[] = Object.freeze([
   {name: "/agent", description: "Inspect the live subagent fleet"},
+  {name: "/canvas", description: "Show files the agent is editing beside the chat"},
   {name: "/compact", description: "Compact older conversation context"},
   {name: "/find", description: "Find text in this conversation"},
   {name: "/fork", description: "Open versions to fork or restore this conversation"},

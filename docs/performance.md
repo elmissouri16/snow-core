@@ -176,10 +176,10 @@ servers and cannot be instrumented here.
 | Light and dark theme | Yes | Yes |
 | Voice input | Yes | Yes, dictation through the browser's speech recognition on the local URL (secure context required) |
 | In-conversation search | Yes | Yes: Find in conversation (menu, `/find`, or ⌘/Ctrl+F inside the chat) with match count, next/previous, and highlights |
-| Canvases/artifacts | Yes | No; Snow edits files in the project itself and shows them in the Files inspector |
+| Canvases/artifacts | Yes | Yes: a Canvas pane opens beside the chat on the file the agent is writing, keeps it current during the turn, and tabs the files touched this session |
 | Smoothed token reveal | ChatGPT smooths tokens visually | Yes; each newly streamed batch fades in over 220 ms (off with reduced motion) |
 
-Canvases are the known gap. Everything else is in place and measured above.
+Everything in the table is in place and measured above; the remaining difference is that Snow's canvas is read-only, since the project files on disk are the source of truth.
 
 ## Shell preflight measurements
 

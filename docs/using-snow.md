@@ -405,6 +405,18 @@ an open conversation instead (see [Accounts and sign-in](#accounts-and-sign-in))
 or use the interactive `snow login ...` workflow on the host. See
 [configuration scopes](configuration.md#local-web-manager-settings-scopes).
 
+#### Canvas: files the agent is editing
+
+When the agent writes or edits a file, a **Canvas** pane opens beside the
+chat on that file and keeps it current while the turn runs, with a tab for
+each file touched in this session (most recent first) and a **Live** marker
+during the turn. Open it any time with **Canvas · edited files** in the
+conversation menu or `/canvas`; **Open on edits** controls whether it opens
+by itself. The pane is read-only and uses the same bounded, pinned-root file
+reads as the Files inspector. Which files changed comes only from the public
+result text of the write and edit tools ("Wrote … to path"), never from tool
+arguments. On a phone the canvas covers the chat; close it to return.
+
 #### Find in conversation
 
 **Find in conversation** in the conversation menu, the `/find` command, or

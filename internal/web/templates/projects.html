@@ -11,7 +11,7 @@
 {{if .SessionID}}<h2>Session history unavailable</h2><p>Retry this read, or explicitly resume below. Nothing has started automatically.</p>{{else if .Error}}<h2>Sessions unavailable</h2><p>Saved sessions could not be read. Nothing has started. Starting below creates a new session; it does not resume an unread session.</p>{{else}}<h2>What would you like to work on?</h2><p>A new session in {{.Project.Name}}. Your other sessions stay in the sidebar.</p>{{end}}
 </div></div></div>{{if and .RuntimeEnabled .Project.Available}}{{template "runtime-activation" .}}{{else}}<div class="empty-state compact"><h2>{{if not .Project.Available}}Workspace folder unavailable{{else}}Live sessions unavailable{{end}}</h2><p>{{if not .Project.Available}}The folder is missing or its identity has changed. Check the host folder before starting this workspace.{{else}}You can browse saved conversations without starting an agent.{{end}}</p></div>{{end}}
 {{end}}
-{{if not .Live}}</div>{{end}}</section>{{template "project-inspection" .}}</div>
+{{if not .Live}}</div>{{end}}</section>{{if .Live}}{{template "canvas" .}}{{end}}{{template "project-inspection" .}}</div>
 {{else}}
 <div data-react-page="workspace-catalog" class="react-live-panel" data-react-props="{{workspaceCatalogReactProps .}}">
 <header class="workspace-heading"><div><span class="eyebrow">YOUR WORKSPACE</span><h1>Workspaces</h1></div><span class="host-label"><span class="status-dot"></span>Folders on this host</span></header>

@@ -11,6 +11,7 @@ const paths = {
   mcp: 'M4 6h16v5H4zM4 13h16v5H4zM7 8.5h.01M7 15.5h.01',
   subagents: 'M12 3v4M12 7H6v5h12V7h-6M8 12v3M16 12v3M4 15h8v6H4zM12 15h8v6h-8z',
   find: 'M16 10a6 6 0 1 1-12 0 6 6 0 0 1 12 0Zm-2 4 6 6',
+  canvas: 'M4 4h16v16H4zM14 4v16M4 10h10',
   refresh: 'M20 7V3m0 4h-4M4 17v4m0-4h4M20 7a9 9 0 0 0-16 1m0 9a9 9 0 0 0 16-1',
   back: 'm14 6-6 6 6 6', next: 'm10 6 6 6-6 6', check: 'm5 12 4 4L19 6',
   chevron: 'm8 10 4 4 4-4', shield: 'M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3Z',
