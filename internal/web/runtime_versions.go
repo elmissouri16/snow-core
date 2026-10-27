@@ -26,6 +26,10 @@ func (r *liveRuntime) refreshVersionsLocked() {
 	r.snapshot.VersionsEnabled = r.worker != nil && r.supports(runtimeVersionsCapability)
 	r.snapshot.HistoryControlEnabled = r.snapshot.VersionsEnabled && r.supports("history_control")
 	r.snapshot.ReasoningEnabled = r.worker != nil && r.supports(protocol.RPCSessionReasoningCapability)
+	r.snapshot.AuthEnabled = r.worker != nil && r.supports("authentication")
+	r.snapshot.MCPEnabled = r.worker != nil && r.supports("mcp_servers")
+	r.snapshot.SubagentsEnabled = r.worker != nil && r.supports("subagents")
+	r.snapshot.ProjectInitEnabled = r.worker != nil && r.supports("project_init")
 	r.snapshot.CompactionEnabled = r.worker != nil && r.supports("compaction_run") && r.supports("goal_run") && r.supports("messages_public_history")
 }
 

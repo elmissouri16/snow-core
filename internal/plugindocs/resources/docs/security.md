@@ -332,9 +332,15 @@ use local config/auth helpers only: no provider initialization, discovery,
 network credential validation/refresh, OAuth or extension loading. Defaults
 apply to future workers and use locked revision-checked atomic updates, not a
 raw config editor or live-worker policy override. At most two short control
-workers run; settings writes have a separate nonqueued serialization gate. The
-browser does not accept provider API keys or perform provider OAuth; credentials
-remain explicit host-terminal or control-RPC operations.
+workers run; settings writes have a separate nonqueued serialization gate.
+Provider sign-in is not a control-worker operation: it runs through an
+explicitly activated project worker's `auth_*` RPC commands, which store tokens
+on the host and never return them. Device-code sign-in carries no secret
+through the manager and is offered on both origins. Browser OAuth (whose
+callback port is on the host) and API-key entry are accepted only on the
+loopback origin; the trusted-LAN origin rejects a submitted key with 403 so it
+never crosses unencrypted HTTP. Sign-in is an idle-only control bound to the
+current worker instance and session.
 
 Pairing uses a random reusable code, valid for up to 30 days or until rotated,
 with a persisted 20-attempt global minute window, an in-memory ten-attempt
@@ -640,42 +646,6 @@ status output. Do not put credentials in:
 Use environment expansion for MCP bearer headers. ChatGPT OAuth uses a local
 callback when available and supports device-code fallback; do not paste codes
 or tokens into prompts.
-
-ChatGPT named aliases are local credential routing, not separate permission
-boundaries or proof of independent subscriptions. The legacy `default`
-credential keeps the `chatgpt` key; named entries use
-`chatgpt/account/<name>`. Login rejects duplicate upstream identities under
-different aliases. Global `chatgpt_accounts.preferred` selects the runtime
-fallback alias; project configuration cannot choose an account. Management
-commands without `--account` still target `default`. Local account enumeration
-and auth checks never refresh tokens, fetch models, or print credentials.
-
-Before ChatGPT inference or compaction, the shared runtime persists/checks an
-account-identity binding against saved encrypted continuity. Resume, branches,
-and forks do not authorize moving that state to another known identity.
-Unbound legacy opaque history is allowed only for `default` with a known
-identity. Direct children snapshot the selected account and copy a known
-parent binding; inherited state without verified provenance fails closed
-(use `fork_turns=none` for an independent child).
-
-An explicit TUI account selection or selected-alias login replacement can carry
-a bounded plain-text working-state checkpoint into a fresh account-bound
-session. The handoff is generated locally from allowlisted visible content;
-no request to the old account is required. Full original turns remain saved,
-while provider-private blocks (including any private Text/Arguments fields),
-thinking, image bytes, old account binding, and executable tool exchanges are
-not replayed. This is not encrypted-continuity portability or permission for
-automatic quota rotation. Existing turn/goal/queue/subagent admission and session
-permission rebinding remain authoritative. Unsaved history is not silently
-written to disk or discarded. Credentials changed outside the TUI require an
-explicit account reselection to request this handoff.
-
-Quota observations are local runtime evidence, not credit balances or usage
-permission. Automatic failover is not implemented: nonempty fallback flags
-and config are rejected while upstream usage allowance and cross-account
-continuity remain unverified. This is not a claim that current provider terms
-prohibit rotation. Dedicated web/public SDK/RPC account controls are deferred;
-their runtimes still enforce the same continuity guard.
 
 Diagnostic capture is opt-in and bounded, but dumps can still contain prompts,
 model output, tool previews, paths, URLs, errors, and model identifiers. Review

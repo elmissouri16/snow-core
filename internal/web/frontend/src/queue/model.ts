@@ -44,7 +44,7 @@ export function presentation(current: Admission) {
   return {
     hidden, disabled: !enabled, label: store.busy && store.busy.action === "queue-enqueue" ? "Queuing…" : "Queue next",
     title: enabled ? "Queue this draft after the current work; it is not sent immediately" : "Queue next needs a connected running turn accepting follow-ups; approval and question takeovers pause queuing",
-    hint: hidden ? "Ctrl / ⌘ + Enter to send · Enter for a new line" : enabled ? "Ctrl / ⌘ + Enter to queue next · Enter for a new line" : "Queue next is paused · your draft is kept",
+    hint: hidden ? "Enter to send · Shift + Enter for a new line" : enabled ? "Enter to queue next · Shift + Enter for a new line" : "Queue next is paused · your draft is kept",
     state: hidden ? retainedReview(queue) ? "Remove reviewed pending items before starting or switching conversations" : null : store.unknown ? "Review the queue request outcome; nothing will retry" : store.busy ? "Updating pending messages · Stop remains available" : queue?.items.some(item => item.state === "pending") ? "Pending messages are separate from your draft" : "Turn in progress · Queue next is an explicit action",
   };
 }

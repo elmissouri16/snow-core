@@ -7,6 +7,21 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Added
 
+- Sign in to providers from the Web Manager. An activated conversation's
+  **Accounts & sign-in…** panel (also `/login`, `/logout`, and the **Sign in…**
+  button on a login-required error) lists provider credential status, runs
+  ChatGPT device-code sign-in from any paired device, offers browser OAuth and
+  API-key entry on the local URL only, polls until the provider confirms, and
+  signs out. Sign-in runs inside the project's worker; tokens stay on the host.
+- Press Enter to send from the Web composer on keyboard devices, matching the
+  TUI; Shift+Enter inserts a newline and Ctrl/⌘+Enter still sends everywhere.
+- Web composer commands `/mcp` (MCP server status dialog), `/help` (the command
+  palette), `/skills` (the `$` skill picker), `/fork` (the Versions dialog),
+  `/agent` (a read-only live subagent inspector that refreshes while children
+  run), and `/init` (the worker-composed AGENTS.md initialization turn through
+  the ordinary prompt and permission path). `/plugins` and `/debug` explain the
+  managed worker policy instead of being absent.
+
 - Enable configured MCP servers and bounded model-directed subagents in
   explicitly activated Web Manager conversations. MCP and shell-capable child
   operations use the existing session permission broker and browser approval
@@ -16,11 +31,61 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Fixed
 
+- Admit cross-site top-level navigations to the Web Manager (a typed URL,
+  bookmark, or link from another site) instead of answering "Cross-site
+  request rejected"; cross-site fetches, embeds, and forms stay rejected.
+- A runtime that started on the placeholder model `default` because no catalog
+  was reachable now resolves the configured model after a sign-in instead of
+  rejecting every prompt until a manual `/model` selection.
 - Restore each Web Manager conversation's selected provider/model after an
   explicit reopen or manager restart without changing operator host defaults.
 
+### Removed
+
+- Named ChatGPT accounts. `/account`, `--account`, `--account-fallback`,
+  `snow accounts`, `snow auth use`, the `chatgpt_accounts` configuration block,
+  and `chatgpt/account/NAME` credentials are gone; Snow keeps one ChatGPT
+  account per host. A previously saved named credential is ignored: run
+  `snow login chatgpt` (or sign in from the Web Manager) to use that account.
+
 ### Changed
 
+- Streamed answer text fades in batch by batch instead of popping, and the
+  composer gains a dictation button that uses the browser's speech recognition
+  where it is available on a secure origin such as the local URL.
+- The Web conversation shows what the model is doing while a turn runs:
+  "Thinking…" with animated dots and elapsed seconds while the model reasons,
+  "Reading a file…", "Running a command…" and similar labels during tool calls,
+  "Writing…" while the answer streams, and a "Thought for 12s" note once
+  reasoning ends. Reasoning text and tool arguments stay on the host, as
+  before; only the state is projected.
+- Provider error banners show the provider's human-readable message instead of
+  a raw JSON body, and an invalid API key offers the Sign in… button.
+- The row of panel launcher buttons above the transcript is hidden when the
+  conversation menu already lists those panels; inline goal, compaction, and
+  steering status still appears there.
+- A trusted workspace's start panel folds its privilege disclosure under
+  "What starting does", keeping the phone layout compact; an untrusted
+  workspace still shows it in full next to the trust checkbox.
+- Require Go 1.27.3 and `golang.org/x/net` v0.60.0, which carry the fixes for
+  the standard-library `net/http`, `html/template`, `crypto/tls`, `crypto/x509`,
+  `mime/multipart`, and `os` advisories that `govulncheck` reported against the
+  1.27rc3 toolchain. Source builds now need the patched toolchain.
+- Compress the Web Manager live event stream per frame when the browser
+  accepts gzip. Each frame is a full public snapshot, so a 300-token answer
+  drops from about 1.1 MB of frames to about 26 KB at the same 75 ms cadence,
+  which keeps streaming responsive for phones on the LAN. The documented
+  responsiveness targets and measurements are in `docs/performance.md`.
+- Serve Web Manager scripts and stylesheets gzip-compressed with content-hash
+  ETags and `Cache-Control: no-cache`, so repeat page loads revalidate with
+  304 responses instead of re-downloading about a megabyte of assets. Pages
+  themselves remain `no-store`. The React bundle is now built as a fully
+  minified application bundle (about 630 KB, 185 KB gzip) instead of an
+  unminified 860 KB library-mode output, and the Activity and Organization
+  pages load on demand as separate hashed chunks served from the embedded
+  generated tree.
+- Activation adopts the text still in the start-session field even if an
+  input event was missed, so a draft is never dropped on **Start session**.
 - Disable the OpenCode Zen provider because its models are restricted to
   OpenCode clients. Fresh configurations now default to authenticated OpenCode
   Go; existing Zen selections fail explicitly instead of silently rerouting.

@@ -390,6 +390,23 @@ func TestOriginHostAndFormGuards(t *testing.T) {
 			}
 		})
 	}
+	// A cross-site top-level document navigation (typed URL, bookmark, or a
+	// link from another site) is admitted for GET; fetches and forms are not.
+	for _, tc := range []struct {
+		method, mode, dest string
+		want               int
+	}{{"GET", "navigate", "document", http.StatusOK}, {"GET", "cors", "", http.StatusForbidden}, {"GET", "navigate", "iframe", http.StatusForbidden}, {"POST", "navigate", "document", http.StatusForbidden}} {
+		r := httptest.NewRequest(tc.method, "/login", strings.NewReader("code=x"))
+		r.Host = "127.0.0.1:7331"
+		r.Header.Set("Sec-Fetch-Site", "cross-site")
+		r.Header.Set("Sec-Fetch-Mode", tc.mode)
+		r.Header.Set("Sec-Fetch-Dest", tc.dest)
+		w := httptest.NewRecorder()
+		s.handler().ServeHTTP(w, r)
+		if w.Code != tc.want {
+			t.Fatalf("%s %s/%s status = %d, want %d", tc.method, tc.mode, tc.dest, w.Code, tc.want)
+		}
+	}
 	for _, values := range []url.Values{
 		{"code": {s.initialCode}},
 		{"code": {s.initialCode}, "csrf": {"forged"}},

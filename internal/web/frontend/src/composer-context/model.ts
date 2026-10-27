@@ -5,16 +5,26 @@ export const bytes = (text: string) => encoder.encode(text).length;
 
 export type ComposerCommand = Readonly<{name: string; description: string}>;
 export const composerCommands: readonly ComposerCommand[] = Object.freeze([
+  {name: "/agent", description: "Inspect the live subagent fleet"},
   {name: "/compact", description: "Compact older conversation context"},
+  {name: "/fork", description: "Open versions to fork or restore this conversation"},
   {name: "/context", description: "Open context and usage"},
+  {name: "/debug", description: "Explain why diagnostics are unavailable in Web workers"},
   {name: "/default", description: "Switch to Default mode"},
   {name: "/goal", description: "Compose a persistent Thread Goal"},
+  {name: "/help", description: "List Web Manager commands"},
+  {name: "/init", description: "Create an AGENTS.md guide and project config"},
+  {name: "/login", description: "Sign in to a provider or manage accounts"},
+  {name: "/logout", description: "Sign out of a provider"},
+  {name: "/mcp", description: "Inspect configured MCP server status"},
   {name: "/model", description: "Choose a model"},
   {name: "/permissions", description: "Choose the session permission mode"},
   {name: "/plan", description: "Switch to Plan Mode"},
+  {name: "/plugins", description: "Explain the Web worker plugin policy"},
   {name: "/processes", description: "Open managed processes"},
   {name: "/sessions", description: "Open conversation actions"},
   {name: "/settings", description: "Open Web Manager settings"},
+  {name: "/skills", description: "Browse enabled Agent Skills to mention"},
   {name: "/thinking", description: "Open thinking and response controls"},
   {name: "/tree", description: "Open conversation versions and branches"},
 ]);

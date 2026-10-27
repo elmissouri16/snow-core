@@ -186,8 +186,8 @@ export function HostSettingsPanel({csrf, enabled, projects}: HostSettingsPanelPr
     <button type="button" className="button" data-host-providers-load="" disabled={locked} onClick={() => { void loadProviders(); }}>Load provider status</button>
     <p data-host-providers-status="" className="fine" role="status">{view.providerStatus}</p>
     <ul data-host-providers-list="">{view.providers.map(provider => <li key={provider.provider_id}>{`${provider.provider_id}: ${provider.state} — ${provider.reason === "anonymous_access" ? "anonymous access; " : ""}local check only, not network verified`}</li>)}</ul>
-    <h4>Connect providers on the Snow host</h4>
-    <p>Do not put passwords or API keys in CLI arguments. In a terminal on the Snow host, run the appropriate interactive login, then check local authentication:</p>
+    <h4>Connect providers</h4>
+    <p>Sign in from an open conversation: choose <strong>Accounts &amp; sign-in…</strong> in its menu or type <code>/login</code>. Device codes work from any paired device; browser OAuth and API keys need the local URL. Settings has no worker to run a login. Alternatively, in a terminal on the Snow host run the interactive login, then check local authentication:</p>
     <ul className="host-login-instructions">{["snow login opencode-go", "snow login chatgpt", "snow login openai-compatible", "snow auth check"].map(command => <li key={command}><code>{command}</code></li>)}</ul>
   </section>;
 }

@@ -462,7 +462,7 @@
   const goalBlocksHistory = () => !!live?.snapshot?.goal?.goal_id && !["complete", "budget_limited"].includes(live.snapshot.goal.status);
   const compactionActive = () => ["pending", "running"].includes(live?.snapshot?.compaction?.state);
   const settingsAction = action => ["mode", "permission-mode", "model", "rename"].includes(action);
-  const streamingAdmission = action => ["prompt", "prompt-content", "goal-start", "goal-resume", "compaction-start", "steer"].includes(action);
+  const streamingAdmission = action => ["prompt", "prompt-content", "project-init", "goal-start", "goal-resume", "compaction-start", "steer"].includes(action);
   const contextDraftBusy = () => !!(window.SnowComposerContext?.hasAttachments() || window.SnowComposerContext?.pending());
   function uncertainSteerStopMatches() {
     const scope = live?.unknownSteerStop, snapshot = live?.snapshot;
@@ -721,6 +721,19 @@
     window.SnowInspection?.refresh?.({project_id: live.project, instance_id: live.instance, session_id: live.session, provider: snapshot.provider, model: snapshot.model});
     window.SnowScroll?.afterUpdate();
   }
+  // The turn indicator says what the model is doing: reasoning, a named tool
+  // call, or generating. All of it comes from the bounded public snapshot.
+  function turnState(snapshot) {
+    const live = snapshot?.live_thinking;
+    const thinking = live && typeof live.active === "boolean" ? {active: live.active, seconds: Number.isSafeInteger(live.seconds) ? live.seconds : 0} : null;
+    const running = (snapshot?.activities || []).filter(activity => activity.status === "running").at(-1);
+    const verbs = {read: "Reading a file", glob: "Finding files", grep: "Searching the project", bash: "Running a command", write: "Writing a file", edit: "Editing a file", webfetch: "Fetching a page", ask_user: "Waiting for your answer", spawn_agent: "Running a subagent"};
+    let label = "Working…";
+    if (thinking?.active) label = "Thinking…";
+    else if (running) label = (verbs[running.tool] || `Running ${running.tool || "a tool"}`) + "…";
+    else if ((snapshot?.messages || []).at(-1)?.role === "assistant") label = "Writing…";
+    return {label, thinking};
+  }
   function updateControls() {
     if (!live) return;
     const stopping = !!live.cancel || !!live.snapshot?.cancel_requested;
@@ -749,6 +762,7 @@
       reviewDisabled: !live.unknown || !live.connected || !live.reviewable || !!live.action || !!live.cancel || !!live.invalidInstance});
     window.SnowLiveView?.updateControls({...live.stopView,
       turnVisible: live.status === "running" && live.connected && !live.invalidInstance && !compacting,
+      turn: turnState(live.snapshot),
       sendDisabled: !ready || !!window.SnowComposerContext?.pending() || !!goalComposer?.enabled && !goalComposer.available, sending: sending || !!goalComposer?.busy,
       goalMode: !!goalComposer?.enabled,
       sendLabel: goalComposer?.busy ? "Starting goal" : goalComposer?.enabled ? "Start goal run" : sending ? "Sending message" : editDrafts.has(live.key) ? "Send edited message" : "Send message",
@@ -926,12 +940,38 @@
           if (!activate("[data-mode-menu]")) return false;
           return activate(`[data-menu-key="${name.slice(1)}"]`);
         }
+        if (name === "/plugins" || name === "/debug") {
+          // Both exist in the TUI; the managed Web worker profile deliberately
+          // starts without plugins or diagnostics dumps. Say so instead of
+          // pretending the control is missing.
+          liveError(name === "/plugins"
+            ? "JavaScript plugins are disabled in Web Manager workers by the managed profile. Inspect, enable or disable them with snow plugins or /plugins in a terminal on the Snow host; the next explicit worker start follows the host configuration."
+            : "Diagnostics dumps are disabled in Web Manager workers because they contain sensitive runtime data. Use /debug in a terminal session on the Snow host.");
+          return true;
+        }
+        if (name === "/init") {
+          // The worker composes the initialization prompt itself; this is one
+          // ordinary admitted turn whose tools still go through permissions.
+          if (current.snapshot?.project_init_enabled !== true) return false;
+          void runtimeAction("project-init", {});
+          return true;
+        }
+        if (name === "/help" || name === "/skills") {
+          // Help is the command palette itself and skills are the "$" picker:
+          // leave that marker in the composer so the matching list opens.
+          const marker = name === "/help" ? "/" : "$", prompt = $("#live-prompt");
+          if (!prompt || !window.SnowLiveView?.updateDraft(marker)) return false;
+          prompt.setSelectionRange(1, 1); current.draftRevision++; saveDraft();
+          prompt.dispatchEvent(new Event("input", {bubbles: true}));
+          return true;
+        }
         const selectors = {
           "/compact": "[data-compaction-open]", "/context": "[data-telemetry-menu]",
           "/goal": "[data-goal-toggle]", "/model": "[data-model-menu]",
           "/permissions": "[data-permission-policy-menu]", "/processes": "[data-processes-open]",
           "/sessions": "[data-session-menu]", "/settings": "[data-settings-open]",
-          "/thinking": "[data-reasoning-open]", "/tree": "[data-versions-open]"
+          "/thinking": "[data-reasoning-open]", "/tree": "[data-versions-open]",
+          "/login": "[data-auth-open]", "/logout": "[data-auth-open]", "/mcp": "[data-mcp-open]", "/fork": "[data-versions-open]", "/agent": "[data-subagents-open]"
         };
         return activate(selectors[name]);
       },
@@ -1026,8 +1066,8 @@
   function disposeLivePanels() {
     window.SnowComposerContext?.dispose();
     if (live?.panels) { live.panels.abort(); live.panels = null; }
-    window.SnowReasoning?.dispose(); window.SnowHistoryControls?.dispose(); window.SnowCompaction?.dispose(); window.SnowSteer?.dispose();
-    if (live && ["reasoning", "history-controls", "compaction", "steer"].includes(live.panelMutation)) live.panelMutation = null;
+    window.SnowReasoning?.dispose(); window.SnowAuth?.dispose(); window.SnowMCP?.dispose(); window.SnowSubagents?.dispose(); window.SnowHistoryControls?.dispose(); window.SnowCompaction?.dispose(); window.SnowSteer?.dispose();
+    if (live && ["reasoning", "auth", "history-controls", "compaction", "steer"].includes(live.panelMutation)) live.panelMutation = null;
   }
   function renderLivePanels() {
     if (!live?.panels || !live.snapshot) return;
@@ -1036,6 +1076,9 @@
     const idle = owner => mutationSafe(owner) && live.status === "idle" && !goalBlocksHistory() && !editing && !s.queue?.items?.length && !s.permission && !s.input;
     window.SnowReasoning?.render(s, {readable: readable && s.reasoning_enabled === true && !live.action && !live.cancel && !live.metadata, safe: idle("reasoning") && s.reasoning_enabled === true});
     window.SnowHistoryControls?.render(s, {supported: s.history_control_enabled === true, safe: idle("history-controls") && s.history_control_enabled === true});
+    window.SnowAuth?.render(s, {readable: readable && s.auth_enabled === true && !live.invalidInstance, safe: idle("auth") && s.auth_enabled === true});
+    window.SnowMCP?.render(s, {readable: readable && s.mcp_enabled === true && !live.invalidInstance, safe: idle("mcp") && s.mcp_enabled === true});
+    window.SnowSubagents?.render(s, {readable: readable && s.subagents_enabled === true && !live.invalidInstance});
     window.SnowCompaction?.render(s, {...live.stopView, supported: s.compaction_enabled === true, readable: readable && s.compaction_enabled === true, safe: idle("compaction") && s.compaction_enabled === true});
     window.SnowSteer?.render(s, {connected: readable, status: s.goal?.running || compactionActive() || s.permission || s.input ? "unavailable" : live.status,
       busy: !!(live.action || live.cancel || live.metadata || live.panelMutation && live.panelMutation !== "steer" || window.SnowQueue?.blocking()),
@@ -1065,6 +1108,21 @@
       },
       set: fields => panelMutation(current, identity, lifetime, "reasoning", "reasoning-set", fields)
     });
+    window.SnowAuth?.init({...base, reserve: reserve("auth"), localOrigin: document.documentElement.dataset.networkProfile === "local",
+      request: (action, fields, signal) => {
+        if (!bound() || !["auth-inspect", "auth-login-start", "auth-login-status", "auth-login-cancel", "auth-logout"].includes(action)) return Promise.reject(new Error("Retired panel"));
+        return panelRead(current, identity, action, fields, AbortSignal.any([signal, lifetime.signal]));
+      },
+      refreshModels: () => { if (bound()) window.SnowConversation?.refreshModels?.(); }
+    });
+    window.SnowSubagents?.init({...base, inspect: signal => {
+      if (!bound()) return Promise.reject(new Error("Retired panel"));
+      return panelRead(current, identity, "subagents-inspect", {}, AbortSignal.any([signal, lifetime.signal]));
+    }});
+    window.SnowMCP?.init({...base, inspect: signal => {
+      if (!bound()) return Promise.reject(new Error("Retired panel"));
+      return panelRead(current, identity, "mcp-inspect", {}, AbortSignal.any([signal, lifetime.signal]));
+    }});
     window.SnowHistoryControls?.init({...base, reserve: reserve("history-controls"),
       mutate: (action, fields) => panelMutation(current, identity, lifetime, "history-controls", action, fields),
       refreshInventory: () => { if (bound()) refreshPanelInventory(current, identity, lifetime); }
@@ -1459,6 +1517,13 @@
       event.preventDefault(); if (form.dataset.pending) return;
       form.dataset.pending = "true";
       const workspace = $("#workspace"), project = workspace.dataset.project, targetSession = $('input[name="session_id"]', form)?.value || "";
+      // The textarea is the user's truth: if an input event was missed (for
+      // example around a React re-render), adopt its current text instead of
+      // silently dropping the draft at activation.
+      const activationPrompt = $("#workspace-prompt", form);
+      if (!homeDraft.text && activationPrompt?.value.trim() && matchesWorkspaceDraft(activationPrompt)) {
+        homeDraft = {text: activationPrompt.value, project: activationPrompt.dataset.draftProject, name: activationPrompt.dataset.draftName, targetSession: activationPrompt.dataset.draftSession, pending: true};
+      }
       const draftOwner = homeDraft;
       const handoff = !!homeDraft.text && (!homeDraft.project || homeDraft.project === project) && (homeDraft.targetSession === undefined || homeDraft.targetSession === targetSession);
       if (handoff && new TextEncoder().encode(homeDraft.text).length > 65536) { window.SnowWorkspace?.updateActivation({busy: false, error: "Shorten your draft to at most 64 KiB before starting."}); delete form.dataset.pending; return; }
@@ -1588,7 +1653,12 @@
     if (nav) { if (event.key === "Escape") { event.preventDefault(); requestNav(false); } else trap(event, nav); return; }
     const inspector = $('#project-inspector[aria-modal="true"]');
     if (inspector) { if (event.key === "Escape") $("[data-inspector-toggle]", inspector).click(); else trap(event, inspector); return; }
-    if (event.target.id === "live-prompt" && event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.isComposing) { event.preventDefault(); if (!$("#live-send").disabled) $("#live-composer").requestSubmit(); else if (window.SnowQueue?.canEnqueue()) window.SnowQueue.enqueue(); }
+    // Enter sends, matching the TUI; Shift+Enter inserts a newline. Touch
+    // keyboards keep Enter as newline because they have no modifier row, and
+    // Ctrl/Cmd+Enter keeps working everywhere. Open suggestion popups consume
+    // Enter before this listener runs.
+    const sendKey = event.key === "Enter" && !event.altKey && !event.isComposing && (event.ctrlKey || event.metaKey || !event.shiftKey && !matchMedia("(pointer: coarse)").matches);
+    if (event.target.id === "live-prompt" && sendKey) { event.preventDefault(); if (!$("#live-send").disabled) $("#live-composer").requestSubmit(); else if (window.SnowQueue?.canEnqueue()) window.SnowQueue.enqueue(); }
   });
   narrow.addEventListener("change", () => { syncSidebarCollapse(); requestNav(false, false); const panel = $("#project-inspector"); if (panel && !panel.hidden) $("[data-inspector-toggle]", panel).click(); });
   document.addEventListener("visibilitychange", () => { if (!document.hidden && live && !live.subscription) { clearTimeout(pollTimer); pollTimer = setTimeout(startUpdates, 0); } });

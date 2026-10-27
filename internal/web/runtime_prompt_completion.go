@@ -42,6 +42,7 @@ func (r *liveRuntime) consumePromptCompletion(completed protocol.RPCPromptComple
 	if r.promptID == "" {
 		r.earlyCompletion = completed.RequestID
 	}
+	r.settleThinkingLocked()
 	binding := runtimePromptCompletionBinding{instance: r.instanceID, session: r.snapshot.SessionID, turn: r.turnID, request: completed.RequestID, cancelToken: r.snapshot.CancelToken, epoch: r.rootEpoch, activity: r.activityPrompt}
 	if r.snapshot.Goal != nil {
 		binding.branch = r.snapshot.Goal.BranchID

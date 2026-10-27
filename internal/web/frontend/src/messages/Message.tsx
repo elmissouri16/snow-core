@@ -1,5 +1,6 @@
 /* Conversation presentation adapted from Harness (MIT); see HARNESS-NOTICE.txt. */
 import { useLayoutEffect, useRef, useState } from 'react';
+import type { RefObject } from 'react';
 import type { MessageData } from './model';
 import type { ActionPresentation } from './actions';
 import { Images } from './Images';
@@ -22,9 +23,36 @@ function CopyMessage({text}: {text: string}) {
   }
   return <><button type="button" className="message-copy" data-message-copy="" aria-label={feedback === 'Copied' ? 'Message copied' : 'Copy message'} title={feedback === 'Copied' ? 'Copied' : 'Copy message'} onClick={copy}><CopyIcon copied={feedback === 'Copied'}/></button><span className="message-copy-feedback" role="status" aria-live="polite">{feedback}</span></>;
 }
+/**
+ * Streamed text arrives in 75 ms batches. Fading each newly appended tail in,
+ * instead of popping it, reads like a continuous stream (the effect ChatGPT and
+ * Claude use). Only the last text node is touched, and the wrapper is removed
+ * before React's next commit, so React keeps owning the text.
+ */
+function useStreamReveal(body: RefObject<HTMLElement | null>, text: string, enabled: boolean) {
+  const seen = useRef(-1);
+  useLayoutEffect(() => {
+    const previous = seen.current; seen.current = text.length;
+    const container = body.current;
+    if (!enabled || !container || previous < 0 || text.length <= previous) return;
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+    let last: Text | null = null;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) if ((node as Text).data.trim()) last = node as Text;
+    if (!last?.parentElement || last.parentElement.closest('pre')) return;
+    const grown = Math.min(text.length - previous, last.data.length);
+    if (grown <= 0) return;
+    const tail = last.splitText(last.data.length - grown);
+    const span = document.createElement('span');
+    span.className = 'stream-reveal';
+    span.textContent = tail.data;
+    tail.replaceWith(span);
+    return () => { if (span.isConnected) span.replaceWith(document.createTextNode(span.textContent || '')); };
+  }, [text, enabled, body]);
+}
 export function Message({message, scope, actions}: {message: MessageData; scope: HTMLElement | null; actions: ActionPresentation}) {
-  const row = useRef<HTMLElement>(null), {role} = message;
+  const row = useRef<HTMLElement>(null), body = useRef<HTMLDivElement>(null), {role} = message;
   const live = scope?.id === 'live-session' && scope.dataset.runtime === 'true';
+  useStreamReveal(body, message.text, live && role !== 'user');
   const editable = scope?.id === 'live-session' && scope.dataset.messageEditEnabled === 'true';
   const regeneratable = scope?.id === 'live-session' && scope.dataset.messageRegenerateEnabled === 'true';
   useLayoutEffect(() => {
@@ -35,7 +63,7 @@ export function Message({message, scope, actions}: {message: MessageData; scope:
   });
   return <article ref={row} className={`catalog-message conversation-message${role === 'user' ? ' user-message' : ''}`} data-message-id={message.id} data-message-role={role} data-message-editable={String(message.editable)} data-message-has-images={String(!!message.images.length)} data-message-regeneratable={String(message.regeneratable)} data-editing={String(live && role === 'user' && actions.edit.messageID === message.id)} aria-label={role === 'user' ? 'Your message' : role === 'plan' ? 'Assistant plan' : 'Assistant message'}>
     <Images images={message.images} root={scope} messageID={message.id}/>
-    <div className={`message-body${role !== 'user' ? ' markdown-body' : ''}`} hidden={!message.text && !!message.images.length}>{role === 'user' ? message.text : <Markdown text={message.text} html={message.html}/>}</div>
+    <div ref={body} className={`message-body${role !== 'user' ? ' markdown-body' : ''}`} hidden={!message.text && !!message.images.length}>{role === 'user' ? message.text : <Markdown text={message.text} html={message.html}/>}</div>
     <span className="message-source" hidden>{message.text}</span>
     <p className="fine message-truncated" hidden={!message.truncated}>Message truncated for bounded display.</p>
     {(message.tools.length > 0 || message.toolsOmitted) && <div className="message-tools tool-timeline activity-list" role="group" aria-label="Saved tool history">{message.tools.map(tool => <ToolRow key={tool.id} data={tool} history/>)}<p className="fine history-tool-limit" hidden={!message.toolsOmitted}>Saved tool history truncated for bounded display.</p></div>}

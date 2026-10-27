@@ -142,7 +142,7 @@ func TestReactGeneratedAssetRoutesAndHead(t *testing.T) {
 			t.Fatalf("generated %s: status=%d MIME=%q", name, w.Code, w.Header().Get("Content-Type"))
 		}
 		csp := w.Header().Get("Content-Security-Policy")
-		if !strings.Contains(csp, "script-src 'self'") || strings.Contains(csp, "unsafe-") || w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("Cache-Control") != "no-store" {
+		if !strings.Contains(csp, "script-src 'self'") || strings.Contains(csp, "unsafe-") || w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("Cache-Control") != "no-cache" || w.Header().Get("ETag") == "" {
 			t.Fatalf("asset protections changed: %v", w.Header())
 		}
 	}

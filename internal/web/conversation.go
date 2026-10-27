@@ -139,6 +139,18 @@ func (s *shell) runtimeAction(w http.ResponseWriter, r *http.Request) {
 		s.runtimeMessageEditAction(ctx, w, r, project)
 		return
 	}
+	if action == "subagents-inspect" {
+		s.runtimeSubagentsAction(ctx, w, r, project)
+		return
+	}
+	if action == "mcp-inspect" {
+		s.runtimeMCPAction(ctx, w, r, project)
+		return
+	}
+	if authAction(action) {
+		s.runtimeAuthAction(ctx, w, r, project)
+		return
+	}
 	if reasoningAction(action) {
 		s.runtimeReasoningAction(ctx, w, r, project)
 		return
@@ -196,6 +208,17 @@ func (s *shell) runtimeAction(w http.ResponseWriter, r *http.Request) {
 		}
 	case "prompt":
 		err = s.runtimes.Prompt(ctx, project.ID, instanceID, r.PostForm.Get("text"))
+	case "project-init":
+		backend, ok := s.runtimes.(RuntimeProjectInitBackend)
+		if !ok {
+			http.Error(w, "Project initialization unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if len(r.PostForm) != 2 || len(r.PostForm["csrf"]) != 1 || len(r.PostForm["instance_id"]) != 1 {
+			http.Error(w, "Invalid project initialization fields; reload this page", http.StatusBadRequest)
+			return
+		}
+		err = backend.ProjectInit(ctx, project.ID, instanceID)
 	case "cancel":
 		backend, ok := s.runtimes.(RuntimeTurnCancelBackend)
 		if !ok {
@@ -228,3 +251,11 @@ func (s *shell) runtimeAction(w http.ResponseWriter, r *http.Request) {
 		Success bool `json:"success"`
 	}{true})
 }
+
+// RuntimeProjectInitBackend runs the worker-composed /init turn through the
+// same serial prompt admission as an ordinary message.
+type RuntimeProjectInitBackend interface {
+	ProjectInit(ctx context.Context, projectID, instanceID string) error
+}
+
+var _ RuntimeProjectInitBackend = (*RuntimeManager)(nil)

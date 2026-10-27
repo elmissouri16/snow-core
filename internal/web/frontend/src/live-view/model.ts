@@ -4,13 +4,18 @@ export interface ChromeState {
   error: string; unknown: boolean; reviewDisabled: boolean;
   recoveryVisible: boolean; recoveryMessage: string; canceled: boolean;
 }
+/** What the model is doing right now, for the turn indicator. */
+export interface TurnState {
+  label: string;
+  thinking: {active: boolean; seconds: number} | null;
+}
 export interface NoticeState {
   visible: boolean; text: string; disabled: boolean;
 }
 export interface ControlsState {
   sendDisabled: boolean; showStop: boolean; sendLabel: string; sending: boolean; goalMode: boolean;
   canStop: boolean; stopLabel: string; stopTitle: string;
-  status: string; statusIdle: boolean; turnVisible: boolean;
+  status: string; statusIdle: boolean; turnVisible: boolean; turn: TurnState;
   queue: {enabled: boolean; hidden: boolean; disabled: boolean; label: string; title: string; hint: string};
   reuse: NoticeState; edit: NoticeState;
   regenerate: {visible: boolean; text: string; dismiss: boolean};
@@ -36,6 +41,10 @@ export function sameControlField<K extends keyof ControlsState>(key: K, left: Co
     const a = left as ControlsState['regenerate'], b = right as ControlsState['regenerate'];
     return a.visible === b.visible && a.text === b.text && a.dismiss === b.dismiss;
   }
+  if (key === 'turn') {
+    const a = left as TurnState, b = right as TurnState;
+    return a.label === b.label && (a.thinking === b.thinking || !!a.thinking && !!b.thinking && a.thinking.active === b.thinking.active && a.thinking.seconds === b.thinking.seconds);
+  }
   if (key === 'dialog') {
     const a = left as ControlsState['dialog'], b = right as ControlsState['dialog'];
     return a.status === b.status && a.confirmDisabled === b.confirmDisabled && a.cancelDisabled === b.cancelDisabled;
@@ -45,8 +54,8 @@ export function sameControlField<K extends keyof ControlsState>(key: K, left: Co
 export const initialControls = (): ControlsState => ({
   sendDisabled: true, showStop: false, sendLabel: 'Send message', sending: false, goalMode: false,
   canStop: false, stopLabel: 'Stop', stopTitle: 'Stop generation',
-  status: 'Updates unavailable · your draft is kept', statusIdle: false, turnVisible: false,
-  queue: {enabled: false, hidden: true, disabled: true, label: 'Queue next', title: '', hint: 'Ctrl / ⌘ + Enter to send · Enter for a new line'},
+  status: 'Updates unavailable · your draft is kept', statusIdle: false, turnVisible: false, turn: {label: 'Working…', thinking: null},
+  queue: {enabled: false, hidden: true, disabled: true, label: 'Queue next', title: '', hint: 'Enter to send · Shift + Enter for a new line'},
   reuse: {visible: false, text: '', disabled: false},
   edit: {visible: false, text: '', disabled: false},
   regenerate: {visible: false, text: '', dismiss: false},

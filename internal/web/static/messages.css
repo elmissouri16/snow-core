@@ -155,3 +155,25 @@
 
 .message-edit-notice { color: var(--text); }
 .conversation-message[data-editing="true"] > .message-body { outline: 1px solid var(--focus); outline-offset: 2px; }
+
+/* Live turn indicator: what the model is doing, plus the visible reasoning the
+ * TUI already streams. The region sits between transcript and composer. */
+.turn-status-region { flex: none; width: min(var(--chat-content-width), calc(100% - 64px)); margin: 0 auto; }
+.turn-status-region #live-turn-status { width: auto; margin: 0 0 16px; display: flex; align-items: center; gap: 10px; }
+.turn-elapsed { font-size: 12px; font-weight: 500; color: var(--muted); -webkit-text-fill-color: var(--muted); }
+.live-thinking { margin: 0 0 10px; font-size: 12px; color: var(--muted); }
+.live-thinking-label { font-weight: 550; }
+.live-thinking-dots { display: inline-flex; gap: 3px; margin-right: 2px; color: var(--accent); -webkit-text-fill-color: var(--accent); }
+.live-thinking-dots i { width: 4px; height: 4px; border-radius: 50%; background: currentColor; opacity: .35; animation: snow-thinking-dot 1.2s ease-in-out infinite; }
+.live-thinking-dots i:nth-child(2) { animation-delay: .2s; }
+.live-thinking-dots i:nth-child(3) { animation-delay: .4s; }
+@keyframes snow-thinking-dot { 0%, 80%, 100% { opacity: .35; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
+@media (prefers-reduced-motion: reduce) { .live-thinking-dots i { animation: none; opacity: .7; } }
+
+/* Newly streamed text fades in instead of popping, so 75 ms batches read as a
+ * continuous stream. The span is transient; React re-owns the text next commit. */
+.stream-reveal { animation: snow-stream-reveal 220ms ease-out; }
+@keyframes snow-stream-reveal { from { opacity: 0.15; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .stream-reveal { animation: none; } }
+.composer-mic.is-listening { color: var(--danger); animation: snow-mic-pulse 1.2s ease-in-out infinite; }
+@keyframes snow-mic-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }

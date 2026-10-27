@@ -57,8 +57,11 @@ npm run check
   it never repairs the checked-in tree. Rebuild explicitly, review the diff and
   include generated files with source changes.
 
-The Vite build emits one self-contained ES module targeting ES2022, with no
-source maps or external CDN runtime. `envPrefix: []` disables automatic
+The Vite build emits a minified ES2022 application bundle (`app.js`) plus
+hashed on-demand chunks for the standalone Activity and Organization pages,
+with no source maps or external CDN runtime. `render.go` serves `app.js`, the
+notices file, and every plain `.js` chunk found in the embedded generated
+tree; nothing else under `static/generated/` is routable. `envPrefix: []` disables automatic
 client-environment exposure. The build script uses `envDir: false` to disable
 `.env` loading (the current equivalent of the deprecated `envFile: false` option).
 Do not introduce environment-derived credentials or bootstrap secrets into the

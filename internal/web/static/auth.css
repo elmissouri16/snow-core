@@ -1,0 +1,23 @@
+/* Accounts & sign-in dialog. Shares the runtime-dialog frame from dialogs.css. */
+.auth-dialog { width: min(560px, calc(100vw - 32px)); }
+.auth-providers { display: flex; flex-direction: column; gap: 12px; margin: 12px 0 0; padding: 0; list-style: none; }
+.auth-provider { border: 1px solid var(--line, #333); border-radius: 10px; padding: 12px 14px; }
+.auth-provider-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.auth-provider-head h3 { margin: 0; font-size: 15px; }
+.auth-state { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line, #333); }
+.auth-state[data-state="configured"] { color: #4bb97f; border-color: #4bb97f55; }
+.auth-state[data-state="expired"], .auth-state[data-state="invalid"] { color: #e5a84b; border-color: #e5a84b55; }
+.auth-state[data-state="missing"] { color: var(--muted, #999); }
+.auth-provider-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.auth-key-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.auth-key-form input { flex: 1 1 220px; min-width: 0; }
+.auth-job { margin-top: 14px; border: 1px solid var(--accent, #4a8cff); border-radius: 10px; padding: 12px 14px; }
+.auth-job-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 26px; letter-spacing: 0.12em; user-select: all; margin: 6px 0; }
+.auth-job-url { word-break: break-all; }
+.auth-job[data-state="completed"] { border-color: #4bb97f; }
+.auth-job[data-state="failed"], .auth-job[data-state="canceled"] { border-color: #e5a84b; }
+.auth-job-url a { color: var(--accent, #4a8cff); text-decoration: underline; }
+
+/* MCP server status dialog shares the account card styling. */
+.mcp-dialog { width: min(560px, calc(100vw - 32px)); }
+.auth-provider-meta { margin: 6px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted, #999); }

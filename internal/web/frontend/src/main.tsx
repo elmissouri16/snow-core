@@ -1,14 +1,13 @@
-import { Component, useLayoutEffect } from 'react';
+import { Component, Suspense, lazy, useLayoutEffect } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import type { Root } from 'react-dom/client';
-import { ActivityPage } from './activity/ActivityPage';
-import { OrganizationPage } from './organization/OrganizationPage';
 import { validateOrganizationProps } from './organization/model';
-import { BrowserInventory } from './browser-access/BrowserInventory';
-import { HostSettingsPanel } from './host-settings/HostSettingsPanel';
 import { reasoning } from './reasoning/index';
+import { auth } from './auth/index';
+import { mcp } from './mcp/index';
+import { subagents } from './subagents/index';
 import { compaction } from './compaction/index';
 import { goals } from './goals/index';
 import { versions, historyControls } from './versions/index';
@@ -32,6 +31,14 @@ import { workspaceNavigation } from './navigation';
 // Only the marked subtree is React-owned. The native workspace navigator may
 // replace its ancestor, but never renders inside a mounted root. No
 // provider/runtime code lives here.
+// Standalone management pages are rarely the first thing a visitor needs, so
+// they load on demand instead of riding along in every page's bundle.
+const ActivityPage = lazy(() => import('./activity/ActivityPage').then(module => ({default: module.ActivityPage})));
+const OrganizationPage = lazy(() => import('./organization/OrganizationPage').then(module => ({default: module.OrganizationPage})));
+const BrowserInventory = lazy(() => import('./browser-access/BrowserInventory').then(module => ({default: module.BrowserInventory})));
+const HostSettingsPanel = lazy(() => import('./host-settings/HostSettingsPanel').then(module => ({default: module.HostSettingsPanel})));
+const loading = <p className="fine" role="status">Loading…</p>;
+
 const roots = new Map<HTMLElement, Root>();
 const savedHistories = new WeakMap<HTMLElement, {project: string; session: string; projection: SavedHistoryProjection | null}>();
 const maxBootstrapLength = 1024 * 1024;
@@ -86,13 +93,13 @@ function page(element: HTMLElement): ReactNode {
     }
     case 'activity': {
       if (!props || typeof props !== 'object' || !('registryEnabled' in props) || typeof props.registryEnabled !== 'boolean' || !('error' in props) || typeof props.error !== 'string' || props.error.length > 4096) throw new Error('Invalid activity page');
-      return <ActivityPage registryEnabled={props.registryEnabled} error={props.error} />;
+      return <Suspense fallback={loading}><ActivityPage registryEnabled={props.registryEnabled} error={props.error} /></Suspense>;
     }
     case 'organization':
-      return <OrganizationPage {...validateOrganizationProps(props)} />;
+      return <Suspense fallback={loading}><OrganizationPage {...validateOrganizationProps(props)} /></Suspense>;
     case 'browser-access': {
       if (!props || typeof props !== 'object' || !('csrf' in props) || typeof props.csrf !== 'string' || props.csrf.length > 512) throw new Error('Invalid browser access page');
-      return <BrowserInventory csrf={props.csrf} />;
+      return <Suspense fallback={loading}><BrowserInventory csrf={props.csrf} /></Suspense>;
     }
     case 'host-settings': {
       if (!props || typeof props !== 'object' || !('csrf' in props) || typeof props.csrf !== 'string' || props.csrf.length > 512 ||
@@ -106,7 +113,7 @@ function page(element: HTMLElement): ReactNode {
         ids.add(project.id);
         return {id: project.id, name: project.name};
       });
-      return <HostSettingsPanel csrf={props.csrf} enabled={props.enabled} projects={projects} />;
+      return <Suspense fallback={loading}><HostSettingsPanel csrf={props.csrf} enabled={props.enabled} projects={projects} /></Suspense>;
     }
     default:
       throw new Error('Unsupported page');
@@ -149,7 +156,7 @@ else mount();
 
 // Explicit readiness: module loading order alone does not synchronize classic
 // controller initialization with the registered React view facades.
-Object.assign(window, {SnowReasoning: reasoning, SnowCompaction: compaction, SnowGoals: goals,
+Object.assign(window, {SnowReasoning: reasoning, SnowAuth: auth, SnowMCP: mcp, SnowSubagents: subagents, SnowCompaction: compaction, SnowGoals: goals,
   SnowVersions: versions, SnowHistoryControls: historyControls, SnowConversation: conversation,
   SnowSteer: steer, SnowQueue: queue, SnowComposerContext: composerContext,
   SnowLiveView: LiveViewBridge, SnowMessages: messages, SnowVisibility: visibility,

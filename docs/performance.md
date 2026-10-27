@@ -120,6 +120,67 @@ commands live in the [agent working guide](../AGENTS.md#verification). Before a
 release, require the complete remote CI run—including this regression guard—to
 pass as described in the [release policy](releases.md).
 
+## Web Manager responsiveness targets
+
+The Web Manager is judged against the feel of current agent apps (ChatGPT,
+Claude, DeepSeek): feedback the moment you send, tokens appearing as they
+arrive, a steady frame rate while streaming, and no main-thread stalls. The
+targets and the latest local measurement, taken on 2026-10-27 in Chrome on a
+500×679 viewport against a deterministic OpenAI-compatible mock streaming 300
+tokens at 30 tokens/s (`scratchpad/mockllm/mock_openai.py` style harness, not
+a hosted model), are:
+
+| Measure | Target | Measured |
+|---|---:|---:|
+| Visible feedback after Send (turn indicator) | < 200 ms | 18 ms |
+| First answer token on screen after Send | < 500 ms + model latency | 96 ms |
+| Incremental DOM updates for a 300-token answer | ≥ 10 per second | 159 updates, 75 ms median gap (p95 78 ms, max 80 ms) |
+| Long tasks (> 50 ms) during streaming | 0 | 0 |
+| Animation frame interval while streaming | p95 ≤ 20 ms | p95 19 ms, max 19 ms |
+| Repeat page load (warm cache) | DOMContentLoaded < 200 ms | 113 ms, 32 requests, 11 KB transferred (304 revalidation) |
+| Production bundle | ≤ 700 KB minified | 632 KB (185 KB gzip), Activity and Organization pages lazy |
+| Event-stream bytes for one 300-token answer (161 snapshot frames) | ≤ 100 KB on the wire | 26 KB gzip-compressed per frame, versus 1,109 KB uncompressed |
+
+The same run on an emulated phone (headless Chrome, 390×844, touch, 2× DPR)
+measured 34 ms to the turn indicator, 109 ms to the first token, 160 updates
+at a 75 ms median gap (max 79 ms), no long tasks, frame p95 17 ms, and the
+transcript stayed scrolled to the newest text for 100% of updates.
+
+The server coalesces snapshot publication at 75 ms, which sets the update
+cadence; the browser renders each frame without long tasks. Event-stream
+frames are full public snapshots and are gzip-compressed per frame when the
+browser accepts it, so the cadence stays affordable for phones on the LAN.
+Reasoning phases show a "Thinking…" indicator with elapsed time because
+reasoning text never reaches the browser by design; the wait there is the
+model's, not the UI's.
+
+### How this compares with ChatGPT, Claude, and DeepSeek
+
+The reference points are the public web apps as of late 2026. The comparison
+is behavioral, not a measurement of those products, which run on their own
+servers and cannot be instrumented here.
+
+| Behavior | ChatGPT / Claude / DeepSeek web | Snow Web Manager |
+|---|---|---|
+| Send on Enter, newline on Shift+Enter | Yes | Yes (touch keyboards keep Enter as newline) |
+| Immediate "working" feedback after Send | Yes | Yes, 18–34 ms |
+| Tokens appear as they stream | Yes, batched at tens of milliseconds | Yes, 75 ms batches, no long tasks |
+| Visible reasoning phase | Collapsible "Thinking" with text (ChatGPT, DeepSeek); summarized (Claude) | "Thinking…" with elapsed time and a "Thought for Ns" note; reasoning text stays on the host by design |
+| Tool activity while working | Named steps ("Searching…", "Reading…") | "Reading a file…", "Running a command…" labels; tool rows without arguments by design |
+| Stop generation, regenerate, edit and resend | Yes | Yes |
+| Markdown, code blocks with copy | Yes | Yes |
+| Conversation sidebar, rename, switch, mobile drawer | Yes | Yes |
+| Attachments and context mentions | Files and images | Images and text files, `@` project files, `$` skills |
+| Command palette | Slash commands (some) | `/` palette with every web-native command |
+| Sign-in inside the app | Yes | Yes (device code anywhere; browser OAuth and API keys on the local URL) |
+| Light and dark theme | Yes | Yes |
+| Voice input | Yes | Yes, dictation through the browser's speech recognition on the local URL (secure context required) |
+| Canvases/artifacts, in-conversation search | Yes | No; files are edited in the project itself and the browser's find-in-page covers the transcript |
+| Smoothed token reveal | ChatGPT smooths tokens visually | Yes; each newly streamed batch fades in over 220 ms (off with reduced motion) |
+
+Canvases and a dedicated transcript search are the known gaps. Everything
+else is in place and measured above.
+
 ## Shell preflight measurements
 
 `BenchmarkAnalyzeShell` covers representative invocations without running their

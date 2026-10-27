@@ -5,12 +5,12 @@
     {
       "source": "docs/configuration.md",
       "resource": "docs/configuration.md",
-      "sha256": "483e94bc73dda6f44d5692e243c115410a49e1684bd0b579a644f7537311f0fe"
+      "sha256": "d1266e12892d3e015648b37c6fb17fb6fc47f3ca5149fed41808929e4ead5c50"
     },
     {
       "source": "docs/goals.md",
       "resource": "docs/goals.md",
-      "sha256": "cae7020a1813ce4b2c9955e5cf55b6093bb676206c94a352a730e2a20ed80dec"
+      "sha256": "ae0b5dd72205fcbda7647354f1e57d18d9611bf993fa68c15ce35f3e73e8d778"
     },
     {
       "source": "docs/plan-mode.md",
@@ -50,7 +50,7 @@
     {
       "source": "docs/security.md",
       "resource": "docs/security.md",
-      "sha256": "79acdf29ac8a5fac41631e7a0aa2a8f838012a4b7c969e78dfdd1c219d3035c3"
+      "sha256": "b9814657482a68d8a2c4dd47c44202f1c9baa2cce336d64b8f468f2def2764ea"
     },
     {
       "source": "docs/sessions.md",

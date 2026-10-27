@@ -9,8 +9,13 @@ function DismissibleError({error}: {error: string}) {
     else event.currentTarget.blur();
     setDismissed(true);
   }
+  const signIn = /login required|sign in again|not signed in|invalid api key|HTTP 401|credential.*(expired|rejected|missing)/i.test(error);
+  function openSignIn(event: MouseEvent<HTMLButtonElement>) {
+    (window as {SnowAuth?: {show: (trigger: HTMLElement | null) => boolean}}).SnowAuth?.show(event.currentTarget);
+  }
   return <div id="live-error" className="error live-error live-error-message" role="alert" hidden={!error || dismissed}>
     <span>{error}</span>
+    {signIn && <button type="button" className="quiet" data-live-error-sign-in="" onClick={openSignIn}>Sign in…</button>}
     <button type="button" className="quiet icon-button" data-live-error-dismiss="" aria-label="Dismiss error" title="Dismiss error" onClick={dismiss}>×</button>
   </div>;
 }

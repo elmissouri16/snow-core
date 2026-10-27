@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/json/v2"
@@ -112,9 +113,16 @@ func (s *shell) runtimeEventsHandlerPolicy(policy streamPolicy) http.Handler {
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Accel-Buffering", "no")
+		w.Header().Set("Vary", "Accept-Encoding")
+		// Every frame is a full public snapshot, so consecutive frames repeat
+		// almost all of their bytes. Compressing the stream per frame keeps the
+		// 75 ms cadence affordable for phones on the LAN: a 300-token answer
+		// shrinks from hundreds of kilobytes of frames to a few.
+		out := newStreamWriter(w, controller, acceptsGzip(r.Header.Get("Accept-Encoding")))
+		defer out.close()
 		binding := streamBinding{ProjectID: projectID, InstanceID: instanceID}
 		send := func(event string, value any) bool {
-			return writeStreamEvent(w, controller, policy.write, event, value) == nil
+			return writeStreamEvent(out, policy.write, event, value) == nil
 		}
 		if err != nil || sub == nil || !sameStreamBinding(snapshot, binding) {
 			send("closed", binding)
@@ -167,7 +175,7 @@ func (s *shell) runtimeEventsHandlerPolicy(policy streamPolicy) http.Handler {
 					revision = snapshot.Revision
 				}
 			case <-heartbeat.C:
-				if writeStreamFrame(w, controller, policy.write, []byte(": heartbeat\n\n")) != nil {
+				if writeStreamFrame(out, policy.write, []byte(": heartbeat\n\n")) != nil {
 					return
 				}
 			}
@@ -201,7 +209,41 @@ func (b *streamBuffer) Write(p []byte) (int, error) {
 	return b.Buffer.Write(p)
 }
 
-func writeStreamEvent(w http.ResponseWriter, controller *http.ResponseController, timeout time.Duration, event string, value any) error {
+// streamWriter writes SSE frames straight to the response or through a
+// per-frame flushed gzip stream when the browser accepts it.
+type streamWriter struct {
+	w          http.ResponseWriter
+	controller *http.ResponseController
+	gzip       *gzip.Writer
+}
+
+func newStreamWriter(w http.ResponseWriter, controller *http.ResponseController, compress bool) *streamWriter {
+	out := &streamWriter{w: w, controller: controller}
+	if compress {
+		w.Header().Set("Content-Encoding", "gzip")
+		out.gzip, _ = gzip.NewWriterLevel(w, gzip.BestSpeed)
+	}
+	return out
+}
+
+func (s *streamWriter) write(frame []byte) error {
+	if s.gzip != nil {
+		if _, err := s.gzip.Write(frame); err != nil {
+			return err
+		}
+		return s.gzip.Flush()
+	}
+	_, err := s.w.Write(frame)
+	return err
+}
+
+func (s *streamWriter) close() {
+	if s.gzip != nil {
+		_ = s.gzip.Close()
+	}
+}
+
+func writeStreamEvent(out *streamWriter, timeout time.Duration, event string, value any) error {
 	var data streamBuffer
 	if err := json.MarshalWrite(&data, value); err != nil {
 		return err
@@ -210,18 +252,18 @@ func writeStreamEvent(w http.ResponseWriter, controller *http.ResponseController
 	frame := fmt.Appendf(nil, "event: %s\ndata: ", event)
 	frame = append(frame, data.Bytes()...)
 	frame = append(frame, '\n', '\n')
-	return writeStreamFrame(w, controller, timeout, frame)
+	return writeStreamFrame(out, timeout, frame)
 }
 
-func writeStreamFrame(w http.ResponseWriter, controller *http.ResponseController, timeout time.Duration, frame []byte) error {
-	if err := controller.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+func writeStreamFrame(out *streamWriter, timeout time.Duration, frame []byte) error {
+	if err := out.controller.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
 		return err
 	}
-	if _, err := w.Write(frame); err != nil {
+	if err := out.write(frame); err != nil {
 		return err
 	}
-	if err := controller.Flush(); err != nil {
+	if err := out.controller.Flush(); err != nil {
 		return err
 	}
-	return controller.SetWriteDeadline(time.Time{})
+	return out.controller.SetWriteDeadline(time.Time{})
 }

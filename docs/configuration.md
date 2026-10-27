@@ -15,7 +15,6 @@ and the supported global/project fields.
 - [Local web manager settings scopes](#local-web-manager-settings-scopes)
 - [Global config.json](#global-configjson)
 - [Providers](#providers)
-- [ChatGPT accounts](#chatgpt-accounts)
 - [TUI](#tui)
 - [Provider retry](#provider-retry)
 - [Compaction](#compaction)
@@ -308,8 +307,6 @@ fills required zero-value defaults before validation.
 |---|---|---|
 | `default_provider` | `opencode-go` | Global fallback provider ID for projects without a remembered selection; requires an OpenCode API key |
 | `default_model` | provider default | Global fallback model ID; provider-specific config may also declare a default |
-| `chatgpt_accounts.preferred` | unset → `default` | Global preferred ChatGPT credential alias; overridden by runtime `--account` |
-| `chatgpt_accounts.fallback` | omitted or `[]` | Reserved; nonempty automatic-failover lists are rejected |
 | `default_project_trust` | `ask` | `ask`, `allow`, or `deny`; legacy `always`/`never` are aliases |
 | `thinking` | `off` | Global fallback effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra` |
 | `project_selections` | `{}` | Operator-owned absolute working-directory map populated by TUI or RPC model/thinking changes; each entry stores `provider`, `model`, and `thinking` |
@@ -455,42 +452,6 @@ its models are restricted to OpenCode clients. `OPENAI_API_KEY` applies only to
 the unnamed `openai-compatible` profile; named profiles do not inherit it. Compatible
 profiles support Bearer authentication but not custom Azure headers or query
 parameters.
-
-## ChatGPT accounts
-
-Account policy belongs only in operator-owned global `config.json`:
-
-```json
-{
-  "chatgpt_accounts": {
-    "preferred": "work"
-  }
-}
-```
-
-Use `snow login chatgpt --account work` to store the login, then
-`snow auth use chatgpt work` to validate its stored existence and atomically
-update the preference. No alias registry is needed: `snow accounts` discovers
-actual credential-store entries. Aliases are 1–64 lowercase ASCII letters or
-digits with internal `._-`, starting and ending in a letter or digit. Tokens
-remain in `auth.json`: `default` uses `chatgpt`; named aliases use
-`chatgpt/account/<name>`.
-
-For a ChatGPT runtime, selection is `--account NAME`, global preferred alias,
-then `default`. A runtime override does not rewrite configuration; `/account`
-also selects only the current runtime. `/account prefer NAME` (or **p** in the
-TUI account picker) explicitly saves the global preference for future runs,
-without switching the current account. Login/logout/auth check without
-`--account` always manage `default`, not the preferred runtime account.
-Trusted project configuration cannot select accounts or configure fallback.
-
-Automatic failover is unavailable pending verified upstream usage permission
-and cross-account continuity behavior. Nonempty `chatgpt_accounts.fallback`
-and `--account-fallback` are rejected rather than silently rotating accounts.
-Account overrides require the ChatGPT provider; web-manager startup rejects
-these flags because it does not transport account overrides. See
-[ChatGPT authentication](https://github.com/elmissouri16/snow-core/blob/main/docs/chatgpt-auth.md#named-accounts-and-manual-selection)
-for manual selection and encrypted-history restrictions.
 
 ## TUI
 

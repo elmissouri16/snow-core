@@ -144,7 +144,7 @@ follow-up for work that can wait until the current response completes.
 Type `/` to open command completion. The essential commands are:
 
 In `/model`, type to search and press **Ctrl+R** to refresh provider catalogs.
-Opening the picker also refreshes expired ChatGPT catalogs automatically. Cached
+Opening the picker also refreshes expired Zen catalogs automatically. Cached
 models remain visible while discovery runs.
 
 | Command | Purpose |
@@ -156,8 +156,7 @@ models remain visible while discovery runs.
 | `/settings` | Open common model, UI, permission, capability, and update settings |
 | `/keybindings` | Inspect or edit global/project shortcuts |
 | `/permissions [mode]` | Inspect or set `ask`, `allow`, or `deny` |
-| `/login`, `/logout` | Manage credentials; `/login chatgpt NAME` saves a separate named login |
-| `/account [name]` | Inspect or select ChatGPT accounts; `/account prefer NAME` saves the preferred alias |
+| `/login`, `/logout` | Manage provider credentials |
 | `/default`, `/plan [prompt]` | Select collaboration mode |
 | `/goal [--budget N] [objective]` | Inspect or create a Thread Goal |
 | `/compact`, `/context` | Compact or inspect model context |
@@ -169,44 +168,6 @@ models remain visible while discovery runs.
 | `/trust [allow or deny]` | Inspect or update project trust |
 | `/debug [status or action]` | Inspect or control diagnostic capture |
 | `/quit` | Exit Snow |
-
-**Select a ChatGPT account.**
-
-Create additional aliases in the CLI with `snow login chatgpt --account NAME`.
-`snow accounts` (or `snow auth accounts chatgpt`) lists stored aliases and local
-authentication status without refreshing credentials or fetching models.
-`snow auth use chatgpt NAME` sets the global preference for future runtimes;
-`snow --provider chatgpt --account NAME` overrides it for one launch. Without
-an explicit selection or preference, the runtime uses `default`. CLI
-login/logout/auth check without `--account` always manage `default`.
-
-With ChatGPT active, `/account` opens a local-only picker. Use the arrow keys
-and Enter, or `/account NAME`, to select a stored account while idle and with
-no active subagents. Selection applies only to this runtime and refreshes the
-selected account's model catalog in the background. `/login` and `/logout`
-then use that alias. To add another account without leaving the TUI, use
-`/login chatgpt NAME` and authorize the other ChatGPT account. Saving does not
-switch the current runtime or replace its existing login. In `/account`, press
-**p** on an alias to make it preferred for future runs, or use
-`/account prefer NAME`; Enter still selects only for this runtime.
-The picker distinguishes authentication expiration from quota observed in this
-runtime; it does not verify active subscriptions or show estimated balances.
-
-Encrypted ChatGPT history cannot transfer to a different known identity.
-Selecting another account carries a bounded plain-text working-state checkpoint
-into a fresh account-bound context when saved private continuity requires it;
-no separate `/new` step is needed. You can continue the task rather than start
-with blank context. The exact previous conversation remains in `/sessions`.
-Logging into a replacement identity under the selected alias in the TUI uses the
-same handoff; token rotation and detached named login do not reset the context.
-If credentials changed externally, reselect the desired alias with `/account NAME`.
-The TUI does not replay thinking, images, provider-private blocks, or old account
-binding, discard/write unsaved `--no-session` history, or treat unrelated errors
-as a reason to create a new context. Child runtimes keep their
-creation-time account. Automatic rotation/failover is unavailable; nonempty
-fallback options are rejected. Dedicated web and public SDK/RPC account
-management remain deferred. See [ChatGPT authentication](https://github.com/elmissouri16/snow-core/blob/main/docs/chatgpt-auth.md)
-for alias rules and legacy/inherited-history restrictions.
 
 Use `/allow`, `/allow always`, or `/deny` only for the permission request that
 is currently visible. The shell permission picker names these choices **Allow once**,
@@ -439,10 +400,74 @@ settings apply to **future workers**, not the current worker or a new conversati
 created within it. Local provider status is only configured/expired/unavailable
 metadata; it is not a network or credential-validity test.
 
-The browser does not accept provider API keys or run provider OAuth. Use the
-appropriate interactive `snow login ...` or other host-side credential workflow,
-then restart workers deliberately when changed credentials must take effect. See
+Settings itself never signs in: it has no worker to run a login. Sign in from
+an open conversation instead (see [Accounts and sign-in](#accounts-and-sign-in)),
+or use the interactive `snow login ...` workflow on the host. See
 [configuration scopes](configuration.md#local-web-manager-settings-scopes).
+
+#### Dictation
+
+On the local URL in Chrome, Edge, or Safari, the microphone button in the
+composer dictates into the draft through the browser's own speech recognition.
+The browser, not Snow, handles the audio; the button is absent where speech
+recognition is unavailable or the origin is not a secure context (the
+trusted-LAN URL).
+
+#### Live turn indicator
+
+While a turn runs, the line above the composer says what the worker is doing:
+**Thinking…** with elapsed seconds while the model reasons, **Reading a
+file…**, **Running a command…** or a similar label for the current tool call,
+and **Writing…** while the answer streams; a **Thought for 12s** note appears
+once reasoning ends. These labels come from public state only. Reasoning text
+and tool arguments are never sent to the browser; the terminal TUI remains the
+place to read them.
+
+#### Subagents and project initialization
+
+**Subagents…** in the conversation menu (or `/agent`) lists the child agents
+the worker has spawned with their path, role, model, status, duration and
+result or error, refreshing every few seconds while any are running. It is
+read-only; **Stop** on the main turn cancels the whole run. `/init` runs the
+same AGENTS.md and project-configuration initialization turn as the TUI: the
+worker composes the prompt and its file writes go through the normal
+permission cards.
+
+#### MCP server status
+
+**MCP servers…** in the conversation menu (or `/mcp`) lists the MCP servers
+the activated worker negotiated, with transport, connection state, protocol
+version, tool count and the worker's last message, as the TUI's `/mcp` does.
+It is read-only: servers are configured on the host and are never started,
+reconnected or edited from the browser.
+
+#### Accounts and sign-in
+
+An activated conversation can sign in to providers the same way the TUI's
+`/login` does. Open **Accounts & sign-in…** from the conversation's `⋯` menu,
+the control row above the transcript, the `/login` or `/logout` composer
+command, or the **Sign in…** button that appears on a "login required" error.
+The panel lists every provider the worker knows with its local credential state
+(signed in, expired, invalid, not signed in) and the worker's own account ID.
+
+Sign-in runs inside that project's worker on the Snow host, so the resulting
+tokens are stored on the host for every Snow surface and are never shown in
+the browser. The available methods depend on the browser's origin:
+
+| Method | Local URL (`127.0.0.1`) | LAN URL |
+|---|---|---|
+| ChatGPT device code | Yes | Yes |
+| ChatGPT browser OAuth | Yes | No (its callback port is on the host) |
+| API key | Yes | No (the key would travel over unencrypted HTTP) |
+
+A device-code sign-in shows the code and the provider URL to open on any
+device; the panel polls the worker until the provider confirms, fails, or you
+press **Cancel sign-in**. Only one sign-in runs at a time, and the composer and
+other session controls stay reserved while it runs. Once sign-in completes the
+panel refreshes provider status and model discovery; a conversation that
+started on the placeholder model `default` because no catalog was reachable
+picks up the configured model automatically. **Sign out** removes the stored
+credential for that provider on the host after an inline confirmation.
 
 #### Workspace layout
 
@@ -1074,11 +1099,12 @@ connection, request-outcome, and in-progress notices remain visible.
 
 - **`/` Web commands:** start an otherwise empty draft with `/` to search the
   browser-native command palette. It exposes only capabilities with an existing
-  typed Web owner—context/compaction, Default or Plan mode, goals, model,
+  typed Web owner—context/compaction, Default or Plan mode, goals, help,
+  sign-in (`/login`, `/logout`), MCP server status (`/mcp`), model,
   permissions, processes, conversations, settings, thinking, and versions. A
   selected command invokes that owner and is never sent as a provider prompt;
-  TUI-only commands such as `/login`, `/plugins`, `/mcp`, and `/agent` are not
-  advertised. A draft that starts with `/` remains command-only: sending an
+  `/help` leaves a bare `/` so the whole palette is listed. TUI-only commands
+  such as `/plugins`, `/agent`, `/fork`, and `/init` are not advertised. A draft that starts with `/` remains command-only: sending an
   incomplete, unsupported, or argument-bearing Web command asks you to choose
   instead of forwarding slash text to the provider, including after Send moves
   focus away from the composer.
@@ -1097,7 +1123,7 @@ connection, request-outcome, and in-progress notices remain visible.
   A disabled runtime explains how to enable skills at its next explicit start.
 - **Keyboard:** arrows move through suggestions; plain Enter or Tab picks an
   enabled result; Escape dismisses the popup. Modified Tab, native text editing,
-  and IME composition retain browser behavior. Ctrl/⌘+Enter remains explicit
+  and IME composition retain browser behavior. Enter remains explicit
   Send except while choosing an open slash command.
 
 Attachments stay in tab memory, independently for each project/conversation;

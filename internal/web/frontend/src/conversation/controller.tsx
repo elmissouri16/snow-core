@@ -125,7 +125,7 @@ export class Controller {
     const definitions: [Glyph, string, string][] = [
       ['versions', 'Conversation versions', '[data-versions-open]'], ['goals', 'Thread goal', '[data-goals-open]'],
       ['processes', 'Managed processes', '[data-processes-open]'], ['reasoning', 'Thinking & response', '[data-reasoning-open]'],
-      ['compaction', 'Compact context', '[data-compaction-open]'], ['steer', 'Steer current run…', '[data-steer-open]'],
+      ['compaction', 'Compact context', '[data-compaction-open]'], ['auth', 'Accounts & sign-in', '[data-auth-open]'], ['mcp', 'MCP servers', '[data-mcp-open]'], ['subagents', 'Subagents', '[data-subagents-open]'], ['steer', 'Steer current run…', '[data-steer-open]'],
     ];
     return definitions.flatMap(([key, label, selector]) => {
       const source = this.element.querySelector<HTMLButtonElement>(selector);
@@ -263,4 +263,9 @@ export async function select({project, session = '', instance, trigger}: {projec
   if (!c.valid(currentInstance)) return false;
   return await c.switchTo(session, trigger);
 }
-export const conversation = Object.freeze({init, render, dispose, select, rename: (trigger: HTMLElement) => state?.openRename(trigger)});
+/** Re-runs host model discovery, for example after a sign-in changed what the provider offers. */
+export function refreshModels(): boolean {
+  const c = state; if (!c?.canChange()) return false;
+  void c.load(); return true;
+}
+export const conversation = Object.freeze({init, render, dispose, select, refreshModels, rename: (trigger: HTMLElement) => state?.openRename(trigger)});

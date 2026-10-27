@@ -55,6 +55,10 @@ type RuntimePermission struct {
 // neither an HTTP response nor an abort acknowledgment establishes readiness.
 type RuntimeSnapshot struct {
 	ReasoningEnabled      bool                       `json:"reasoning_enabled"`
+	AuthEnabled           bool                       `json:"auth_enabled"`
+	MCPEnabled            bool                       `json:"mcp_enabled"`
+	SubagentsEnabled      bool                       `json:"subagents_enabled"`
+	ProjectInitEnabled    bool                       `json:"project_init_enabled"`
 	CompactionEnabled     bool                       `json:"compaction_enabled"`
 	Steer                 *RuntimeSteer              `json:"steer"`
 	SteerACK              *RuntimeSteerACK           `json:"steer_ack,omitempty"`
@@ -73,6 +77,7 @@ type RuntimeSnapshot struct {
 	PermissionMode        string                     `json:"permission_mode"`
 	Thinking              string                     `json:"thinking"`
 	Telemetry             *RuntimeTelemetry          `json:"telemetry"`
+	LiveThinking          *RuntimeLiveThinking       `json:"live_thinking,omitempty"`
 	Provider              string                     `json:"provider"`
 	Model                 string                     `json:"model"`
 	Status                string                     `json:"status"`

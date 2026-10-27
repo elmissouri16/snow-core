@@ -48,7 +48,7 @@ func (m *RuntimeManager) PromptContent(ctx context.Context, projectID, instanceI
 		owned[i] = block
 		owned[i].Data = bytes.Clone(block.Data)
 	}
-	return m.prompt(ctx, projectID, instanceID, text, owned)
+	return m.prompt(ctx, projectID, instanceID, "prompt", text, owned)
 }
 
 // runtimeComposerPrompt runs only after authentication, bounded form parsing,

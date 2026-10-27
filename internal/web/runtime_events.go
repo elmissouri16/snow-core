@@ -2,9 +2,11 @@ package web
 
 import (
 	"crypto/sha256"
+	"encoding/json/v2"
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 
 	clientrpc "github.com/elmissouri16/snow-core/pkg/agentclient/rpc"
@@ -105,7 +107,77 @@ func runtimeErrorText(text string) string {
 	for _, prefix := range []string{"agent: provider stream: ", "agent: provider chat: ", "agent: provider resolve: ", "agent: "} {
 		text = strings.TrimPrefix(text, prefix)
 	}
-	return strings.TrimSpace(text)
+	return strings.TrimSpace(humanizeProviderError(text))
+}
+
+// humanizeProviderError replaces a raw JSON error body that a provider relayed
+// (for example `HTTP 410: {"type":"error","error":{"message":"..."}}`) with its
+// human-readable message, keeping the provider and status prefix. Anything that
+// is not a JSON object with a message is returned unchanged.
+func humanizeProviderError(text string) string {
+	start := strings.Index(text, "{")
+	if start < 0 || !strings.HasSuffix(strings.TrimSpace(text), "}") {
+		return text
+	}
+	var body any
+	if json.Unmarshal([]byte(text[start:]), &body) != nil {
+		return text
+	}
+	message := providerErrorMessage(body, 0)
+	if message == "" {
+		return text
+	}
+	return strings.TrimSpace(text[:start]) + " " + message
+}
+
+func providerErrorMessage(value any, depth int) string {
+	object, ok := value.(map[string]any)
+	if !ok || depth > 3 {
+		return ""
+	}
+	for _, key := range []string{"message", "detail", "error_description"} {
+		if message, ok := object[key].(string); ok && strings.TrimSpace(message) != "" {
+			return strings.TrimSpace(message)
+		}
+	}
+	for _, key := range []string{"error", "errors"} {
+		if message := providerErrorMessage(object[key], depth+1); message != "" {
+			return message
+		}
+	}
+	return ""
+}
+
+// RuntimeLiveThinking is state only: whether the model is currently reasoning
+// and for how long. Reasoning text itself stays private to the worker, like
+// tool arguments; the browser snapshot never carries it.
+type RuntimeLiveThinking struct {
+	Active    bool  `json:"active"`
+	StartedAt int64 `json:"started_at"`
+	Seconds   int   `json:"seconds"`
+}
+
+func (r *liveRuntime) projectThinkingLocked(text string) {
+	if text == "" {
+		return
+	}
+	thinking := r.snapshot.LiveThinking
+	if thinking != nil && thinking.Active {
+		return // already shown; deltas carry no public state change
+	}
+	// A fresh reasoning phase after answer text or tools starts a new block.
+	r.snapshot.LiveThinking = &RuntimeLiveThinking{Active: true, StartedAt: time.Now().UnixMilli()}
+	r.publishLocked()
+}
+
+func (r *liveRuntime) settleThinkingLocked() {
+	thinking := r.snapshot.LiveThinking
+	if thinking == nil || !thinking.Active {
+		return
+	}
+	thinking.Active = false
+	thinking.Seconds = max(int((time.Now().UnixMilli()-thinking.StartedAt)/1000), 1)
+	r.publishLocked()
 }
 
 func runtimePromptFailureText(detail string) string {
@@ -501,8 +573,11 @@ func (r *liveRuntime) consumeEvent(event clientrpc.Event) {
 			r.snapshot.Thinking = string(protocol.NormalizeThinkingLevel(e.Mode.ReasoningEffort))
 			r.publishLocked()
 		}
+	case protocol.EvThinkingDelta:
+		r.projectThinkingLocked(e.Text)
 	case protocol.EvTextDelta:
 		if e.Text != "" {
+			r.settleThinkingLocked()
 			if r.assistant < 0 {
 				r.addMessage(RuntimeMessage{Role: "assistant", SourceTurnID: r.assistantSourceTurn(*e), SourceSpanID: r.queueSourceSpanLocked()})
 				r.assistant = len(r.snapshot.Messages) - 1
@@ -515,6 +590,9 @@ func (r *liveRuntime) consumeEvent(event clientrpc.Event) {
 			r.publishLocked()
 		}
 	case protocol.EvToolStart, protocol.EvToolEnd:
+		if e.Type == protocol.EvToolStart {
+			r.settleThinkingLocked()
+		}
 		r.projectActivity(*e)
 	case protocol.EvError:
 		if message := runtimeErrorText(e.Message); message != "" {

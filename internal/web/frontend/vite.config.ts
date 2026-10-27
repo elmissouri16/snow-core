@@ -29,12 +29,15 @@ export default defineConfig(({ command }) => ({
     emptyOutDir: true,
     sourcemap: false,
     target: 'es2022',
-    lib: {
-      entry: directory('./src/main.tsx'),
-      formats: ['es'],
-      fileName: () => 'app.js',
-      cssFileName: 'app',
+    // An application build, not library mode: library-mode ES output keeps
+    // whitespace and pure annotations, which left this bundle at ~860 KB. The
+    // manager serves it on every page, so minify fully; gzip applies on top.
+    minify: 'oxc',
+    rolldownOptions: {
+      input: directory('./src/main.tsx'),
+      // Standalone pages load on demand as hashed chunks next to app.js; the Go
+      // manager serves every generated .js file from the embedded tree.
+      output: { format: 'es', entryFileNames: 'app.js', chunkFileNames: '[name]-[hash].js', assetFileNames: 'app.[ext]' },
     },
-    rolldownOptions: { output: { codeSplitting: false } },
   },
 }));

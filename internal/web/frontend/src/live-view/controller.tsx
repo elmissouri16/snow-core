@@ -60,7 +60,7 @@ function updateControls(patch: Partial<ControlsState>) {
   if (changed('reuse', 'edit', 'regenerate')) commit(current, 'composer-notices', <Notices view={view}/>);
   if (changed('sendDisabled', 'showStop', 'sendLabel', 'sending', 'canStop', 'stopLabel', 'stopTitle')) commit(current, 'composer-actions', <Actions view={view}/>);
   if (changed('status', 'statusIdle', 'queue')) commit(current, 'composer-status', <Status view={view}/>);
-  if (changed('turnVisible')) commit(current, 'turn-status', <TurnStatus visible={view.turnVisible}/>);
+  if (changed('turnVisible', 'turn')) commit(current, 'turn-status', <TurnStatus visible={view.turnVisible} turn={view.turn}/>);
   if (current.regeneration && changed('dialog')) commit(current, 'regenerate-dialog', <Regeneration view={view.dialog}/>);
 }
 function updateDraft(text: string): boolean {

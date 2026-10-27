@@ -429,6 +429,11 @@ export function init({root, key, instance, request, changed = () => {}, error = 
     const slashDraft = prompt.value.trim();
     const slash = /^\/([^\s/]*)$/.exec(slashDraft);
     const exact = slash?.[1] === undefined ? undefined : matchingCommands(slash[1]).find(item => item.name.toLocaleLowerCase() === `/${slash[1].toLocaleLowerCase()}`);
+    if (exact?.name === "/help") {
+      // Help is the palette itself: leave a bare slash so every command shows.
+      if (!replaceText?.("/", 0, prompt.value.length)) { report("/help is unavailable in this Web Manager state."); return; }
+      focusPrompt(); inspectToken(); return;
+    }
     if (exact) {
       if (!replaceText?.("", 0, prompt.value.length)) { report(`${exact.name} is unavailable in this Web Manager state.`); return; }
       close(); focusPrompt();

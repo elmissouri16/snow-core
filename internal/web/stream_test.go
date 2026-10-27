@@ -2,6 +2,8 @@ package web
 
 import (
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/json/v2"
@@ -288,26 +290,46 @@ func (w *streamDeadlineWriter) Write(data []byte) (int, error) {
 }
 func (w *streamDeadlineWriter) FlushError() error { return w.flushErr }
 
+func TestRuntimeStreamCompressedFramesFlushPerEvent(t *testing.T) {
+	writer := &streamDeadlineWriter{ResponseRecorder: httptest.NewRecorder()}
+	out := newStreamWriter(writer, http.NewResponseController(writer), true)
+	if err := writeStreamEvent(out, time.Second, "snapshot", map[string]string{"text": "first"}); err != nil {
+		t.Fatal(err)
+	}
+	// Each frame must be readable before the stream closes: a flushed gzip
+	// member, not bytes held back in the compressor.
+	reader, err := gzip.NewReader(bytes.NewReader(writer.Body.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := make([]byte, 256)
+	n, _ := reader.Read(first)
+	if writer.Header().Get("Content-Encoding") != "gzip" || !strings.Contains(string(first[:n]), `"text":"first"`) {
+		t.Fatalf("compressed frame not flushed: %q", first[:n])
+	}
+	out.close()
+}
+
 func TestRuntimeStreamBoundedFramesDeadlinesAndLifetime(t *testing.T) {
 	writer := &streamDeadlineWriter{ResponseRecorder: httptest.NewRecorder()}
 	controller := http.NewResponseController(writer)
-	if err := writeStreamEvent(writer, controller, time.Second, "snapshot", map[string]string{"text": "one\ntwo"}); err != nil {
+	if err := writeStreamEvent(newStreamWriter(writer, controller, false), time.Second, "snapshot", map[string]string{"text": "one\ntwo"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(writer.deadlines) != 2 || writer.deadlines[0].IsZero() || !writer.deadlines[1].IsZero() || !strings.Contains(writer.Body.String(), `one\ntwo`) {
 		t.Fatal("frame boundaries or per-write deadlines incorrect")
 	}
 	before := writer.Body.Len()
-	if err := writeStreamEvent(writer, controller, time.Second, "snapshot", strings.Repeat("x", streamSnapshotBytes+1)); err == nil || writer.Body.Len() != before {
+	if err := writeStreamEvent(newStreamWriter(writer, controller, false), time.Second, "snapshot", strings.Repeat("x", streamSnapshotBytes+1)); err == nil || writer.Body.Len() != before {
 		t.Fatal("oversized frame partially written or not bounded")
 	}
 	writer.writeErr = io.ErrClosedPipe
-	if err := writeStreamFrame(writer, controller, time.Second, []byte("test")); !errors.Is(err, io.ErrClosedPipe) {
+	if err := writeStreamFrame(newStreamWriter(writer, controller, false), time.Second, []byte("test")); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatal("write error ignored")
 	}
 	writer.writeErr = nil
 	writer.flushErr = io.ErrClosedPipe
-	if err := writeStreamFrame(writer, controller, time.Second, []byte("test")); !errors.Is(err, io.ErrClosedPipe) {
+	if err := writeStreamFrame(newStreamWriter(writer, controller, false), time.Second, []byte("test")); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatal("flush error ignored")
 	}
 	policy := shortStreamPolicy()

@@ -138,6 +138,9 @@ func (s *shell) projectData(ctx context.Context, query url.Values, data *pageDat
 	_, data.HistoryControlEnabled = s.runtimes.(RuntimeHistoryControlBackend)
 	data.HistoryControlEnabled = data.HistoryControlEnabled && data.VersionsEnabled
 	_, data.ReasoningEnabled = s.runtimes.(RuntimeReasoningBackend)
+	_, data.AuthEnabled = s.runtimes.(RuntimeAuthBackend)
+	_, data.MCPEnabled = s.runtimes.(RuntimeMCPBackend)
+	_, data.SubagentsEnabled = s.runtimes.(RuntimeSubagentsBackend)
 	_, data.CompactionEnabled = s.runtimes.(RuntimeCompactionBackend)
 	data.ProjectOperationsEnabled = s.operations != nil
 	_, data.ProcessControlEnabled = s.runtimes.(RuntimeProcessBackend)

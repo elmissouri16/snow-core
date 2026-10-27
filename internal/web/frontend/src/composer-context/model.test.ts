@@ -15,7 +15,8 @@ test('web command completion is bounded to native controls and ranks exact, pref
   assert.deepEqual(matchingCommands('model').map(command => command.name), ['/model']);
   assert.deepEqual(matchingCommands('mod').map(command => command.name), ['/model']);
   assert.deepEqual(matchingCommands('cmp').map(command => command.name), ['/compact']);
-  assert.equal(matchingCommands('login').length, 0);
+  assert.equal(matchingCommands('quit').length, 0);
+  assert.deepEqual(matchingCommands('login').map(command => command.name), ['/login']);
   assert.equal(matchingCommands('').length, composerCommands.length);
   assert.equal(new Set(composerCommands.map(command => command.name)).size, composerCommands.length);
   assert.ok(composerCommands.every(command => command.name.startsWith('/') && command.description));

@@ -68,7 +68,7 @@ continuation. Use `/goal resume` when you are ready to continue.
 The local manager exposes a narrower explicit workflow than the TUI commands.
 Activate a conversation and enable **Goal** in the composer. This is a local
 draft-mode toggle: it performs no inspection and starts no work. Type the objective
-in the same message box, then submit using **Start goal run** (or Ctrl/⌘+Enter).
+in the same message box, then submit using **Start goal run** (or Enter).
 There is no separate objective editor, creation dialog, or consent checkbox.
 Submitting explicitly authorizes one goal run with the current model and session
 permissions. Goal objectives currently accept plain text, not attachments.

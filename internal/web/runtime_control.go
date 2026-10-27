@@ -89,18 +89,33 @@ func (m *RuntimeManager) Prompt(ctx context.Context, projectID, instanceID, text
 	if len(text) > 64<<10 || strings.TrimSpace(text) == "" || !utf8.ValidString(text) || strings.ContainsRune(text, 0) {
 		return ErrRuntimeInvalid
 	}
-	return m.prompt(ctx, projectID, instanceID, text, nil)
+	return m.prompt(ctx, projectID, instanceID, "prompt", text, nil)
 }
 
-// prompt is the sole prompt admission path for legacy text and composer content.
-// Callers validate and own their payload before entering the control gate.
-func (m *RuntimeManager) prompt(ctx context.Context, projectID, instanceID, text string, content []protocol.ContentBlock) error {
+// projectInitSummary is the public transcript label for a /init turn. The
+// worker composes the real instruction prompt; saved history keeps that text.
+const projectInitSummary = "Initialize an AGENTS.md guide and project configuration for this workspace."
+
+// ProjectInit runs the TUI's /init through the ordinary prompt admission path.
+// The worker builds the initialization prompt itself (RPC project_init), so no
+// browser-authored instruction text is involved.
+func (m *RuntimeManager) ProjectInit(ctx context.Context, projectID, instanceID string) error {
+	return m.prompt(ctx, projectID, instanceID, "project_init", projectInitSummary, nil)
+}
+
+// prompt is the sole prompt admission path for legacy text, composer content
+// and worker-composed turns such as project_init. Callers validate and own
+// their payload before entering the control gate.
+func (m *RuntimeManager) prompt(ctx context.Context, projectID, instanceID, command, text string, content []protocol.ContentBlock) error {
 	r, err := m.controlRuntime(ctx, projectID, instanceID)
 	if err != nil {
 		return err
 	}
 	defer r.control.Unlock()
 	if len(content) != 0 && !r.supports("multimodal_prompts") {
+		return ErrRuntimeInvalid
+	}
+	if command == "project_init" && !r.supports("project_init") {
 		return ErrRuntimeInvalid
 	}
 	project := r.project
@@ -150,6 +165,7 @@ func (m *RuntimeManager) prompt(ctx context.Context, projectID, instanceID, text
 	}
 	r.snapshot.Status = "running"
 	r.snapshot.Error = ""
+	r.snapshot.LiveThinking = nil
 	r.messageEdit = runtimeMessageEditState{}
 	// The public projection contains only the browser's message summary, never
 	// image bytes. Image-only SDK callers receive a fixed nonempty placeholder.
@@ -163,7 +179,11 @@ func (m *RuntimeManager) prompt(ctx context.Context, projectID, instanceID, text
 	r.mu.Unlock()
 	callCtx, cancel := context.WithTimeout(r.ctx, 8*time.Second)
 	defer cancel()
-	response, err := r.worker.Client.Call(callCtx, protocol.RPCRequest{Type: "prompt", Message: text, Content: content})
+	request := protocol.RPCRequest{Type: command, Message: text, Content: content}
+	if command == "project_init" {
+		request.Message, request.Content = "", nil
+	}
+	response, err := r.worker.Client.Call(callCtx, request)
 	if err != nil {
 		r.fail()
 		return ErrRuntimeUnavailable

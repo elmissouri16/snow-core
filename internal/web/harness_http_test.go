@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json/v2"
 	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
@@ -69,6 +70,28 @@ func TestHarnessHTTPAssetsAndLanding(t *testing.T) {
 			response := request(t, s, "GET", "/static/"+asset.name, nil, cookie)
 			if response.Code != http.StatusOK || !strings.HasPrefix(response.Header().Get("Content-Type"), asset.contentType) || !strings.Contains(response.Body.String(), asset.marker) {
 				t.Fatal("embedded shell asset is not served by the HTTP allowlist")
+			}
+			etag := response.Header().Get("ETag")
+			if etag == "" || response.Header().Get("Cache-Control") != "no-cache" {
+				t.Fatalf("asset lacks revalidation headers: %v", response.Header())
+			}
+			r := httptest.NewRequest("GET", "/static/"+asset.name, nil)
+			r.Host = s.host
+			r.AddCookie(cookie)
+			r.Header.Set("If-None-Match", etag)
+			w := httptest.NewRecorder()
+			s.handler().ServeHTTP(w, r)
+			if w.Code != http.StatusNotModified {
+				t.Fatalf("matching ETag not revalidated: %d", w.Code)
+			}
+			r = httptest.NewRequest("GET", "/static/"+asset.name, nil)
+			r.Host = s.host
+			r.AddCookie(cookie)
+			r.Header.Set("Accept-Encoding", "gzip, deflate")
+			w = httptest.NewRecorder()
+			s.handler().ServeHTTP(w, r)
+			if w.Code != http.StatusOK || w.Header().Get("Content-Encoding") != "gzip" || w.Body.Len() >= len(response.Body.Bytes()) {
+				t.Fatalf("asset not served compressed: %d %s %d", w.Code, w.Header().Get("Content-Encoding"), w.Body.Len())
 			}
 		})
 	}

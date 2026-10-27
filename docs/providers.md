@@ -71,34 +71,6 @@ This login is separate from OpenAI API-key authentication. Run
 `snow logout chatgpt` to remove the credential stored by Snow. See the detailed
 [ChatGPT authentication reference][chatgpt-auth] for OAuth troubleshooting.
 
-To keep another account under a local alias:
-
-```sh
-snow login chatgpt --account work
-snow accounts chatgpt
-snow auth use chatgpt work
-snow --provider chatgpt --account work
-```
-
-Runtime selection uses `--account`, then the global preferred alias, then
-`default`. Management commands without `--account` still target `default`;
-use `snow logout chatgpt --account work` to remove only the named credential.
-Account lists and auth checks inspect local storage without network requests.
-In the TUI, `/account [NAME]` selects an existing stored account for this runtime;
-`/login` uses that selected alias, while `/login chatgpt NAME` saves another
-account without switching. `/account prefer NAME` or **p** in the picker makes an
-alias preferred for future runs without changing the current account.
-Account selection does not bypass encrypted history binding: when saved private
-continuity requires it, the TUI carries a bounded text working-state checkpoint
-into a fresh account-bound context and keeps exact old history in `/sessions`.
-Selected-alias TUI login replacement uses the same handoff; detached login does
-not switch. Provider-private state is never transferred or stripped from its
-original durable history. Handoffs revalidate the chosen model and explicit
-settings for the new identity, including a replacement under `default`; no model
-is silently substituted. Automatic failover is not implemented; nonempty
-fallback flags/config are rejected.
-See [named accounts and continuity][chatgpt-auth] for the full restrictions.
-
 The model picker uses your account's live Codex catalog, including GPT-6 Astra
 when available to that account. Opening `/model` refreshes catalogs older than
 15 minutes; **Ctrl+R** forces a refresh. If an announced model is missing,
