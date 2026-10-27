@@ -2,6 +2,20 @@
 (() => {
   "use strict";
   const frameLimit = 16 * 1024 * 1024;
+  // A frame may abbreviate a message or activity the same connection already
+  // delivered as {id, unchanged: true}. Merge from the previous frame only; a
+  // stub without a known predecessor means the connection is out of sync.
+  function mergeDelta(items, previous) {
+    if (!Array.isArray(items)) return items;
+    let known = null;
+    return items.map(item => {
+      if (!item || typeof item !== "object" || item.unchanged !== true) return item;
+      if (!known) { known = new Map(); for (const earlier of Array.isArray(previous) ? previous : []) if (earlier && typeof earlier === "object" && typeof earlier.id === "string") known.set(earlier.id, earlier); }
+      const earlier = known.get(item.id);
+      if (!earlier) throw new Error("Stream delta out of sync");
+      return earlier;
+    });
+  }
   function open({url, signal, snapshot, state, fallback}) {
     let disposed = false, connection, retryTimer, watchdog, failures = 0;
     const clear = () => { clearTimeout(watchdog); watchdog = null; };
@@ -27,7 +41,7 @@
         if (!response.ok || !response.headers.get("content-type")?.startsWith("text/event-stream") || !response.body) throw new Error("Stream unavailable");
         reader = response.body.getReader();
         const decoder = new TextDecoder("utf-8", {fatal: true});
-        let buffer = "";
+        let buffer = "", previous = null;
         while (!disposed && connection === controller) {
           const {done, value} = await reader.read();
           if (disposed || controller.signal.aborted || connection !== controller) return;
@@ -48,6 +62,8 @@
             if (event === "snapshot" && data.length) {
               const value = JSON.parse(data.join("\n"));
               if (!value || typeof value !== "object" || !Number.isSafeInteger(value.revision)) throw new Error("Invalid stream snapshot");
+              value.messages = mergeDelta(value.messages, previous?.messages); value.activities = mergeDelta(value.activities, previous?.activities);
+              previous = value;
               failures = 0; snapshot(value);
               if (disposed || controller.signal.aborted || connection !== controller) return;
             }

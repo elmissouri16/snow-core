@@ -54,6 +54,13 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Changed
 
+- Web Manager streaming is smoother and far cheaper for long conversations:
+  snapshot frames now arrive every 40 ms instead of 75 ms, and each frame
+  abbreviates messages and tool activities the connection already delivered,
+  so an answer streamed into an 82-message conversation moves about 44 KB on
+  the wire instead of 631 KB while transcript rows that did not change skip
+  re-rendering. The server-side Markdown cache now holds a whole bounded
+  conversation instead of 64 entries.
 - The composer toolbar stays on one row in a desktop window beside the
   sidebar: at medium widths the mode, permission, and thinking chips collapse
   to icons or short forms and the model name is ellipsized, as in ChatGPT.

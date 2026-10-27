@@ -17,7 +17,12 @@ import (
 )
 
 const markdownHTMLLimit = 128 << 10
-const markdownCacheLimit = 1 << 20
+
+// The cache must hold every rendered message of a bounded snapshot (up to
+// runtimeHistoryCount entries) or each stream frame re-renders the whole
+// conversation.
+const markdownCacheLimit = 8 << 20
+const markdownCacheEntries = 512
 
 // Only explicit links can leave the manager. No images, HTML, styles, forms,
 // embedded objects or remotely loaded content are admitted. The sanitizer is
@@ -77,7 +82,7 @@ func markdownHTML(text string) template.HTML {
 	}
 	markdownCache.Lock()
 	if _, exists := markdownCache.values[key]; !exists {
-		for len(markdownCache.order) > 0 && (len(markdownCache.order) >= 64 || markdownCache.bytes+len(rendered) > markdownCacheLimit) {
+		for len(markdownCache.order) > 0 && (len(markdownCache.order) >= markdownCacheEntries || markdownCache.bytes+len(rendered) > markdownCacheLimit) {
 			oldest := markdownCache.order[0]
 			markdownCache.order = markdownCache.order[1:]
 			markdownCache.bytes -= len(markdownCache.values[oldest])

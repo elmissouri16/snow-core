@@ -75,7 +75,7 @@ func TestMarkdownCacheConcurrentBoundedAndSnapshotIsolation(t *testing.T) {
 	}
 	wg.Wait()
 	markdownCache.Lock()
-	if len(markdownCache.values) > 64 || markdownCache.bytes > markdownCacheLimit {
+	if len(markdownCache.values) > markdownCacheEntries || markdownCache.bytes > markdownCacheLimit {
 		t.Error("unbounded Markdown cache")
 	}
 	markdownCache.Unlock()

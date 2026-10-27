@@ -1,7 +1,8 @@
 /* Conversation presentation adapted from Harness (MIT); see HARNESS-NOTICE.txt. */
-import { useLayoutEffect, useRef, useState } from 'react';
+import { memo, useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import type { MessageData } from './model';
+import { sameMessage } from './model';
 import type { ActionPresentation } from './actions';
 import { Images } from './Images';
 import { Markdown } from './Markdown';
@@ -58,7 +59,10 @@ function useStreamReveal(body: RefObject<HTMLElement | null>, text: string, enab
     return () => { if (span.isConnected) span.replaceWith(document.createTextNode(span.textContent || '')); };
   }, [text, enabled, body]);
 }
-export function Message({message, scope, actions}: {message: MessageData; scope: HTMLElement | null; actions: ActionPresentation}) {
+type MessageProps = {message: MessageData; scope: HTMLElement | null; actions: ActionPresentation};
+/** Every snapshot frame re-renders the transcript; rows whose projection did not change skip reconciliation. */
+export const Message = memo(MessageView, (previous, next) => previous.scope === next.scope && previous.actions === next.actions && sameMessage(previous.message, next.message));
+function MessageView({message, scope, actions}: MessageProps) {
   const row = useRef<HTMLElement>(null), body = useRef<HTMLDivElement>(null), {role} = message;
   const live = scope?.id === 'live-session' && scope.dataset.runtime === 'true';
   useStreamReveal(body, message.text, live && role !== 'user');

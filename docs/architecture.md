@@ -2009,7 +2009,10 @@ The optional `RuntimeSubscriber`/`RuntimeSubscription` seam atomically registers
 an observer and snapshots under the runtime lock. One-slot wakeups coalesce
 revisions; no per-token queue, replay ring or manager event stream is introduced.
 `GET /projects/{p}/runtime/events?instance_id=...` emits LF-delimited SSE with
-full display-safe public snapshots, initially and on newer revisions at 75 ms.
+display-safe public snapshots, initially and on newer revisions at 40 ms; after
+the first frame, messages and activities whose encoding is byte-identical to
+what that connection already sent are abbreviated to `{"id", "unchanged"}`
+stubs the browser merges from its previous frame (`stream_delta.go`).
 The handler admits 16 streams globally/four per browser; runtimes admit 32
 subscribers. Encoded snapshot JSON is capped at 4 MiB, heartbeat is 10 seconds,
 authority is rechecked periodically every five seconds (not immediate revocation),

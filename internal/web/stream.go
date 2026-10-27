@@ -24,7 +24,7 @@ type streamPolicy struct {
 }
 
 var defaultStreamPolicy = streamPolicy{
-	coalesce: 75 * time.Millisecond, heartbeat: 10 * time.Second,
+	coalesce: 40 * time.Millisecond, heartbeat: 10 * time.Second,
 	auth: 5 * time.Second, lifetime: 10 * time.Minute, write: 5 * time.Second,
 }
 
@@ -114,21 +114,26 @@ func (s *shell) runtimeEventsHandlerPolicy(policy streamPolicy) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Accel-Buffering", "no")
 		w.Header().Set("Vary", "Accept-Encoding")
-		// Every frame is a full public snapshot, so consecutive frames repeat
-		// almost all of their bytes. Compressing the stream per frame keeps the
-		// 75 ms cadence affordable for phones on the LAN: a 300-token answer
-		// shrinks from hundreds of kilobytes of frames to a few.
+		// Frames carry the public snapshot with unchanged messages and
+		// activities reduced to stubs (streamDelta), and are gzip-compressed
+		// per frame, so the 40 ms cadence stays cheap for phones on the LAN
+		// even when a long conversation is streaming.
 		out := newStreamWriter(w, controller, acceptsGzip(r.Header.Get("Accept-Encoding")))
 		defer out.close()
 		binding := streamBinding{ProjectID: projectID, InstanceID: instanceID}
 		send := func(event string, value any) bool {
 			return writeStreamEvent(out, policy.write, event, value) == nil
 		}
+		delta := &streamDelta{}
+		sendSnapshot := func(snapshot RuntimeSnapshot) bool {
+			frame, err := delta.frame(displaySnapshot(snapshot))
+			return err == nil && send("snapshot", frame)
+		}
 		if err != nil || sub == nil || !sameStreamBinding(snapshot, binding) {
 			send("closed", binding)
 			return
 		}
-		if !send("snapshot", displaySnapshot(snapshot)) {
+		if !sendSnapshot(snapshot) {
 			return
 		}
 		revision := snapshot.Revision
@@ -169,7 +174,7 @@ func (s *shell) runtimeEventsHandlerPolicy(policy streamPolicy) http.Handler {
 					return
 				}
 				if snapshot.Revision > revision {
-					if !send("snapshot", displaySnapshot(snapshot)) {
+					if !sendSnapshot(snapshot) {
 						return
 					}
 					revision = snapshot.Revision

@@ -140,16 +140,24 @@ a hosted model), are:
 | Repeat page load (warm cache) | DOMContentLoaded < 200 ms | 113 ms, 32 requests, 11 KB transferred (304 revalidation) |
 | Production bundle | ≤ 700 KB minified | 632 KB (185 KB gzip), Activity and Organization pages lazy |
 | Event-stream bytes for one 300-token answer (161 snapshot frames) | ≤ 100 KB on the wire | 26 KB gzip-compressed per frame, versus 1,109 KB uncompressed |
+| Same answer in an 82-message conversation (1,280 px, 30 tokens/s) | ≥ 20 updates per second, ≤ 100 KB on the wire | 279 updates at 40 ms, 44 KB on the wire (2.5 MB decoded); before delta frames: 151 updates at 75 ms, 631 KB on the wire (23.3 MB decoded) |
 
 The same run on an emulated phone (headless Chrome, 390×844, touch, 2× DPR)
 measured 34 ms to the turn indicator, 109 ms to the first token, 160 updates
 at a 75 ms median gap (max 79 ms), no long tasks, frame p95 17 ms, and the
 transcript stayed scrolled to the newest text for 100% of updates.
 
-The server coalesces snapshot publication at 75 ms, which sets the update
-cadence; the browser renders each frame without long tasks. Event-stream
-frames are full public snapshots and are gzip-compressed per frame when the
-browser accepts it, so the cadence stays affordable for phones on the LAN.
+The server coalesces snapshot publication at 40 ms, which sets the update
+cadence; the browser renders each frame without long tasks. Each event-stream
+frame carries the public snapshot, but a message or tool activity whose
+encoding is byte-identical to what the same connection already delivered is
+reduced to an `{"id", "unchanged": true}` stub that the browser merges from
+its previous frame (a stub with no predecessor forces a reconnect, which
+starts from a complete frame). Frames are also gzip-compressed per frame when
+the browser accepts it. Together this keeps a long conversation's streaming
+cost proportional to what changed: the 82-message run above moved 44 KB on
+the wire instead of 631 KB. Transcript rows are memoized, so a frame only
+reconciles the rows whose projection changed.
 Reasoning phases show a "Thinking…" indicator with elapsed time because
 reasoning text never reaches the browser by design; the wait there is the
 model's, not the UI's.
@@ -164,7 +172,7 @@ servers and cannot be instrumented here.
 |---|---|---|
 | Send on Enter, newline on Shift+Enter | Yes | Yes (touch keyboards keep Enter as newline) |
 | Immediate "working" feedback after Send | Yes | Yes, 18–34 ms |
-| Tokens appear as they stream | Yes, batched at tens of milliseconds | Yes, 75 ms batches, no long tasks |
+| Tokens appear as they stream | Yes, batched at tens of milliseconds | Yes, 40 ms batches, no long tasks |
 | Visible reasoning phase | Collapsible "Thinking" with text (ChatGPT, DeepSeek); summarized (Claude) | "Thinking…" with elapsed time and a "Thought for Ns" note; reasoning text stays on the host by design |
 | Tool activity while working | Named steps ("Searching…", "Reading…") | "Reading a file…", "Running a command…" labels; tool rows without arguments by design |
 | Stop generation, regenerate, edit and resend | Yes | Yes |

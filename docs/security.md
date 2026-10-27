@@ -282,7 +282,7 @@ wire contracts and core execution remain unchanged by this transport.
 
 Each subscription retains one coalesced wakeup, not a token/event replay log.
 Admission is bounded to 16 streams across the HTTP handler, four per browser
-credential and 32 subscribers per runtime. Changes coalesce at 75 ms; heartbeats
+credential and 32 subscribers per runtime. Changes coalesce at 40 ms; heartbeats
 are sent every 10 seconds. Encoded snapshot JSON is capped at 4 MiB, each frame
 write/flush has a five-second deadline, and connections expire after ten minutes.
 A slow browser cannot block the RPC event drain; reconnecting reads a fresh

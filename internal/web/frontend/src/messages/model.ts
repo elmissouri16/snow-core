@@ -11,10 +11,11 @@ const sameTool = (left: ToolData, right: ToolData) => left.id === right.id && le
   left.summary === right.summary && left.output === right.output && left.expandable === right.expandable && left.error === right.error && left.truncated === right.truncated &&
   left.available === right.available && left.rawTruncated === right.rawTruncated && left.open === right.open;
 const sameList = <T>(left: T[], right: T[], same: (a: T, b: T) => boolean) => left.length === right.length && left.every((value, index) => same(value, right[index]));
+export const sameMessage = (a: MessageData, b: MessageData): boolean => a === b || a.id === b.id && a.role === b.role && a.text === b.text && a.html === b.html && a.truncated === b.truncated &&
+  a.editable === b.editable && a.regeneratable === b.regeneratable && a.reusable === b.reusable && a.toolsOmitted === b.toolsOmitted &&
+  sameList(a.images, b.images, sameImage) && sameList(a.tools, b.tools, sameTool);
 export function sameMessageProjection(left: MessageData[], right: MessageData[]): boolean {
-  return sameList(left, right, (a, b) => a.id === b.id && a.role === b.role && a.text === b.text && a.html === b.html && a.truncated === b.truncated &&
-    a.editable === b.editable && a.regeneratable === b.regeneratable && a.reusable === b.reusable && a.toolsOmitted === b.toolsOmitted &&
-    sameList(a.images, b.images, sameImage) && sameList(a.tools, b.tools, sameTool));
+  return sameList(left, right, sameMessage);
 }
 export function boundedOutput(value: unknown, limit: number) {
   const source = typeof value === 'string' ? value : '';
