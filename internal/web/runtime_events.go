@@ -283,7 +283,7 @@ func (r *liveRuntime) projectHistory(page protocol.RPCMessagesPage) {
 				r.addMessage(RuntimeMessage{ID: fmt.Sprintf("%s-%d", key, blockIndex), SourceID: source, Role: "plan", Text: block.Text})
 				continue
 			}
-			if block.Type != protocol.BlockText {
+			if block.Type != protocol.BlockText || imageLabelBlock(message.Content, blockIndex) {
 				continue
 			}
 			if text == "" {

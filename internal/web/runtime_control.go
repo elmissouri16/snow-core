@@ -382,8 +382,8 @@ func promptSummary(text string, content []protocol.ContentBlock) (string, bool) 
 	if strings.TrimSpace(text) != "" {
 		parts = append(parts, text)
 	}
-	for _, block := range content {
-		if block.Type == protocol.BlockText && strings.TrimSpace(block.Text) != "" {
+	for i, block := range content {
+		if block.Type == protocol.BlockText && strings.TrimSpace(block.Text) != "" && !imageLabelBlock(content, i) {
 			parts = append(parts, block.Text)
 		}
 	}
@@ -395,4 +395,10 @@ func promptSummary(text string, content []protocol.ContentBlock) (string, bool) 
 	}
 	joined := strings.Join(parts, "\n\n")
 	return runtimeText(joined, runtimeMessageBytes), len(joined) > runtimeMessageBytes
+}
+
+// imageLabelBlock reports a composer label that only names the image block
+// following it; the thumbnail already shows that attachment.
+func imageLabelBlock(content []protocol.ContentBlock, i int) bool {
+	return i+1 < len(content) && content[i+1].Type == protocol.BlockImage && strings.HasSuffix(content[i].Text, "[Image]")
 }

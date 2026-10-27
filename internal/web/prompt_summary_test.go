@@ -13,6 +13,7 @@ func TestPromptSummaryShowsTextAttachments(t *testing.T) {
 	content := []protocol.ContentBlock{
 		{Type: protocol.BlockText, Text: "Attachment: notes.txt\nfirst file"},
 		{Type: protocol.BlockText, Text: "Attachment: todo.txt\nsecond file"},
+		{Type: protocol.BlockText, Text: "Attachment: photo.png\n[Image]"},
 		{Type: protocol.BlockImage, MIMEType: "image/png", Data: []byte{1, 2, 3}},
 	}
 	summary, truncated := promptSummary("Please review", content)
@@ -23,6 +24,7 @@ func TestPromptSummaryShowsTextAttachments(t *testing.T) {
 		t.Fatalf("attachment-only summary = %q", summary)
 	}
 	if summary, _ := promptSummary("", content[2:]); summary != "[Image attachment]" {
+		// An image label alone is not display text: the thumbnail shows the image.
 		t.Fatalf("image-only summary = %q", summary)
 	}
 	if summary, truncated := promptSummary(strings.Repeat("x", runtimeMessageBytes), content[:1]); !truncated || len(summary) > runtimeMessageBytes {

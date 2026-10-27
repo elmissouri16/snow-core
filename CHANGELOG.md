@@ -42,11 +42,16 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Fixed
 
-- A sent Web message now shows its text attachments right away. The live
-  transcript projected only the typed text, so files attached alongside it
-  did not appear until the conversation was reopened; the live and saved
-  projections now agree, with the typed text and each attachment as separate
-  paragraphs.
+- A sent Web message now shows its text attachments right away, as
+  collapsible files under the typed text. The live transcript projected only
+  the typed text, so files attached alongside it did not appear until the
+  conversation was reopened; the live and saved projections now agree, and
+  image attachments show only their thumbnails, never an "Attachment: …
+  [Image]" label.
+- Streamed answers no longer end up with duplicated fragments. The fade-in on
+  newly streamed text split React-owned text nodes, which could duplicate
+  phrases when a paragraph re-rendered mid-stream; the block that grew is now
+  animated without touching its nodes.
 - Changing the thinking level (or any other request that settles within a
   glance) no longer flickers the Web composer: the busy status line waits
   250 ms before expanding the footer, and controls that are disabled only

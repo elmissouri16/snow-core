@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { boundedOutput, projectActivities, projectMessages, sameActivityProjection, sameMessageProjection } from './model.ts';
+import { boundedOutput, projectActivities, projectMessages, sameActivityProjection, sameMessageProjection, splitAttachments } from './model.ts';
 import { imageURL } from './imageTransport.ts';
 import { markdownTags, safeLink } from './markdownModel.ts';
 import { defaultActions, mergeActions } from './actions.ts';
@@ -115,4 +115,12 @@ test('action projection bounds presentation text and rejects malformed capabilit
   const next = mergeActions(current, malformed);
   assert.equal(next.reuse.disabled, true); assert.equal(next.reuse.hidden, true); assert.equal(next.reuse.title.length, 512);
   assert.equal(next.edit.messageID, ''); assert.equal(next.historicalDisabled, true);
+});
+
+test('user text splits trailing attachment paragraphs into files', () => {
+  const {body, files} = splitAttachments('Please review\n\nAttachment: notes.txt\nfirst\nlines\n\nAttachment: todo.txt\nsecond');
+  assert.equal(body, 'Please review');
+  assert.deepEqual(files, [{name: 'notes.txt', content: 'first\nlines'}, {name: 'todo.txt', content: 'second'}]);
+  assert.deepEqual(splitAttachments('Plain message').files, []);
+  assert.equal(splitAttachments('Attachment: only.txt\nbody').body, '');
 });

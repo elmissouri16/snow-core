@@ -167,9 +167,6 @@
 
 /* Newly streamed text fades in instead of popping, so 75 ms batches read as a
  * continuous stream. The span is transient; React re-owns the text next commit. */
-.stream-reveal { animation: snow-stream-reveal 220ms ease-out; }
-@keyframes snow-stream-reveal { from { opacity: 0.15; } to { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .stream-reveal { animation: none; } }
 .composer-mic.is-listening { color: var(--danger); animation: snow-mic-pulse 1.2s ease-in-out infinite; }
 @keyframes snow-mic-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 
@@ -201,3 +198,11 @@
 .changed-files-name { font-weight: 550; color: var(--text); }
 .changed-files-path { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; }
 .changed-files-kind { color: var(--muted); font-size: 11px; }
+
+/* Text attachments inside a sent message: name first, contents on demand. */
+.message-attachment { margin: 8px 0 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 13px; }
+.message-attachment > summary { display: flex; align-items: center; gap: 6px; padding: 6px 10px; cursor: pointer; list-style: none; color: var(--text); }
+.message-attachment > summary::-webkit-details-marker { display: none; }
+.message-attachment > summary .icon { width: 14px; height: 14px; flex: none; color: var(--muted); }
+.message-attachment > summary small { color: var(--muted); }
+.message-attachment pre { margin: 0; padding: 8px 10px; border-top: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 18px; max-height: 320px; overflow: auto; }

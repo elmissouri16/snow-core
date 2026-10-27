@@ -90,3 +90,16 @@ export function projectActivities(value: unknown): Activity[] {
   }
   return result;
 }
+
+/** The composer sends each text attachment as a paragraph "Attachment: NAME" + contents; show those as collapsible files. */
+export function splitAttachments(text: string): {body: string; files: {name: string; content: string}[]} {
+  const parts = text.split(/\n\n(?=Attachment: )/);
+  const files: {name: string; content: string}[] = [];
+  const body: string[] = [];
+  for (const [index, part] of parts.entries()) {
+    const match = index > 0 || parts.length === 1 && part.startsWith('Attachment: ') ? /^Attachment: ([^\n]{1,256})\n?([\s\S]*)$/.exec(part) : null;
+    if (match && (index > 0 || !body.length)) files.push({name: match[1]!, content: match[2] ?? ''});
+    else body.push(part);
+  }
+  return {body: body.join('\n\n'), files};
+}

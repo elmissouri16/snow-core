@@ -2,7 +2,7 @@
 import { memo, useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import type { MessageData } from './model';
-import { sameMessage } from './model';
+import { sameMessage, splitAttachments } from './model';
 import type { ActionPresentation } from './actions';
 import { Images } from './Images';
 import { Markdown } from './Markdown';
@@ -45,21 +45,20 @@ function useStreamReveal(body: RefObject<HTMLElement | null>, text: string, enab
     const previous = seen.current; seen.current = text.length;
     const container = body.current;
     if (!enabled || !container || previous < 0 || text.length <= previous) return;
-    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-    let last: Text | null = null;
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) if ((node as Text).data.trim()) last = node as Text;
-    if (!last?.parentElement || last.parentElement.closest('pre')) return;
-    const grown = Math.min(text.length - previous, last.data.length);
-    if (grown <= 0) return;
-    const tail = last.splitText(last.data.length - grown);
-    const span = document.createElement('span');
-    span.className = 'stream-reveal';
-    span.textContent = tail.data;
-    tail.replaceWith(span);
-    return () => { if (span.isConnected) span.replaceWith(document.createTextNode(span.textContent || '')); };
+    // Animate the block that just grew instead of splitting its text nodes:
+    // React owns those nodes, and rewriting them under it duplicated fragments.
+    const target = container.lastElementChild;
+    if (!target || target.closest('pre') || typeof target.animate !== 'function') return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    try { target.animate([{opacity: .55}, {opacity: 1}], {duration: 220, easing: 'ease-out'}); } catch { /* motion is optional */ }
   }, [text, enabled, body]);
 }
 type MessageProps = {message: MessageData; scope: HTMLElement | null; actions: ActionPresentation};
+function UserText({text}: {text: string}) {
+  const {body, files} = splitAttachments(text);
+  const bytes = (value: string) => { const n = new TextEncoder().encode(value).length; return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB`; };
+  return <>{body}{files.map((file, index) => <details key={index} className="message-attachment"><summary><svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m8 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l8-8m-5 13 8-8"/></svg><span>{file.name}</span><small>{bytes(file.content)}</small></summary><pre>{file.content}</pre></details>)}</>;
+}
 /** Every snapshot frame re-renders the transcript; rows whose projection did not change skip reconciliation. */
 export const Message = memo(MessageView, (previous, next) => previous.scope === next.scope && previous.actions === next.actions && sameMessage(previous.message, next.message));
 function MessageView({message, scope, actions}: MessageProps) {
@@ -76,7 +75,7 @@ function MessageView({message, scope, actions}: MessageProps) {
   });
   return <article ref={row} className={`catalog-message conversation-message${role === 'user' ? ' user-message' : ''}`} data-message-id={message.id} data-message-role={role} data-message-editable={String(message.editable)} data-message-has-images={String(!!message.images.length)} data-message-regeneratable={String(message.regeneratable)} data-editing={String(live && role === 'user' && actions.edit.messageID === message.id)} aria-label={role === 'user' ? 'Your message' : role === 'plan' ? 'Assistant plan' : 'Assistant message'}>
     <Images images={message.images} root={scope} messageID={message.id}/>
-    <div ref={body} className={`message-body${role !== 'user' ? ' markdown-body' : ''}`} hidden={!message.text && !!message.images.length}>{role === 'user' ? message.text : <Markdown text={message.text} html={message.html}/>}</div>
+    <div ref={body} className={`message-body${role !== 'user' ? ' markdown-body' : ''}`} hidden={!message.text && !!message.images.length}>{role === 'user' ? <UserText text={message.text}/> : <Markdown text={message.text} html={message.html}/>}</div>
     <span className="message-source" hidden>{message.text}</span>
     <p className="fine message-truncated" hidden={!message.truncated}>Message truncated for bounded display.</p>
     {(message.tools.length > 0 || message.toolsOmitted) && <div className="message-tools tool-timeline activity-list" role="group" aria-label="Saved tool history">{message.tools.map(tool => <ToolRow key={tool.id} data={tool} history/>)}<p className="fine history-tool-limit" hidden={!message.toolsOmitted}>Saved tool history truncated for bounded display.</p></div>}
