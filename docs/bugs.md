@@ -1,5 +1,14 @@
 # Known bugs
 
+## BUG-269: Saved thinking prevents startup when model discovery is unavailable
+
+- **Status:** Resolved — verified with empty/failed discovery and logged-out startup regressions.
+- **Severity:** High
+- **Surface:** App startup with saved reasoning effort and an empty active-provider catalog.
+- **Evidence:** ChatGPT discovery with no usable catalog can replace a saved model with the placeholder `default`. The saved `high` effort then fails agent construction with `model "default" does not advertise thinking level "high" (supported: off)`, preventing access to login and model selection. Logged-out startup can fail the same validation with the saved model ID.
+- **Resolution:** Start with runtime-only `off` when an empty catalog cannot verify a saved effort, report recovery guidance, and preserve saved settings. Explicit CLI/SDK efforts remain strict; populated catalogs retain existing capability validation and remembered-tuple repair.
+- **Verification:** The original-code overlay reproduces the exact `default`/`high` error for empty and failed ChatGPT catalogs. Logged-out startup also reproduces a global-setting failure or an incorrect permanent project-effort reset. The new six-case regression passes with the fix and checks byte-identical saved settings, runtime effort, model selection, recovery diagnostics, and explicit-effort rejection. `go test ./...`, focused race-enabled startup and withdrawn-project-effort regressions, `go vet ./...`, all 70 Python support tests, the benchmark guard, embedded-resource synchronization and `git diff --check` pass. The installed binary also starts eager RPC with saved `high` and no credentials while preserving the configuration bytes.
+
 ## BUG-268: Selected-account login leaves an incompatible ChatGPT conversation active
 
 - **Status:** Resolved — verified with selected-login identity replacement and subsequent mocked provider requests.

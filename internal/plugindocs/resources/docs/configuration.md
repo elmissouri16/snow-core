@@ -356,9 +356,13 @@ clear skills, reduce configured guidance, or select a larger-window model.
 Project configuration cannot raise this global operator limit.
 
 Model capabilities remain authoritative. An explicit CLI/SDK reasoning level
-that is not advertised by the selected model is rejected. If refreshed backend
-metadata withdraws a previously remembered project effort, startup resets that
-project tuple to `off` and reports a configuration diagnostic. In the TUI,
+that is not advertised by the selected model is rejected. If model discovery
+returns no models, startup temporarily uses `off` for a saved
+effort and reports a diagnostic so login and `/model` remain accessible. Saved
+global and project settings remain unchanged; explicit CLI/SDK efforts still
+require advertised support. If refreshed backend metadata withdraws a previously
+remembered project effort, startup resets that project tuple to `off` and reports
+a configuration diagnostic. In the TUI,
 selecting a model that does not support the current level likewise atomically
 resets thinking to `off`, persists the provider/model/effort tuple for the
 active working directory, and reports the adjustment instead of leaving the

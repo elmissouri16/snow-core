@@ -412,6 +412,19 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 		}
 	}
 
+	// An unavailable catalog provides no evidence that a saved effort was
+	// withdrawn. Keep the saved selection intact and let the runtime start with
+	// off so login and model selection remain reachable. Explicit efforts stay
+	// strict, including when discovery cannot verify their support.
+	if len(models) == 0 && !model.SupportsThinkingLevel(thinking) && opts.Thinking == "" {
+		configDiagnostics = append(configDiagnostics, config.Diagnostic{
+			Path:    configPath,
+			Message: fmt.Sprintf("using thinking off for this run because provider %q has no available model catalog to verify saved thinking %q; saved settings are unchanged; check login and select a model with /model", providerID, thinking),
+		})
+		thinking = protocol.ThinkingOff
+		cfg.Thinking = string(thinking)
+	}
+
 	// Backend catalogs can withdraw an effort that an older interactive
 	// selection persisted. Repair only that remembered project tuple; explicit
 	// CLI/SDK and global fallback values remain strict startup errors.
