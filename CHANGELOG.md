@@ -42,6 +42,11 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Fixed
 
+- A sent Web message now shows its text attachments right away. The live
+  transcript projected only the typed text, so files attached alongside it
+  did not appear until the conversation was reopened; the live and saved
+  projections now agree, with the typed text and each attachment as separate
+  paragraphs.
 - Changing the thinking level (or any other request that settles within a
   glance) no longer flickers the Web composer: the busy status line waits
   250 ms before expanding the footer, and controls that are disabled only

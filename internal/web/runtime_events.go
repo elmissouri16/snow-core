@@ -288,6 +288,9 @@ func (r *liveRuntime) projectHistory(page protocol.RPCMessagesPage) {
 			}
 			if text == "" {
 				firstBlock = blockIndex
+			} else if block.Text != "" && !strings.HasSuffix(text, "\n") {
+				// Separate blocks (typed text, then each attachment) as paragraphs.
+				text += "\n\n"
 			}
 			room := runtimeMessageBytes - len(text)
 			truncated = truncated || len(block.Text) > room

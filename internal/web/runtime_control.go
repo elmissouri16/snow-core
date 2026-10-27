@@ -167,13 +167,11 @@ func (m *RuntimeManager) prompt(ctx context.Context, projectID, instanceID, comm
 	r.snapshot.Error = ""
 	r.snapshot.LiveThinking = nil
 	r.messageEdit = runtimeMessageEditState{}
-	// The public projection contains only the browser's message summary, never
-	// image bytes. Image-only SDK callers receive a fixed nonempty placeholder.
-	summary := text
-	if strings.TrimSpace(summary) == "" && len(content) != 0 {
-		summary = "[Image attachment]"
-	}
-	r.addMessage(RuntimeMessage{Role: "user", Text: summary, Images: promptImages(text, content)})
+	// The public projection shows what the browser sent: the typed text and
+	// every text attachment, never image bytes. Image-only SDK callers receive
+	// a fixed nonempty placeholder.
+	summary, truncated := promptSummary(text, content)
+	r.addMessage(RuntimeMessage{Role: "user", Text: summary, Truncated: truncated, Images: promptImages(text, content)})
 	r.pendingUserID = r.snapshot.Messages[len(r.snapshot.Messages)-1].ID
 	r.publishLocked()
 	r.mu.Unlock()
@@ -374,4 +372,27 @@ func (m *RuntimeManager) ReplyInput(ctx context.Context, projectID, instanceID s
 	}
 	r.mu.Unlock()
 	return nil
+}
+
+// promptSummary mirrors the saved-history projection of a user turn: the typed
+// text followed by each attachment's text block, separated by blank lines and
+// bounded like any projected message.
+func promptSummary(text string, content []protocol.ContentBlock) (string, bool) {
+	var parts []string
+	if strings.TrimSpace(text) != "" {
+		parts = append(parts, text)
+	}
+	for _, block := range content {
+		if block.Type == protocol.BlockText && strings.TrimSpace(block.Text) != "" {
+			parts = append(parts, block.Text)
+		}
+	}
+	if len(parts) == 0 {
+		if len(content) != 0 {
+			return "[Image attachment]", false
+		}
+		return text, false
+	}
+	joined := strings.Join(parts, "\n\n")
+	return runtimeText(joined, runtimeMessageBytes), len(joined) > runtimeMessageBytes
 }

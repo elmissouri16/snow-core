@@ -138,7 +138,10 @@ func TestComposerPromptExactRPCAndCompletion(t *testing.T) {
 				t.Fatal(err)
 			}
 			imageJSON, _ := json.Marshal(data)
-			if bytes.Contains(encoded, imageJSON) || bytes.Contains(encoded, []byte(`"data"`)) || len(snapshot.Messages) != 1 || snapshot.Messages[0].Text != text {
+			// The transcript shows the typed text and every attachment label, as
+			// saved history will, but never image bytes.
+			want, _ := promptSummary(text, content)
+			if bytes.Contains(encoded, imageJSON) || bytes.Contains(encoded, []byte(`"data"`)) || len(snapshot.Messages) != 1 || snapshot.Messages[0].Text != want || !strings.HasPrefix(want, text) {
 				t.Fatalf("unsafe transcript projection: %s", encoded)
 			}
 		})
