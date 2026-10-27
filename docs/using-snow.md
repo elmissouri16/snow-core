@@ -1101,8 +1101,8 @@ removing a live project; conversation switching now uses that same worker.
 
 ### Attach files and mention context in the web composer
 
-Use the paperclip **Attach files** button, drop files onto the composer, or paste
-an image. Supported attachments are UTF-8 text/source files and PNG, JPEG, GIF
+Choose **Attach images or files** from the **Add context (+)** menu, drop files
+onto the composer, or paste an image. Supported attachments are UTF-8 text/source files and PNG, JPEG, GIF
 or WebP images. Images require a vision-capable model. PDFs and other binary
 formats are not supported. Each attachment appears as a compact removable chip;
 images include a small local thumbnail, and long filenames are abbreviated with
@@ -1111,9 +1111,10 @@ you that Send forwards contents to the provider and saves them with the chat;
 its hover text retains the full explanation. Failed or interrupted reads remain
 visible and must be removed rather than silently omitted from Send.
 
-The bottom action row keeps **Add context (+)** and the paperclip beside the
-permission/mode controls. Opening **Add context** does not read files or discover
-skills; choose a menu item to begin. Suggestions align with the composer width;
+The bottom action row keeps **Add context (+)** beside the Goal, permission and
+mode controls; **Compact context** sits next to the context-usage ring on the
+right. Opening **Add context** does not read files or discover skills; choose a
+menu item to begin. Suggestions align with the composer width;
 file rows are compact, and skill summaries stay on one line (hover for the full
 description). Idle keyboard guidance remains available to assistive technology;
 connection, request-outcome, and in-progress notices remain visible.

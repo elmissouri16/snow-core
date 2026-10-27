@@ -44,6 +44,7 @@ export function ContextPanel({state: s, actions: a, refs}: {state: Presentation;
     </div>
     {s.menuOpen && <div id="composer-context-menu" ref={refs.menu} className="snow-menu composer-context-menu" role="menu" aria-label="Add context" tabIndex={-1} style={s.menuStyle} onKeyDown={a.menuKey}>
       <div className="snow-menu-content" tabIndex={-1}>
+        <button type="button" role="menuitem" className="snow-menu-row composer-context-menu-item" data-composer-attach-row disabled={!s.canAttach} onClick={a.attach}><span className="composer-mention-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="m8 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l8-8m-5 13 8-8" /></svg></span><span className="snow-menu-row-label">Attach images or files</span></button>
         <button type="button" role="menuitem" className="snow-menu-row composer-context-menu-item" data-composer-files disabled={!s.canFiles} onClick={() => a.marker('@')}><MentionIcon kind="folder" /><span className="snow-menu-row-label">Project files</span><span className="snow-menu-row-value" aria-hidden="true">@</span></button>
         <button type="button" role="menuitem" className="snow-menu-row composer-context-menu-item" data-composer-skills disabled={!s.canRead} onClick={() => a.marker('$')}><MentionIcon kind="skill" /><span className="snow-menu-row-label">Installed skills</span><span className="snow-menu-row-value" aria-hidden="true">$</span></button>
       </div>
@@ -58,7 +59,9 @@ export function ContextTools({state: s, actions: a, refs}: {state: Presentation;
       <button type="button" className="composer-context-button" data-composer-context-menu aria-label="Add context" title="Add context" aria-haspopup="menu" aria-expanded={s.menuOpen} aria-controls={s.menuOpen ? 'composer-context-menu' : undefined} disabled={!s.canRead} ref={refs.trigger} onClick={a.menu}>
         <svg className="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
       </button>
-      <button type="button" className="composer-context-button" data-composer-attach aria-label="Attach files" title="Attach images or UTF-8 text files" disabled={!s.canAttach} ref={refs.attach} onClick={a.attach}>
+      {/* The + menu owns attaching now; this control stays for keyboard focus
+          hand-off and scripts, out of the visible row. */}
+      <button type="button" className="composer-context-button" data-composer-attach aria-label="Attach files" title="Attach images or UTF-8 text files" disabled={!s.canAttach} ref={refs.attach} onClick={a.attach} hidden>
         <svg className="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m8 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l8-8m-5 13 8-8" /></svg>
       </button>
     </div>

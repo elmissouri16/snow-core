@@ -58,6 +58,10 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Changed
 
+- The Web composer toolbar is tidier: the **+** menu now holds "Attach images
+  or files" alongside project files and installed skills, so the separate
+  paperclip is gone; Goal uses a target glyph; and Compact context moved next
+  to the context-usage ring with a clearer compress glyph.
 - The Web composer's permission shield now shows the session policy in the
   icon itself (a green check for Allow, a red cross for Deny, an amber mark
   for Ask), so the state stays visible at widths where its label collapses.
