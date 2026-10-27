@@ -50,6 +50,9 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Changed
 
+- The composer toolbar stays on one row in a desktop window beside the
+  sidebar: at medium widths the mode, permission, and thinking chips collapse
+  to icons or short forms and the model name is ellipsized, as in ChatGPT.
 - Message actions (edit & resend, use as new prompt, regenerate, copy) are
   icon buttons with tooltips and screen-reader labels, revealed on hover like
   the ChatGPT and Claude action rows, instead of text buttons.

@@ -54,3 +54,12 @@
 .permission-policy-dialog .checkbox-label { margin: 16px 0; align-items: flex-start; }
 @container (max-width: 460px) { .permission-policy-trigger [data-permission-policy-label] { display: none; } }
 @container (max-width: 360px) { [data-mode-label] { display: none; } .mode-short { display: inline; } .composer-leading, .composer-trailing { gap: 4px; } .model-menu-trigger .model-trigger-icon { display: block; } .model-menu-trigger #live-model { display: none; } }
+/* Medium composers (a desktop window beside the sidebar) keep one toolbar row,
+ * as ChatGPT does: labels collapse to icons and short forms before wrapping. */
+@container (max-width: 900px) {
+  .composer-leading, .composer-trailing { gap: 6px; }
+  .permission-policy-trigger [data-permission-policy-label] { display: none; }
+  [data-mode-label] { display: none; }
+  .mode-short { display: inline; }
+  .model-menu-trigger #live-model { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+}
