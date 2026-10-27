@@ -10,6 +10,15 @@ export type MessageElement = HTMLElement & {_snowCopyText: string; _snowHasImage
 function CopyIcon({copied}: {copied: boolean}) {
   return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d={copied ? 'm5 12 4 4L19 6' : 'M9 8V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-3M5 8h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z'}/></svg>;
 }
+const actionPaths: Record<string, string> = {
+  edit: 'm4 16 12-12 4 4-12 12-5 1z M13 7l4 4',
+  reuse: 'M4 19V5a2 2 0 0 1 2-2h8l4 4v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z M9 13h6M12 10v6',
+  regenerate: 'M20 7V3m0 4h-4M4 17v4m0-4h4M20 7a9 9 0 0 0-16 1m0 9a9 9 0 0 0 16-1',
+};
+/** ChatGPT- and Claude-style icon actions: the visible label is the icon; the text stays for assistive tech and tests. */
+function ActionLabel({kind, label}: {kind: string; label: string}) {
+  return <><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d={actionPaths[kind]}/></svg><span className="sr-only">{label}</span></>;
+}
 function CopyMessage({text}: {text: string}) {
   const [feedback, setFeedback] = useState(''), generation = useRef(0), timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useLayoutEffect(() => () => { generation.current++; clearTimeout(timer.current); }, []);
@@ -68,8 +77,8 @@ export function Message({message, scope, actions}: {message: MessageData; scope:
     <p className="fine message-truncated" hidden={!message.truncated}>Message truncated for bounded display.</p>
     {(message.tools.length > 0 || message.toolsOmitted) && <div className="message-tools tool-timeline activity-list" role="group" aria-label="Saved tool history">{message.tools.map(tool => <ToolRow key={tool.id} data={tool} history/>)}<p className="fine history-tool-limit" hidden={!message.toolsOmitted}>Saved tool history truncated for bounded display.</p></div>}
     <div className="message-actions">
-      {role === 'user' && !message.images.length && (editable ? message.editable && <button type="button" className="message-edit" data-message-edit="" disabled={!live || actions.edit.disabled || actions.historicalDisabled || !message.editable} hidden={!live || actions.edit.hidden} title="Edit this message and replace the following conversation when you Send.">Edit &amp; resend</button> : <button type="button" className="message-reuse" data-message-reuse="" disabled={!live || actions.reuse.disabled || actions.historicalDisabled || !message.reusable} hidden={!live || actions.reuse.hidden} title={!message.reusable ? "This message is truncated and cannot be reused" : actions.reuse.title}>Use as new prompt</button>)}
-      {regeneratable && message.regeneratable && <button type="button" className="message-regenerate" data-message-regenerate="" disabled={!live || actions.regenerate.disabled || !message.regeneratable} hidden={!live || actions.regenerate.hidden} title="Regenerate this reply and replace the following conversation after confirmation.">Regenerate</button>}
+      {role === 'user' && !message.images.length && (editable ? message.editable && <button type="button" className="message-edit" data-message-edit="" disabled={!live || actions.edit.disabled || actions.historicalDisabled || !message.editable} hidden={!live || actions.edit.hidden} title="Edit & resend: replace the following conversation when you Send"><ActionLabel kind="edit" label="Edit & resend"/></button> : <button type="button" className="message-reuse" data-message-reuse="" disabled={!live || actions.reuse.disabled || actions.historicalDisabled || !message.reusable} hidden={!live || actions.reuse.hidden} title={!message.reusable ? "This message is truncated and cannot be reused" : actions.reuse.title || "Use as new prompt"}><ActionLabel kind="reuse" label="Use as new prompt"/></button>)}
+      {regeneratable && message.regeneratable && <button type="button" className="message-regenerate" data-message-regenerate="" disabled={!live || actions.regenerate.disabled || !message.regeneratable} hidden={!live || actions.regenerate.hidden} title="Regenerate this reply and replace the following conversation after confirmation"><ActionLabel kind="regenerate" label="Regenerate"/></button>}
       <CopyMessage text={message.text}/>
     </div>
   </article>;

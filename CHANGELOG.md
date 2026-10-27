@@ -50,6 +50,9 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Changed
 
+- Message actions (edit & resend, use as new prompt, regenerate, copy) are
+  icon buttons with tooltips and screen-reader labels, revealed on hover like
+  the ChatGPT and Claude action rows, instead of text buttons.
 - Find in conversation: a search bar over the transcript (menu, `/find`, or
   ⌘/Ctrl+F in the chat) with highlighted matches, a match counter, and
   next/previous navigation.

@@ -42,15 +42,16 @@
 .conversation-message .message-truncated { font-size: 11px; line-height: 18px; color: var(--muted); margin: 6px 0 0; }
 .conversation-message .message-actions { display: flex; align-items: center; gap: 8px; min-height: 28px; margin: 16px 0 0 -6px; }
 .conversation-message.user-message .message-actions { margin: 0 -6px 0 0; justify-content: flex-end; }
-.conversation-message .message-copy {
+.conversation-message :is(.message-copy, .message-edit, .message-reuse, .message-regenerate) {
   display: inline-flex; align-items: center; justify-content: center; flex: none;
   width: 28px; min-width: 28px; height: 28px; min-height: 28px;
   padding: 6px; border: 0; border-radius: 28px; background: transparent;
-  color: var(--muted); cursor: pointer;
+  color: var(--muted); cursor: pointer; font-size: 0; line-height: 0;
 }
-.conversation-message .message-copy svg { width: 15px; height: 15px; }
-.conversation-message .message-copy:hover { background: var(--raised); color: var(--text); }
-.conversation-message .message-copy:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.conversation-message :is(.message-copy, .message-edit, .message-reuse, .message-regenerate) svg { width: 15px; height: 15px; }
+.conversation-message :is(.message-copy, .message-edit, .message-reuse, .message-regenerate):hover:not(:disabled) { background: var(--raised); color: var(--text); }
+.conversation-message :is(.message-copy, .message-edit, .message-reuse, .message-regenerate):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.conversation-message :is(.message-edit, .message-reuse, .message-regenerate):disabled { opacity: .4; cursor: not-allowed; }
 .conversation-message .message-copy-feedback { font-size: 11px; line-height: 18px; color: var(--muted); }
 @media (hover: hover) {
   /* Older rows retain every action; hover and keyboard focus reveal them. */
@@ -136,14 +137,8 @@
 .conversation-message .message-tools .activity-output { min-width: 0; max-width: 100%; margin: 0; font-size: 12px; line-height: 20px; }
 .conversation-message .message-tools .history-tool-limit { margin: 4px 0; }
 
-/* Reuse is a copy in the normal composer, not an in-place history editor. */
-.conversation-message :is(.message-reuse, .message-edit, .message-regenerate) {
-  border: 0; background: transparent; color: var(--muted); padding: 4px 8px;
-  min-height: 28px; border-radius: 6px; font: inherit; font-size: 12px;
-}
-.conversation-message :is(.message-reuse, .message-edit, .message-regenerate):hover:not(:disabled) { background: var(--raised); color: var(--text); }
-.conversation-message :is(.message-reuse, .message-edit, .message-regenerate):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.conversation-message :is(.message-reuse, .message-edit, .message-regenerate):disabled { opacity: .5; cursor: not-allowed; }
+/* Reuse is a copy in the normal composer, not an in-place history editor.
+ * Edit, reuse, regenerate and copy share the icon-button geometry above. */
 :is(.message-reuse-notice, .message-edit-notice) { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 14px 0; font-size: 12px; line-height: 18px; color: var(--muted); }
 :is(.message-reuse-notice, .message-edit-notice) button { flex: none; font-size: 12px; }
 /* Send, admission and Stop share one footprint. A text Stop pill used to wrap
