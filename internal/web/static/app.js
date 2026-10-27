@@ -173,7 +173,18 @@
   document.addEventListener("snow:session-new", event => { void selectWorkspaceSession(event.detail, true); });
   document.addEventListener("snow:navigation-start", event => {
     if (event.detail?.target?.id === "workspace" && workspaceIntent && event.detail.source !== workspaceIntent.trigger) workspaceIntent = null;
+    navigationProgress(true);
   });
+  // A slim top progress bar for soft navigations that outlast one glance.
+  let progressTimer = null, progressReset = null;
+  function navigationProgress(active) {
+    const bar = $("[data-nav-progress]"); if (!bar) return;
+    clearTimeout(progressTimer); clearTimeout(progressReset);
+    if (active) { progressTimer = setTimeout(() => { bar.classList.remove("is-done"); bar.classList.add("is-active"); }, 120); return; }
+    if (!bar.classList.contains("is-active")) return;
+    bar.classList.remove("is-active"); bar.classList.add("is-done");
+    progressReset = setTimeout(() => bar.classList.remove("is-done"), 500);
+  }
   async function navigateWorkspace(href, source, event, history = "push") {
     if (!window.SnowNavigation?.visit || typeof href !== "string" || href.length > 8192) return false;
     let target;
@@ -1447,6 +1458,14 @@
   document.addEventListener("click", async event => {
     const button = event.target.closest("button,[data-folder-open]");
     if (!button) return;
+    // The pressed control shows progress until its handler settles; handlers
+    // that finish synchronously clear it before the delayed spinner appears.
+    const busy = button instanceof HTMLButtonElement && !button.matches("[data-nav-toggle], [data-nav-close], #theme-toggle, [data-sidebar-restore], [data-sidebar-collapse]");
+    if (busy) button.dataset.busy = "";
+    try { await handleDelegatedClick(button); }
+    finally { if (busy) delete button.dataset.busy; }
+  });
+  async function handleDelegatedClick(button) {
     if (button.hasAttribute("data-home-draft-discard")) { homeDraft = {text: "", project: "", name: "", pending: false}; syncHomeDraft(); return; }
     if (button.hasAttribute("data-home-draft-use")) { if (takeHomeDraft(true)) { syncHomeDraft(); updateControls(); $("#live-prompt")?.focus(); } return; }
     if (button.matches("[data-sidebar-restore], [data-sidebar-collapse]") && !button.closest("#project-navigation")) window.SnowShell?.collapse();
@@ -1495,7 +1514,7 @@
       const project = live?.project, session = live?.session; closeDialog($("#runtime-close-dialog"));
       if (await runtimeAction("close")) reloadWorkspace(project, session);
     } else if (button.matches("[data-permission]")) { await runtimeAction("permission", {request_id: button.dataset.requestId, decision: button.dataset.permission}); }
-  });
+  }
   async function registerProject(form) {
     if (registeringProjects.has(form) || !form.isConnected) return;
     if (!window.SnowNavigation?.submit) { workspaceFlowError("Workspace registration is unavailable. Your draft is kept; copy it before reloading."); return; }
@@ -1675,7 +1694,7 @@
     if (event.detail?.target?.id === "workspace") { saveDraft(); disposeLivePanels(); window.SnowGoals?.dispose(); window.SnowVersions?.dispose(); window.SnowQueue?.dispose(); live?.controller.abort(); clearTimeout(pollTimer); folderRequest?.abort(); window.SnowProcesses?.dispose(); window.SnowInspection?.dispose(); window.SnowConversation?.dispose(); window.SnowMessages?.dispose(); window.SnowScroll?.dispose(); window.SnowWidth?.dispose(); window.SnowAttention?.dispose(); window.SnowLiveView?.dispose(); live = null; window.SnowWorkspace?.reset(); requestNav(false, false); }
   });
   document.addEventListener("snow:navigation-after-swap", event => {
-    syncThemeChoices();
+    navigationProgress(false); syncThemeChoices();
     if (event.detail?.target?.id === "workspace") {
       navigation();
       if (narrow.matches || !$("#project-navigation")?.contains(document.activeElement)) $("#workspace-content")?.focus({preventScroll: true});
@@ -1683,6 +1702,7 @@
     if ($("#connection-error")) $("#connection-error").hidden = true;
   });
   document.addEventListener("snow:navigation-error", event => {
+    navigationProgress(false);
     if (!event.detail?.aborted && $("#connection-error")) $("#connection-error").hidden = false;
   });
   window.addEventListener("pagehide", () => { pageAway = true; saveDraft(); disposeLivePanels(); window.SnowProcesses?.dispose(); window.SnowInspection?.dispose(); window.SnowGoals?.dispose(); window.SnowVersions?.dispose(); window.SnowQueue?.dispose(); live?.controller.abort(); clearTimeout(pollTimer); window.SnowMessages?.dispose(); window.SnowScroll?.dispose(); window.SnowWidth?.dispose(); window.SnowAttention?.dispose(); window.SnowConversation?.dispose(); window.SnowLiveView?.dispose(); live = null; });

@@ -299,3 +299,24 @@ button, .button { padding: 6px 12px; }
   .inactive-conversation .workspace-session-start { max-height: none; overflow: visible; }
   .workspace-session-start .form-footer { position: static; }
 }
+
+/* Instant click feedback: every control presses, async controls show progress
+   after a short delay so fast actions never flash a spinner. */
+@keyframes snow-spin { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: no-preference) {
+  button, .button, .session-tree a, .composer-mention-option { transition: background-color .15s, color .15s, opacity .15s, transform .06s ease-out; }
+  button:not(:disabled):active, .button:active, .session-tree a:active, .composer-mention-option:not([aria-disabled=true]):active { transform: scale(.97); }
+  .icon-button:not(:disabled):active, .shell-session-more:not(:disabled):active { transform: scale(.88); }
+}
+button[data-busy] { position: relative; cursor: progress; }
+button[data-busy]::after { content: ""; position: absolute; inset: 0; margin: auto; width: 14px; height: 14px; border-radius: 50%; border: 2px solid transparent; border-top-color: currentColor; border-right-color: currentColor; opacity: 0; animation: snow-spin .7s linear infinite, snow-busy-in .15s .12s forwards; }
+button[data-busy] > * { visibility: hidden; transition: visibility 0s .12s; }
+@keyframes snow-busy-in { to { opacity: 1; } }
+.nav-progress { position: fixed; top: 0; left: 0; z-index: 60; height: 2px; width: 0; background: var(--accent); pointer-events: none; opacity: 0; transition: width .2s ease-out, opacity .2s; }
+.nav-progress.is-active { opacity: 1; width: 80%; transition: width 1.5s cubic-bezier(.1,.7,.3,1), opacity .1s; }
+.nav-progress.is-done { width: 100%; opacity: 0; transition: width .15s ease-out, opacity .3s .15s; }
+.shell-session-row[data-shell-session-pending] { background: var(--raised); }
+.shell-session-row[data-shell-session-pending] a { color: var(--text); }
+.shell-session-row[data-shell-session-pending] a > .icon { display: none; }
+.shell-session-row[data-shell-session-pending] a::before { content: ""; flex: none; width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: snow-spin .7s linear infinite; }
+@media (prefers-reduced-motion: reduce) { button[data-busy]::after, .shell-session-row[data-shell-session-pending] a::before { animation-duration: 1.4s; } }

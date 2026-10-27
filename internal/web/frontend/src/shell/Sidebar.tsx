@@ -33,11 +33,13 @@ function Session({c, group, row}: {c: ShellController; group: Group; row: Sessio
   }, [c, hasActions, ownMenu]);
   const selected = current || !live && c.snapshot.bootstrap?.project === group.project && c.snapshot.bootstrap.session === row.session_id;
   const instance = live?.project === group.project ? live.instance : group.instance;
-  return <div className="shell-session-row" data-shell-session={row.session_id} data-shell-live-session={current ? '' : undefined}>
+  const pending = !current && c.snapshot.pending?.project === group.project && c.snapshot.pending.session === row.session_id;
+  return <div className="shell-session-row" data-shell-session={row.session_id} data-shell-live-session={current ? '' : undefined} data-shell-session-pending={pending ? '' : undefined}>
     <a ref={link} href={projectURL(group.project, {session: row.session_id})} data-snow-navigation="" data-shell-session-open="" data-project={group.project} data-instance={instance} aria-current={selected ? 'page' : undefined}
       onClick={event => {
         if (!ordinary(event)) return;
         event.preventDefault(); event.stopPropagation(); c.navigation(false);
+        if (!current) c.selectPending(group.project, row.session_id);
         if (instance) document.dispatchEvent(new CustomEvent('snow:session-select', {detail: {project: group.project, session: row.session_id, instance, trigger: event.currentTarget}}));
         else {
           const delegated = !document.dispatchEvent(new CustomEvent('snow:session-resume', {cancelable: true, detail: {project: group.project, session: row.session_id, trigger: event.currentTarget}}));

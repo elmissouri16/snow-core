@@ -54,6 +54,12 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Changed
 
+- Clicks in the Web Manager answer instantly: every button and list row has a
+  pressed state, a clicked sidebar session is highlighted with a spinner until
+  its conversation is open, a slim progress bar appears for any navigation
+  that takes longer than a glance, and a live control that is waiting on the
+  worker (close, permission decisions, edits) shows progress in place instead
+  of going dead.
 - Web Manager streaming is smoother and far cheaper for long conversations:
   snapshot frames now arrive every 40 ms instead of 75 ms, and each frame
   abbreviates messages and tool activities the connection already delivered,

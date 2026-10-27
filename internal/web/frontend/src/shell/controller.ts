@@ -16,12 +16,14 @@ export interface ViewState {
   collapsed: boolean; navOpen: boolean; narrow: boolean; theme: 'light' | 'dark';
   settings: 'general' | 'workspaces' | 'access' | null; settingsReturn: HTMLElement | null;
   menu: ShellMenu | null; deletion: DeleteAttempt | null;
+  /** The session a click is opening, shown as pending until the live selection catches up. */
+  pending: {project: string; session: string} | null;
 }
 const initialGroup = (project: string, expanded: boolean): Group => ({project, expanded, rows: [], instance: '', loaded: false,
   available: true, deleteSupported: false, activeSession: '', loading: false, error: '', nextOffset: 0, hasMore: false, truncated: false, pages: 0});
 export class ShellController {
   snapshot: ViewState = {bootstrap: null, groups: new Map(), live: null, query: '', searchOpen: false, hideSessions: false, pinnedOnly: false,
-    collapsed: false, navOpen: false, narrow: false, theme: 'dark', settings: null, settingsReturn: null, menu: null, deletion: null};
+    collapsed: false, navOpen: false, narrow: false, theme: 'dark', settings: null, settingsReturn: null, menu: null, deletion: null, pending: null};
   listeners = new Set<() => void>();
   requests = new Map<string, AbortController>();
   sidebarMemory: {list: number; rail: number; focused: {project: string; session: string; selector: string; href: string} | null; selection: [number, number] | null} | null = null;
@@ -82,7 +84,7 @@ export class ShellController {
       bootstrap.sessions.forEach(row => rows.set(row.session_id, row));
       selected.rows = [...rows.values()].slice(0, LIMITS.rows);
     }
-    this.publish({bootstrap, groups, live: null, deletion: null, menu: null, settings: null,
+    this.publish({bootstrap, groups, live: null, pending: null, deletion: null, menu: null, settings: null,
       theme: document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'});
     this.updateLive(bootstrap.live);
     this.initialize();
@@ -109,11 +111,26 @@ export class ShellController {
     this.updateLive({project: live.dataset.project || '', session: live.dataset.session || '', instance: live.dataset.instance || '',
       title: live.querySelector('[data-live-title]')?.textContent || 'New conversation', renameAvailable: !!rename, renameDisabled: !rename || rename.disabled, newDisabled: !!create?.disabled});
   };
+  pendingTimer: ReturnType<typeof setTimeout> | null = null;
+  selectPending = (project: string, session: string) => {
+    if (!this.mounted) return;
+    this.clearPending();
+    this.publish({pending: {project, session}});
+    const clear = () => this.clearPending();
+    document.addEventListener('snow:navigation-error', clear, {once: true});
+    // Nothing else reports a stalled switch; never leave a row spinning.
+    this.pendingTimer = setTimeout(() => { document.removeEventListener('snow:navigation-error', clear); this.clearPending(); }, 8000);
+  };
+  clearPending = () => {
+    if (this.pendingTimer) { clearTimeout(this.pendingTimer); this.pendingTimer = null; }
+    if (this.snapshot.pending) this.publish({pending: null});
+  };
   updateLive = (live: LiveSelection | null) => {
     if (!this.mounted || JSON.stringify(this.snapshot.live) === JSON.stringify(live)) return;
     if (live && (!live.project || !live.session || !live.instance || !this.snapshot.groups.has(live.project))) return;
     const old = this.snapshot.live;
-    this.publish({live});
+    if (this.pendingTimer) { clearTimeout(this.pendingTimer); this.pendingTimer = null; }
+    this.publish({live, pending: null});
     if (!live) return;
     const state = this.snapshot.groups.get(live.project)!;
     // Row IDs are immutable. Never turn the prior active row into the target.
