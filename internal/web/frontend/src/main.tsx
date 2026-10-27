@@ -8,6 +8,7 @@ import { reasoning } from './reasoning/index';
 import { auth } from './auth/index';
 import { mcp } from './mcp/index';
 import { subagents } from './subagents/index';
+import { find } from './find/index';
 import { compaction } from './compaction/index';
 import { goals } from './goals/index';
 import { versions, historyControls } from './versions/index';
@@ -156,7 +157,7 @@ else mount();
 
 // Explicit readiness: module loading order alone does not synchronize classic
 // controller initialization with the registered React view facades.
-Object.assign(window, {SnowReasoning: reasoning, SnowAuth: auth, SnowMCP: mcp, SnowSubagents: subagents, SnowCompaction: compaction, SnowGoals: goals,
+Object.assign(window, {SnowReasoning: reasoning, SnowAuth: auth, SnowMCP: mcp, SnowSubagents: subagents, SnowFind: find, SnowCompaction: compaction, SnowGoals: goals,
   SnowVersions: versions, SnowHistoryControls: historyControls, SnowConversation: conversation,
   SnowSteer: steer, SnowQueue: queue, SnowComposerContext: composerContext,
   SnowLiveView: LiveViewBridge, SnowMessages: messages, SnowVisibility: visibility,

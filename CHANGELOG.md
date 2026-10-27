@@ -50,6 +50,9 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Changed
 
+- Find in conversation: a search bar over the transcript (menu, `/find`, or
+  ⌘/Ctrl+F in the chat) with highlighted matches, a match counter, and
+  next/previous navigation.
 - Streamed answer text fades in batch by batch instead of popping, and the
   composer gains a dictation button that uses the browser's speech recognition
   where it is available on a secure origin such as the local URL.

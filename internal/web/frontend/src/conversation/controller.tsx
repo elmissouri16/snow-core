@@ -125,13 +125,13 @@ export class Controller {
     const definitions: [Glyph, string, string][] = [
       ['versions', 'Conversation versions', '[data-versions-open]'], ['goals', 'Thread goal', '[data-goals-open]'],
       ['processes', 'Managed processes', '[data-processes-open]'], ['reasoning', 'Thinking & response', '[data-reasoning-open]'],
-      ['compaction', 'Compact context', '[data-compaction-open]'], ['auth', 'Accounts & sign-in', '[data-auth-open]'], ['mcp', 'MCP servers', '[data-mcp-open]'], ['subagents', 'Subagents', '[data-subagents-open]'], ['steer', 'Steer current run…', '[data-steer-open]'],
+      ['compaction', 'Compact context', '[data-compaction-open]'], ['auth', 'Accounts & sign-in', '[data-auth-open]'], ['mcp', 'MCP servers', '[data-mcp-open]'], ['subagents', 'Subagents', '[data-subagents-open]'], ['find', 'Find in conversation', '[data-find-open]'], ['steer', 'Steer current run…', '[data-steer-open]'],
     ];
     return definitions.flatMap(([key, label, selector]) => {
       const source = this.element.querySelector<HTMLButtonElement>(selector);
       // Goal's primary control is a composer-mode toggle. Its details proxy is
       // intentionally hidden, but only an advertised goal exposes the menu action.
-      return source && (!source.hidden || key === 'goals' && source.dataset.goalsAvailable === 'true') ? [{key, label, source}] : [];
+      return source && (!source.hidden || key === 'find' || key === 'goals' && source.dataset.goalsAvailable === 'true') ? [{key, label, source}] : [];
     });
   };
   mutate = async (instance: string, kind: string, fields: Record<string, string>) => {

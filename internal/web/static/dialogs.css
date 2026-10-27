@@ -77,4 +77,4 @@
  * above the transcript is redundant chrome. The panels stay mounted and
  * reachable through the menu; inline statuses in the row still show. */
 .live-manager-controls.manager-menu-enabled > .react-live-panel > button.quiet { display: none; }
-.live-manager-controls.manager-menu-enabled:not(:has(:is(.goal-inline-status, .compaction-inline, .steer-history):not([hidden]))) { display: none; }
+.live-manager-controls.manager-menu-enabled:not(:has(.find-bar, :is(.goal-inline-status, .compaction-inline, .steer-history):not([hidden]))) { display: none; }

@@ -177,3 +177,15 @@
 @media (prefers-reduced-motion: reduce) { .stream-reveal { animation: none; } }
 .composer-mic.is-listening { color: var(--danger); animation: snow-mic-pulse 1.2s ease-in-out infinite; }
 @keyframes snow-mic-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+
+/* Find in conversation: a bar pinned above the transcript; matches are painted
+ * with the CSS Highlight API so the message DOM is never rewritten. */
+.find-panel { position: sticky; top: 0; z-index: 2; }
+.find-bar { display: flex; align-items: center; gap: 6px; width: min(var(--chat-content-width), calc(100% - 32px)); margin: 8px auto 4px; padding: 6px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); color: var(--muted); }
+.find-bar .icon { width: 18px; height: 18px; flex: none; }
+.find-bar input { flex: 1; min-height: 32px; padding: 4px 6px; border: 0; background: transparent; color: var(--text); }
+.find-bar input:focus { outline: none; }
+.find-count { font-size: 12px; white-space: nowrap; }
+.find-bar .icon-button { width: 30px; height: 30px; min-height: 30px; padding: 4px; }
+::highlight(snow-find) { background: color-mix(in srgb, var(--warning) 35%, transparent); color: inherit; }
+::highlight(snow-find-current) { background: var(--warning); color: var(--canvas); }

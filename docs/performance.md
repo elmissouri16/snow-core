@@ -175,11 +175,11 @@ servers and cannot be instrumented here.
 | Sign-in inside the app | Yes | Yes (device code anywhere; browser OAuth and API keys on the local URL) |
 | Light and dark theme | Yes | Yes |
 | Voice input | Yes | Yes, dictation through the browser's speech recognition on the local URL (secure context required) |
-| Canvases/artifacts, in-conversation search | Yes | No; files are edited in the project itself and the browser's find-in-page covers the transcript |
+| In-conversation search | Yes | Yes: Find in conversation (menu, `/find`, or ⌘/Ctrl+F inside the chat) with match count, next/previous, and highlights |
+| Canvases/artifacts | Yes | No; Snow edits files in the project itself and shows them in the Files inspector |
 | Smoothed token reveal | ChatGPT smooths tokens visually | Yes; each newly streamed batch fades in over 220 ms (off with reduced motion) |
 
-Canvases and a dedicated transcript search are the known gaps. Everything
-else is in place and measured above.
+Canvases are the known gap. Everything else is in place and measured above.
 
 ## Shell preflight measurements
 

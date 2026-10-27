@@ -405,6 +405,14 @@ an open conversation instead (see [Accounts and sign-in](#accounts-and-sign-in))
 or use the interactive `snow login ...` workflow on the host. See
 [configuration scopes](configuration.md#local-web-manager-settings-scopes).
 
+#### Find in conversation
+
+**Find in conversation** in the conversation menu, the `/find` command, or
+⌘/Ctrl+F while the chat has focus opens a search bar above the transcript.
+Matches in the loaded messages are highlighted, the bar shows "3 of 12",
+Enter and Shift+Enter step through them, and Escape closes it. It searches
+what is on screen, not the whole saved session.
+
 #### Dictation
 
 On the local URL in Chrome, Edge, or Safari, the microphone button in the

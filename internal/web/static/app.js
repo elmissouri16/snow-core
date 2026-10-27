@@ -971,7 +971,7 @@
           "/permissions": "[data-permission-policy-menu]", "/processes": "[data-processes-open]",
           "/sessions": "[data-session-menu]", "/settings": "[data-settings-open]",
           "/thinking": "[data-reasoning-open]", "/tree": "[data-versions-open]",
-          "/login": "[data-auth-open]", "/logout": "[data-auth-open]", "/mcp": "[data-mcp-open]", "/fork": "[data-versions-open]", "/agent": "[data-subagents-open]"
+          "/login": "[data-auth-open]", "/logout": "[data-auth-open]", "/mcp": "[data-mcp-open]", "/fork": "[data-versions-open]", "/agent": "[data-subagents-open]", "/find": "[data-find-open]"
         };
         return activate(selectors[name]);
       },
@@ -1066,7 +1066,7 @@
   function disposeLivePanels() {
     window.SnowComposerContext?.dispose();
     if (live?.panels) { live.panels.abort(); live.panels = null; }
-    window.SnowReasoning?.dispose(); window.SnowAuth?.dispose(); window.SnowMCP?.dispose(); window.SnowSubagents?.dispose(); window.SnowHistoryControls?.dispose(); window.SnowCompaction?.dispose(); window.SnowSteer?.dispose();
+    window.SnowReasoning?.dispose(); window.SnowAuth?.dispose(); window.SnowMCP?.dispose(); window.SnowSubagents?.dispose(); window.SnowFind?.dispose(); window.SnowHistoryControls?.dispose(); window.SnowCompaction?.dispose(); window.SnowSteer?.dispose();
     if (live && ["reasoning", "auth", "history-controls", "compaction", "steer"].includes(live.panelMutation)) live.panelMutation = null;
   }
   function renderLivePanels() {
@@ -1079,6 +1079,7 @@
     window.SnowAuth?.render(s, {readable: readable && s.auth_enabled === true && !live.invalidInstance, safe: idle("auth") && s.auth_enabled === true});
     window.SnowMCP?.render(s, {readable: readable && s.mcp_enabled === true && !live.invalidInstance, safe: idle("mcp") && s.mcp_enabled === true});
     window.SnowSubagents?.render(s, {readable: readable && s.subagents_enabled === true && !live.invalidInstance});
+    window.SnowFind?.render();
     window.SnowCompaction?.render(s, {...live.stopView, supported: s.compaction_enabled === true, readable: readable && s.compaction_enabled === true, safe: idle("compaction") && s.compaction_enabled === true});
     window.SnowSteer?.render(s, {connected: readable, status: s.goal?.running || compactionActive() || s.permission || s.input ? "unavailable" : live.status,
       busy: !!(live.action || live.cancel || live.metadata || live.panelMutation && live.panelMutation !== "steer" || window.SnowQueue?.blocking()),
@@ -1115,6 +1116,7 @@
       },
       refreshModels: () => { if (bound()) window.SnowConversation?.refreshModels?.(); }
     });
+    window.SnowFind?.init(base.root);
     window.SnowSubagents?.init({...base, inspect: signal => {
       if (!bound()) return Promise.reject(new Error("Retired panel"));
       return panelRead(current, identity, "subagents-inspect", {}, AbortSignal.any([signal, lifetime.signal]));
@@ -1649,6 +1651,7 @@
   document.addEventListener("keydown", event => {
     const dialog = $("dialog[open]");
     if (dialog) { trap(event, dialog); return; }
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "f" && live && $("#live-session")?.contains(event.target) && window.SnowFind?.show()) { event.preventDefault(); return; }
     const nav = $(".sidebar.nav-open");
     if (nav) { if (event.key === "Escape") { event.preventDefault(); requestNav(false); } else trap(event, nav); return; }
     const inspector = $('#project-inspector[aria-modal="true"]');
