@@ -49,7 +49,6 @@ func (m *Model) clearLoginStepState() {
 	m.providerLogout = false
 	m.providers = nil
 	m.pickChatGPTAuth = false
-	m.loginChatGPTAccount = ""
 	m.authAccounts = nil
 	m.authIndex = 0
 	m.loginProfileMode = false
@@ -175,9 +174,6 @@ func chatGPTAccountChoices(sources []chatgpt.AuthSource) []chatGPTAccountChoice 
 // starts a fresh Snow OAuth flow constrained to the selected account. Tokens
 // from other clients are never copied into Snow by this TUI flow.
 func (m *Model) startChatGPTAuthPick() (tea.Model, tea.Cmd) {
-	if m.loginChatGPTAccount == "" {
-		m.loginChatGPTAccount = m.app.SelectedChatGPTAccount()
-	}
 	m.authAccounts = chatGPTAccountChoices(chatgpt.DiscoverAuthSources())
 	m.authIndex = 0
 	m.pickChatGPTAuth = true
@@ -228,19 +224,9 @@ func (m *Model) startChatGPTOAuth(method chatgpt.LoginMethod, allowedWorkspaceID
 	m.oauthBackRequested = false
 	m.oauthProgress = chatgpt.LoginProgress{}
 	m.loginError = ""
-	account := m.loginChatGPTAccount
-	if account == "" {
-		account = "default"
-		if m.app != nil {
-			account = m.app.SelectedChatGPTAccount()
-		}
-	}
 	login := m.oauthLogin
 	if login == nil {
-		application := m.app
-		login = func(ctx context.Context, _ string, request auth.LoginRequest, interaction auth.Interaction) (auth.Status, error) {
-			return application.LoginChatGPTAccount(ctx, account, request, interaction)
-		}
+		login = m.app.Login
 	}
 	m.oauthWG.Go(func() {
 		request := auth.LoginRequest{Method: string(method), Params: map[string][]string{"allowed_workspace_id": allowedWorkspaceIDs}}
@@ -252,7 +238,7 @@ func (m *Model) startChatGPTOAuth(method chatgpt.LoginMethod, allowedWorkspaceID
 		status := chatGPTStatus(resolved)
 		// Operation cancellation while the TUI remains live must still settle the
 		// picker. TUI shutdown instead abandons the now-unobservable completion.
-		deliverOAuthDone(m.ctx, events, oauthDoneMsg{account: account, status: status, err: err})
+		deliverOAuthDone(m.ctx, events, oauthDoneMsg{status: status, err: err})
 	})
 	return waitOAuthEvent(events)
 }

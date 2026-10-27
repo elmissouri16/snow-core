@@ -11,7 +11,7 @@ import (
 
 // logoutCmd clears a provider credential from auth.json.
 func logoutCmd() *cobra.Command {
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "logout <provider>",
 		Short: "Remove a stored credential for a provider",
 		Args:  cobra.ExactArgs(1),
@@ -34,14 +34,11 @@ func logoutCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			account, _ := cmd.Flags().GetString("account")
-			if err := service.LogoutAccount(cmd.Context(), provider, account); err != nil {
+			if err := service.Logout(cmd.Context(), provider); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "removed %s credential from %s\n", authAccountLabel(provider, account), authPath)
+			fmt.Printf("removed %s credential from %s\n", provider, authPath)
 			return nil
 		},
 	}
-	cmd.Flags().String("account", "default", "ChatGPT account alias to remove")
-	return cmd
 }

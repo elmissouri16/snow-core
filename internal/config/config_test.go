@@ -20,7 +20,7 @@ func TestZeroConfigOmitsEmptyNestedSections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"tui", "debug", "skills", "subagents", "processes", "retry", "compaction", "chatgpt_accounts"} {
+	for _, field := range []string{"tui", "debug", "skills", "subagents", "processes", "retry", "compaction"} {
 		if bytes.Contains(data, []byte(`"`+field+`"`)) {
 			t.Fatalf("zero config unexpectedly includes %q: %s", field, data)
 		}

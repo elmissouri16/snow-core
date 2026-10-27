@@ -69,6 +69,9 @@ func CheckAuth(cred auth.Credential) (AuthStatus, error) {
 			}
 		}
 		status.AccountID = accountIDFromClaims(claims)
+		if status.AccountID == "" {
+			status.AccountID = stringExtra(cred.Extra, "account_id")
+		}
 		status.PlanType = planTypeFromClaims(claims)
 	}
 	if status.AccountID == "" {

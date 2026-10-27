@@ -43,9 +43,6 @@ func (a *App) AuthStatus(ctx context.Context, providerID string) (auth.Status, e
 	if a == nil || a.AuthService == nil {
 		return auth.Status{}, fmt.Errorf("app: auth service is unavailable")
 	}
-	if providerID == "chatgpt" {
-		return a.AuthService.StatusAccount(ctx, providerID, a.SelectedChatGPTAccount())
-	}
 	return a.AuthService.Status(ctx, providerID)
 }
 
@@ -55,35 +52,11 @@ func (a *App) Login(ctx context.Context, providerID string, request auth.LoginRe
 	if a == nil || a.AuthService == nil {
 		return auth.Status{}, fmt.Errorf("app: auth service is unavailable")
 	}
-	if providerID == "chatgpt" {
-		return a.LoginChatGPTAccount(ctx, a.SelectedChatGPTAccount(), request, interaction)
-	}
-	status, err := a.AuthService.LoginAccount(ctx, providerID, "default", request, interaction)
+	status, err := a.AuthService.Login(ctx, providerID, request, interaction)
 	if err != nil {
 		return auth.Status{}, err
 	}
 	_ = a.RefreshProviderModels(ctx, providerID)
-	return status, nil
-}
-
-// LoginChatGPTAccount saves a separately authorized alias without selecting it
-// or changing the preferred account. Only a login for the selected alias may
-// refresh this runtime's catalog.
-func (a *App) LoginChatGPTAccount(ctx context.Context, account string, request auth.LoginRequest, interaction auth.Interaction) (auth.Status, error) {
-	if a == nil || a.AuthService == nil {
-		return auth.Status{}, fmt.Errorf("app: auth service is unavailable")
-	}
-	status, err := a.AuthService.LoginAccount(ctx, "chatgpt", account, request, interaction)
-	if err != nil {
-		return auth.Status{}, err
-	}
-	if account == "" {
-		account = "default"
-	}
-	if account == a.SelectedChatGPTAccount() {
-		a.clearProviderCatalog("chatgpt")
-		_ = a.RefreshProviderModels(ctx, "chatgpt")
-	}
 	return status, nil
 }
 
@@ -101,15 +74,11 @@ func (a *App) Logout(ctx context.Context, providerID string) error {
 			refreshCatalog = authoritative.ModelCatalogAuthoritative()
 		}
 	}
-	account := "default"
-	if providerID == "chatgpt" {
-		account = a.SelectedChatGPTAccount()
-	}
-	if err := a.AuthService.LogoutAccount(ctx, providerID, account); err != nil {
+	if err := a.AuthService.Logout(ctx, providerID); err != nil {
 		return err
 	}
 	if descriptor.Required {
-		if _, resolveErr := a.AuthService.ResolveAccount(ctx, providerID, account); resolveErr != nil {
+		if _, resolveErr := a.AuthService.Resolve(ctx, providerID); resolveErr != nil {
 			a.clearProviderCatalog(providerID)
 			return nil
 		}
@@ -126,11 +95,6 @@ func (a *App) Logout(ctx context.Context, providerID string) error {
 // or catalog load can repopulate it.
 func (a *App) clearProviderCatalog(providerID string) {
 	a.stateMu.Lock()
-	defer a.stateMu.Unlock()
-	a.clearProviderCatalogLocked(providerID)
-}
-
-func (a *App) clearProviderCatalogLocked(providerID string) {
 	delete(a.modelCatalog, providerID)
 	if a.runtimeSelection != nil {
 		a.runtimeSelection.mu.Lock()
@@ -146,4 +110,5 @@ func (a *App) clearProviderCatalogLocked(providerID string) {
 	if a.ProviderID == providerID {
 		a.Models = nil
 	}
+	a.stateMu.Unlock()
 }

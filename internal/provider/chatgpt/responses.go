@@ -281,9 +281,6 @@ func (s *retryingCodexStream) startAttempt() (protocol.EventStream, error) {
 		if requestID != "" {
 			message += " (request ID " + requestID + ")"
 		}
-		if kind, resetsAt := quotaMetadata(resp.StatusCode, snippet); kind != "" {
-			return nil, &providerpkg.LimitError{Provider: ProviderID, Status: resp.StatusCode, Message: message, Kind: kind, ResetsAt: resetsAt}
-		}
 		if resp.StatusCode == http.StatusPaymentRequired {
 			return nil, &providerpkg.LimitError{Provider: ProviderID, Status: resp.StatusCode, Message: message}
 		}

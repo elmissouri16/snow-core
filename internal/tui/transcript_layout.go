@@ -626,10 +626,6 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleChatGPTAuthPick(msg)
 	}
 
-	if m.pickAccount {
-		return m.handleAccountPick(msg)
-	}
-
 	// --- Model picker (for /model) ---
 	if m.pickModel {
 		return m.handleModelPick(msg)
@@ -849,8 +845,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	initControl := m.busy && command == "/init"
 	keybindingsControl := m.busy && command == "/keybindings"
 	processInspectorControl := m.busy && command == "/processes"
-	accountControl := m.busy && command == "/account"
-	busyControl := goalControl || initControl || keybindingsControl || processInspectorControl || accountControl
+	busyControl := goalControl || initControl || keybindingsControl || processInspectorControl
 	if abortKey && m.busy {
 		m.requestAbort()
 		return m, nil

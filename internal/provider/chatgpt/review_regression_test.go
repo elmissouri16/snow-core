@@ -125,23 +125,22 @@ func TestCatalogCacheMetadataIsolationAndValidation(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now().UTC()
 	p := New(Config{BaseURL: "https://one.example/backend-api", CacheRoot: root, ClientVersion: "v1", Now: func() time.Time { return now }})
-	identity := auth.AccountIdentity(auth.Credential{AccountID: "acct"})
-	entry := catalogCache{Version: catalogCacheVersion, BackendOrigin: p.backendOrigin(), AccountID: "acct", AccountIdentity: identity, FetchedAt: now, ClientVersion: "v1", Models: []modelRecord{{Slug: "m", Visibility: "list"}}}
-	if err := p.saveCatalogCache(identity, entry); err != nil {
+	entry := catalogCache{Version: catalogCacheVersion, BackendOrigin: p.backendOrigin(), AccountID: "acct", FetchedAt: now, ClientVersion: "v1", Models: []modelRecord{{Slug: "m", Visibility: "list"}}}
+	if err := p.saveCatalogCache("acct", entry); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := p.loadCatalogCache("acct", identity); !ok {
+	if _, ok := p.loadCatalogCache("acct"); !ok {
 		t.Fatal("valid cache rejected")
 	}
 	otherOrigin := New(Config{BaseURL: "https://two.example/backend-api", CacheRoot: root, ClientVersion: "v1", Now: func() time.Time { return now }})
-	if p.catalogCachePath(identity) == otherOrigin.catalogCachePath(identity) {
+	if p.catalogCachePath("acct") == otherOrigin.catalogCachePath("acct") {
 		t.Fatal("backend origins share a cache key")
 	}
-	if _, ok := p.loadCatalogCache("other", identity); ok {
+	if _, ok := p.loadCatalogCache("other"); ok {
 		t.Fatal("cache accepted for another account")
 	}
 
-	path := p.catalogCachePath(identity)
+	path := p.catalogCachePath("acct")
 	for _, tc := range []struct {
 		name string
 		data []byte
@@ -153,7 +152,7 @@ func TestCatalogCacheMetadataIsolationAndValidation(t *testing.T) {
 			if err := os.WriteFile(path, tc.data, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, ok := p.loadCatalogCache("acct", identity); ok {
+			if _, ok := p.loadCatalogCache("acct"); ok {
 				t.Fatal("invalid cache accepted")
 			}
 		})
@@ -162,7 +161,6 @@ func TestCatalogCacheMetadataIsolationAndValidation(t *testing.T) {
 		func(c *catalogCache) { c.Version++ },
 		func(c *catalogCache) { c.ClientVersion = "old" },
 		func(c *catalogCache) { c.AccountID = "other" },
-		func(c *catalogCache) { c.AccountIdentity = "other" },
 		func(c *catalogCache) { c.FetchedAt = time.Time{} },
 	} {
 		bad := entry
@@ -171,7 +169,7 @@ func TestCatalogCacheMetadataIsolationAndValidation(t *testing.T) {
 		if err := os.WriteFile(path, data, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, ok := p.loadCatalogCache("acct", identity); ok {
+		if _, ok := p.loadCatalogCache("acct"); ok {
 			t.Fatalf("invalid metadata accepted: %+v", bad)
 		}
 	}
@@ -191,9 +189,8 @@ func TestStaleCatalogCacheTriggersRefresh(t *testing.T) {
 	_ = store.Put(ProviderID, auth.Credential{Type: auth.CredentialOAuth, Access: "access", AccountID: "acct"})
 	now := time.Now().UTC()
 	p := New(Config{BaseURL: server.URL, Store: store, CacheRoot: t.TempDir(), HTTPClient: server.Client(), Now: func() time.Time { return now }})
-	identity := auth.AccountIdentity(auth.Credential{AccountID: "acct"})
-	stale := catalogCache{Version: catalogCacheVersion, BackendOrigin: p.backendOrigin(), AccountID: "acct", AccountIdentity: identity, FetchedAt: now.Add(-catalogFreshness - time.Second), ClientVersion: p.clientVersion, Models: []modelRecord{{Slug: "cached", Visibility: "list"}}}
-	if err := p.saveCatalogCache(identity, stale); err != nil {
+	stale := catalogCache{Version: catalogCacheVersion, BackendOrigin: p.backendOrigin(), AccountID: "acct", FetchedAt: now.Add(-catalogFreshness - time.Second), ClientVersion: p.clientVersion, Models: []modelRecord{{Slug: "cached", Visibility: "list"}}}
+	if err := p.saveCatalogCache("acct", stale); err != nil {
 		t.Fatal(err)
 	}
 	models, err := p.ListModels(context.Background())

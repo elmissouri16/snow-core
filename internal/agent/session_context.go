@@ -28,21 +28,6 @@ func (a *Agent) SessionIdentityAdmitted() (id, path string, running bool, err er
 	return a.opts.Session.ID(), a.opts.Session.Path(), a.running || a.goalRun != nil, nil
 }
 
-// CredentialSelectionReady requires the caller's admission lock. Switching
-// credentials must not retarget automatic continuation or pending user work.
-// Unlike lifecycle controls it does not stop, discard, or resume that work.
-func (a *Agent) CredentialSelectionReady() error {
-	if err := a.QueueControlTransitionReady(); err != nil {
-		return err
-	}
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	if a.autoRunning || len(a.queuedInputs) != 0 {
-		return errors.New("agent: wait for automatic continuation or queued input before switching credentials")
-	}
-	return nil
-}
-
 func (a *Agent) withSessionRead(read func(session.Store) error) error {
 	unlock := a.LockAdmission()
 	defer unlock()

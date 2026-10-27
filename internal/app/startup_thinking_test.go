@@ -60,7 +60,7 @@ func TestStartupWithoutCatalogPreservesSavedThinking(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if err := store.Put("chatgpt", accountTestCredential("default", "workspace", "test-token")); err != nil {
+					if err := store.Put("chatgpt", auth.Credential{Provider: "chatgpt", Type: auth.CredentialOAuth, Access: "test-token", AccountID: "workspace"}); err != nil {
 						t.Fatal(err)
 					}
 				}

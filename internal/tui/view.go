@@ -197,9 +197,6 @@ func (m *Model) currentHeaderStatus() string {
 			status = "login…"
 		}
 	}
-	if m.pickAccount {
-		status = "accounts"
-	}
 	if m.pickInfo {
 		status = "inspect"
 	}
@@ -336,8 +333,6 @@ func (m *Model) viewContent() string {
 		frame = m.overlayCenteredModal(frame, m.renderSelectionModal())
 	} else if m.loginModalVisible() && !m.permPending && !m.userInputPending {
 		frame = m.overlayLoginModal(frame)
-	} else if m.pickAccount {
-		frame = m.overlayCenteredModal(frame, m.renderAccountPicker())
 	} else if m.modelModalVisible() && !m.permPending && !m.userInputPending {
 		frame = m.overlayModelModal(frame)
 	} else if m.thinkingModalVisible() && !m.permPending && !m.userInputPending {

@@ -19,7 +19,6 @@ type commandSpec struct {
 
 // commands is the registry shown by the "/" palette and /help.
 var commands = []commandSpec{
-	{name: "/account", desc: "ChatGPT accounts", argHint: "[name] | prefer NAME"},
 	{name: "/agent", desc: "open live fleet inspector or set concurrency", argHint: "[path | concurrency N]"},
 	{name: "/allow", desc: "approve a pending permission request", argHint: "[always]"},
 	{name: "/compact", desc: "compact older conversation context"},
@@ -32,7 +31,7 @@ var commands = []commandSpec{
 	{name: "/goal", desc: "show or control a persistent thread goal", argHint: "[objective|edit|pause|resume|clear]"},
 	{name: "/init", desc: "create an AGENTS.md guide and project config"},
 	{name: "/keybindings", desc: "configure keyboard shortcuts"},
-	{name: "/login", desc: "configure credentials; chatgpt NAME saves an account", argHint: "<provider> [name]"},
+	{name: "/login", desc: "configure a provider endpoint or credentials", argHint: "<provider>"},
 	{name: "/logout", desc: "choose and remove a stored credential", argHint: "[provider]"},
 	{name: "/mcp", desc: "inspect configured MCP server status"},
 	{name: "/model", desc: "pick a model (persisted)", argHint: "<id>"},

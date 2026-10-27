@@ -236,18 +236,10 @@ func collectDiagnosticSecrets(opts Options, cfg config.Config, store auth.Store,
 	if service != nil {
 		for _, descriptor := range service.Providers() {
 			if store != nil {
-				accounts, _ := service.Accounts(descriptor.ProviderID)
-				accounts = append(accounts, "default")
-				for _, account := range accounts {
-					key, err := auth.AccountKey(descriptor.ProviderID, account)
-					if err != nil {
-						continue
-					}
-					if credential, ok := store.Get(key); ok {
-						add(credential.Key)
-						add(credential.Access)
-						add(credential.Refresh)
-					}
+				if credential, ok := store.Get(descriptor.ProviderID); ok {
+					add(credential.Key)
+					add(credential.Access)
+					add(credential.Refresh)
 				}
 			}
 			for _, name := range descriptor.Environment {

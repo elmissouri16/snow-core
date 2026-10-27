@@ -28,7 +28,7 @@ const (
 	catalogRetryDelay   = time.Minute
 	catalogTimeout      = 5 * time.Second
 	maxCatalogBytes     = 8 << 20
-	catalogCacheVersion = 2
+	catalogCacheVersion = 1
 )
 
 type reasoningLevelRecord struct {
@@ -61,14 +61,13 @@ type modelRecord struct {
 }
 
 type catalogCache struct {
-	Version         int           `json:"version"`
-	BackendOrigin   string        `json:"backend_origin"`
-	AccountID       string        `json:"account_id"`
-	AccountIdentity string        `json:"account_identity,omitempty"`
-	FetchedAt       time.Time     `json:"fetched_at"`
-	ETag            string        `json:"etag,omitempty"`
-	ClientVersion   string        `json:"client_version"`
-	Models          []modelRecord `json:"models"`
+	Version       int           `json:"version"`
+	BackendOrigin string        `json:"backend_origin"`
+	AccountID     string        `json:"account_id"`
+	FetchedAt     time.Time     `json:"fetched_at"`
+	ETag          string        `json:"etag,omitempty"`
+	ClientVersion string        `json:"client_version"`
+	Models        []modelRecord `json:"models"`
 }
 
 type modelsResponse struct {
@@ -128,7 +127,6 @@ func (p *Provider) RefreshModelsWithCredential(ctx context.Context, credential a
 func (p *Provider) listModels(ctx context.Context, force bool) ([]protocol.Model, error) {
 	cred, ok := p.storeCredential()
 	if !ok {
-		p.scopeCatalog("")
 		return Models(), nil
 	}
 	resolved, err := p.resolve(ctx, cred, false)
@@ -137,30 +135,26 @@ func (p *Provider) listModels(ctx context.Context, force bool) ([]protocol.Model
 		if status, checkErr := CheckAuth(cred); checkErr == nil && status.AccountID != "" {
 			accountID = status.AccountID
 		}
-		identity := auth.AccountIdentity(cred)
-		p.scopeCatalog(identity)
-		if cached, ok := p.loadCatalogCache(accountID, identity); ok && cached.ClientVersion == p.clientVersion {
-			return p.acceptRecords(identity, cached.Models, p.now().Add(catalogRetryDelay)), err
+		if cached, ok := p.loadCatalogCache(accountID); ok && cached.ClientVersion == p.clientVersion {
+			return p.acceptRecords(cached.Models, p.now().Add(catalogRetryDelay)), err
 		}
-		return p.acceptRecords(identity, nil, p.now().Add(catalogRetryDelay)), err
+		return p.acceptRecords(nil, p.now().Add(catalogRetryDelay)), err
 	}
 	return p.listModelsCredential(ctx, resolved, force)
 }
 
 func (p *Provider) listModelsCredential(ctx context.Context, credential auth.Credential, force bool) ([]protocol.Model, error) {
-	identity := auth.AccountIdentity(credential)
-	p.scopeCatalog(identity)
 	status, err := CheckAuth(credential)
 	if err != nil {
 		return nil, err
 	}
-	if status.AccountID == "" || identity == "" {
-		return nil, errors.New("chatgpt: OAuth credential has no account identity for model discovery")
+	if status.AccountID == "" {
+		return nil, errors.New("chatgpt: OAuth credential has no account ID for model discovery")
 	}
-	cache, cacheOK := p.loadCatalogCache(status.AccountID, identity)
+	cache, cacheOK := p.loadCatalogCache(status.AccountID)
 	compatibleCache := cacheOK && cache.ClientVersion == p.clientVersion
 	if compatibleCache && !force && p.now().Sub(cache.FetchedAt) < catalogFreshness {
-		return p.acceptRecords(identity, cache.Models, cache.FetchedAt.Add(catalogFreshness)), nil
+		return p.acceptRecords(cache.Models, cache.FetchedAt.Add(catalogFreshness)), nil
 	}
 	requestETag := ""
 	if compatibleCache {
@@ -169,9 +163,9 @@ func (p *Provider) listModelsCredential(ctx context.Context, credential auth.Cre
 	records, etag, notModified, err := p.fetchCatalog(ctx, credential, requestETag, true)
 	if err != nil {
 		if compatibleCache {
-			return p.acceptRecords(identity, cache.Models, p.now().Add(catalogRetryDelay)), err
+			return p.acceptRecords(cache.Models, p.now().Add(catalogRetryDelay)), err
 		}
-		return p.acceptRecords(identity, nil, p.now().Add(catalogRetryDelay)), err
+		return p.acceptRecords(nil, p.now().Add(catalogRetryDelay)), err
 	}
 	if notModified {
 		if !compatibleCache {
@@ -179,12 +173,12 @@ func (p *Provider) listModelsCredential(ctx context.Context, credential auth.Cre
 		}
 		cache.FetchedAt = p.now().UTC()
 		cache.ClientVersion = p.clientVersion
-		_ = p.saveCatalogCache(identity, cache)
-		return p.acceptRecords(identity, cache.Models, cache.FetchedAt.Add(catalogFreshness)), nil
+		_ = p.saveCatalogCache(status.AccountID, cache)
+		return p.acceptRecords(cache.Models, cache.FetchedAt.Add(catalogFreshness)), nil
 	}
-	entry := catalogCache{Version: catalogCacheVersion, BackendOrigin: p.backendOrigin(), AccountID: status.AccountID, AccountIdentity: identity, FetchedAt: p.now().UTC(), ETag: etag, ClientVersion: p.clientVersion, Models: records}
-	_ = p.saveCatalogCache(identity, entry)
-	return p.acceptRecords(identity, records, entry.FetchedAt.Add(catalogFreshness)), nil
+	entry := catalogCache{Version: catalogCacheVersion, BackendOrigin: p.backendOrigin(), AccountID: status.AccountID, FetchedAt: p.now().UTC(), ETag: etag, ClientVersion: p.clientVersion, Models: records}
+	_ = p.saveCatalogCache(status.AccountID, entry)
+	return p.acceptRecords(records, entry.FetchedAt.Add(catalogFreshness)), nil
 }
 
 func (p *Provider) storeCredential() (auth.Credential, bool) {
@@ -235,9 +229,6 @@ func (p *Provider) fetchCatalog(ctx context.Context, cred auth.Credential, etag 
 		if refreshErr != nil {
 			return nil, "", false, refreshErr
 		}
-		if auth.AccountIdentity(fresh) != auth.AccountIdentity(cred) {
-			return nil, "", false, errors.New("chatgpt: credential identity changed during model discovery; retry with the current account")
-		}
 		return p.fetchCatalog(parentCtx, fresh, etag, false)
 	}
 	if resp.StatusCode == http.StatusNotModified {
@@ -260,31 +251,12 @@ func (p *Provider) fetchCatalog(ctx context.Context, cred auth.Credential, etag 
 	return payload.Models, resp.Header.Get("ETag"), false, nil
 }
 
-// scopeCatalog invalidates the retained inventory before discovering a different
-// account, so even a pending or failed request cannot expose the prior catalog.
-func (p *Provider) scopeCatalog(identity string) {
-	p.modelsMu.Lock()
-	defer p.modelsMu.Unlock()
-	if p.catalogAccount != identity {
-		p.catalogAccount = identity
-		p.models = nil
-		p.catalogRefreshAt = time.Time{}
-		p.catalogRevision++
-	}
-}
-
-func (p *Provider) acceptRecords(identity string, records []modelRecord, refreshAt time.Time) []protocol.Model {
+func (p *Provider) acceptRecords(records []modelRecord, refreshAt time.Time) []protocol.Model {
 	models := mapModelRecords(records)
 	// The authenticated response is account-scoped. Do not add bundled models
 	// missing from it: the Codex backend can reject a model for one ChatGPT
 	// account even when another local OpenCode/Pi account can invoke it.
 	p.modelsMu.Lock()
-	// A request started for an earlier account may finish after an account switch.
-	// Return its result to that caller without restoring its retained inventory.
-	if p.catalogAccount != identity {
-		p.modelsMu.Unlock()
-		return models
-	}
 	if !reflect.DeepEqual(p.models, records) {
 		p.catalogRevision++
 	}
@@ -388,29 +360,29 @@ func (p *Provider) backendOrigin() string {
 	return u.Scheme + "://" + u.Host
 }
 
-func (p *Provider) catalogCachePath(identity string) string {
-	sum := sha256.Sum256([]byte(p.backendOrigin() + "\x00" + identity))
+func (p *Provider) catalogCachePath(accountID string) string {
+	sum := sha256.Sum256([]byte(p.backendOrigin() + "\x00" + accountID))
 	return filepath.Join(p.cacheRoot, hex.EncodeToString(sum[:])+".json")
 }
-func (p *Provider) loadCatalogCache(accountID, identity string) (catalogCache, bool) {
-	if p.cacheRoot == "" || identity == "" {
+func (p *Provider) loadCatalogCache(accountID string) (catalogCache, bool) {
+	if p.cacheRoot == "" || accountID == "" {
 		return catalogCache{}, false
 	}
-	data, err := os.ReadFile(p.catalogCachePath(identity))
+	data, err := os.ReadFile(p.catalogCachePath(accountID))
 	if err != nil || len(data) > maxCatalogBytes {
 		return catalogCache{}, false
 	}
 	var c catalogCache
 	if json.Unmarshal(data, &c) != nil || len(c.Models) == 0 ||
 		c.Version != catalogCacheVersion || c.BackendOrigin != p.backendOrigin() ||
-		c.AccountID != accountID || c.AccountIdentity != identity || c.ClientVersion != p.clientVersion || c.FetchedAt.IsZero() ||
+		c.AccountID != accountID || c.ClientVersion != p.clientVersion || c.FetchedAt.IsZero() ||
 		c.FetchedAt.After(p.now().Add(time.Minute)) {
 		return catalogCache{}, false
 	}
 	return c, true
 }
-func (p *Provider) saveCatalogCache(identity string, c catalogCache) error {
-	if p.cacheRoot == "" || identity == "" {
+func (p *Provider) saveCatalogCache(accountID string, c catalogCache) error {
+	if p.cacheRoot == "" || accountID == "" {
 		return nil
 	}
 	if err := os.MkdirAll(p.cacheRoot, 0o700); err != nil {
@@ -442,10 +414,10 @@ func (p *Provider) saveCatalogCache(identity string, c catalogCache) error {
 	if err != nil {
 		return err
 	}
-	if err = os.Rename(name, p.catalogCachePath(identity)); err != nil {
+	if err = os.Rename(name, p.catalogCachePath(accountID)); err != nil {
 		return err
 	}
-	return os.Chmod(p.catalogCachePath(identity), 0o600)
+	return os.Chmod(p.catalogCachePath(accountID), 0o600)
 }
 
 var _ providerpkg.Transport = (*Provider)(nil)

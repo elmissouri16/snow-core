@@ -136,10 +136,6 @@ func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
 	}
 	a.stateMu.Lock()
 	p, ok := a.Providers[id]
-	selectedAccount := ""
-	if runtime, authenticated := p.(*provider.Authenticated); authenticated && id == "chatgpt" {
-		selectedAccount = runtime.Account()
-	}
 	a.stateMu.Unlock()
 	if !ok {
 		return fmt.Errorf("app: provider %q is not available", id)
@@ -181,12 +177,8 @@ func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
 	a.stateMu.Lock()
 	currentProvider, stillConfigured := a.Providers[id]
 	active := a.ProviderID == id
-	accountChanged := false
-	if runtime, authenticated := currentProvider.(*provider.Authenticated); authenticated && selectedAccount != "" {
-		accountChanged = runtime.Account() != selectedAccount
-	}
 	a.stateMu.Unlock()
-	if !stillConfigured || currentProvider != p || accountChanged {
+	if !stillConfigured || currentProvider != p {
 		return fmt.Errorf("app: provider %q configuration changed during model refresh", id)
 	}
 
@@ -209,14 +201,14 @@ func (a *App) RefreshProviderModels(ctx context.Context, id string) error {
 			break
 		}
 		if refreshedActive == nil && modelCatalogAuthoritative(p) {
-			if id == "chatgpt" {
-				return fmt.Errorf("app: active model %q is unavailable to the selected ChatGPT account; choose an available model explicitly", current.ID)
-			}
-			for i := range models {
-				if !models[i].SupportsThinkingLevel(level) {
+			// The startup placeholder (no catalog before login) and a withdrawn
+			// model both resolve to the configured default when the catalog
+			// allows it, then the provider default, then catalog order.
+			for _, candidate := range a.preferredCatalogModels(p, models) {
+				if !candidate.SupportsThinkingLevel(level) {
 					continue
 				}
-				fallback := models[i]
+				fallback := candidate
 				if setErr := a.Agent.SetModel(fallback); setErr != nil {
 					return fmt.Errorf("app: replace unavailable active model %q with %q: %w", current.ID, fallback.ID, setErr)
 				}
@@ -963,4 +955,33 @@ func (a *App) SkillInventoryPublic() (protocol.RPCSkillsList, error) {
 		out.Diagnostics = append(out.Diagnostics, protocol.RPCSkillDiagnostic{Path: d.Path, Skill: d.Skill, Level: d.Level, Message: d.Message})
 	}
 	return out, nil
+}
+
+// placeholderModelID is the startup stand-in used when no model catalog could
+// be read (for example before login). It is never a real provider model.
+const placeholderModelID = "default"
+
+// preferredCatalogModels orders a catalog for automatic selection: the
+// configured default model, then the provider's documented default, then the
+// catalog order. This mirrors startup resolution so a recovered placeholder
+// lands on the model the user configured rather than whatever is listed first.
+func (a *App) preferredCatalogModels(p any, models []protocol.Model) []protocol.Model {
+	ordered := make([]protocol.Model, 0, len(models))
+	seen := make(map[string]bool, len(models))
+	add := func(id string) {
+		for _, model := range models {
+			if model.ID == id && !seen[id] {
+				ordered = append(ordered, model)
+				seen[id] = true
+			}
+		}
+	}
+	add(a.Cfg.DefaultModel)
+	if dm, ok := p.(interface{ DefaultModel() protocol.Model }); ok {
+		add(dm.DefaultModel().ID)
+	}
+	for _, model := range models {
+		add(model.ID)
+	}
+	return ordered
 }

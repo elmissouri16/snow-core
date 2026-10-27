@@ -53,22 +53,6 @@ func (a *App) loadProviderCatalogs(ctx context.Context, force bool) ([]protocol.
 		return nil, errors.New("app: provider catalogs unavailable")
 	}
 	_, loadErr := a.runtimeSelection.loadAvailableModels(ctx, force)
-	return a.publishProviderCatalogs(), loadErr
-}
-
-// LoadProviderCatalog loads only the requested provider and publishes the
-// combined picker snapshot from cached catalogs. Unrelated inactive providers
-// are neither contacted nor allowed to report errors for this operation.
-// It does not change the selected provider or model.
-func (a *App) LoadProviderCatalog(ctx context.Context, providerID string) ([]protocol.Model, error) {
-	if a == nil || a.runtimeSelection == nil {
-		return nil, errors.New("app: provider catalogs unavailable")
-	}
-	_, loadErr := a.runtimeSelection.ensureCatalog(ctx, providerID, false)
-	return a.publishProviderCatalogs(), loadErr
-}
-
-func (a *App) publishProviderCatalogs() []protocol.Model {
 	// Publish one generation-consistent snapshot. Profile reconfiguration uses
 	// the same stateMu -> runtimeSelection.mu lock order, so an obsolete lazy
 	// load cannot restore the replaced provider's catalog in App mirrors.
@@ -92,7 +76,7 @@ func (a *App) publishProviderCatalogs() []protocol.Model {
 		a.Models = cloneModels(active)
 	}
 	a.stateMu.Unlock()
-	return cloneModels(models)
+	return cloneModels(models), loadErr
 }
 
 // ResolveProviderModel returns one exact catalog-backed provider/model pair.

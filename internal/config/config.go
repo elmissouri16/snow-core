@@ -230,7 +230,6 @@ type Config struct {
 	ContextCapBytes           int                                    `json:"context_cap_bytes,omitzero"`
 	FixedContextBudgetPercent int                                    `json:"fixed_context_budget_percent,omitzero"`
 	SystemPromptFile          string                                 `json:"system_prompt_file,omitempty"`
-	ChatGPTAccounts           ChatGPTAccountsConfig                  `json:"chatgpt_accounts,omitzero"`
 	Providers                 map[string]ProviderConfig              `json:"providers,omitempty"`
 	TUI                       TUIConfig                              `json:"tui,omitzero"`
 	Debug                     DebugConfig                            `json:"debug,omitzero"`

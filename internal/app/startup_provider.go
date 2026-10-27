@@ -32,12 +32,6 @@ func initializeProvider(opts Options, cfg config.Config, authStore auth.Store, a
 	if providerID == "opencode-zen" {
 		return startupProvider{}, errors.New("app: provider \"opencode-zen\" is disabled because its models are restricted to OpenCode clients; choose opencode-go, chatgpt, or an OpenAI-compatible provider")
 	}
-	if opts.Account != "" && providerID != chatgpt.ProviderID {
-		return startupProvider{}, errors.New("app: --account requires --provider chatgpt")
-	}
-	if len(opts.AccountFallback) > 0 || len(cfg.ChatGPTAccounts.Fallback) > 0 {
-		return startupProvider{}, errors.New("app: automatic ChatGPT account fallback is unavailable until the upstream quota contract and applicable usage rules are verified; select an account manually with --account or /account")
-	}
 	cacheRoot := filepath.Join(config.GlobalDir(), "cache")
 	baseURLOverride := opts.BaseURL
 	newOpenCode := func(pc config.ProviderConfig) (provider.Transport, error) {
@@ -200,15 +194,6 @@ func initializeProvider(opts Options, cfg config.Config, authStore auth.Store, a
 	providers, err := providerModules.Build(authService)
 	if err != nil {
 		return startupProvider{}, err
-	}
-	if runtime, ok := providers[chatgpt.ProviderID].(*provider.Authenticated); ok {
-		account := cfg.ChatGPTAccounts.Preferred
-		if opts.Account != "" {
-			account = opts.Account
-		}
-		if err := runtime.SetAccount(account); err != nil {
-			return startupProvider{}, fmt.Errorf("app: select ChatGPT account: %w", err)
-		}
 	}
 	prov := providers[providerID]
 

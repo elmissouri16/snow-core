@@ -7,7 +7,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/elmissouri16/snow-core/internal/auth"
 	"github.com/elmissouri16/snow-core/internal/config"
 	"github.com/elmissouri16/snow-core/internal/permission"
 	"github.com/elmissouri16/snow-core/internal/provider/chatgpt"
@@ -293,8 +292,6 @@ func (m *Model) runCommandWithDisplay(line, displayLine string) (tea.Model, tea.
 		}
 		return m.startTreePick()
 
-	case "/account":
-		return m.startAccountPick(args)
 	case "/model":
 		if m.compatibleLoginPending {
 			m.lastStatus = "waiting for openai-compatible model discovery"
@@ -480,7 +477,6 @@ func (m *Model) startLogin(args []string) (tea.Model, tea.Cmd) {
 	// clipboard/image result that was requested by the prior composer state.
 	m.imagePasteGeneration++
 	m.clearLoginNavigation()
-	m.loginChatGPTAccount = ""
 	m.oauthBackRequested = false
 	if len(args) == 0 {
 		m.providers = m.supportedProviders()
@@ -493,18 +489,11 @@ func (m *Model) startLogin(args []string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if len(args) > 2 {
-		m.pushLine(styleError.Render("usage: /login [provider] [profile-name or ChatGPT account-name]"))
+		m.pushLine(styleError.Render("usage: /login [provider] [profile-name]"))
 		return m, nil
 	}
 	provider := args[0]
 	if provider == chatgpt.ProviderID {
-		if len(args) == 2 {
-			if err := auth.ValidateAccountName(args[1]); err != nil {
-				m.pushLine(styleError.Render("login: " + err.Error()))
-				return m, nil
-			}
-			m.loginChatGPTAccount = args[1]
-		}
 		return m.startChatGPTAuthPick()
 	}
 	if !m.isSupportedProvider(provider) {

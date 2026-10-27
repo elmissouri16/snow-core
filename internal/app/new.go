@@ -24,7 +24,6 @@ import (
 	"github.com/elmissouri16/snow-core/internal/plugin/javascript"
 	"github.com/elmissouri16/snow-core/internal/plugindocs"
 	managedprocess "github.com/elmissouri16/snow-core/internal/process"
-	"github.com/elmissouri16/snow-core/internal/provider"
 	"github.com/elmissouri16/snow-core/internal/session"
 	"github.com/elmissouri16/snow-core/internal/skills"
 	"github.com/elmissouri16/snow-core/internal/subagent"
@@ -293,9 +292,6 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	// scoped to the currently bound session.
 	sessionQuery := session.NewQueryEngine(session.NewFileIndex(session.DefaultSessionsRoot()), absCWD)
 	sessionHistory := builtin.NewSessionBinding(st)
-	if runtime, ok := providers["chatgpt"].(*provider.Authenticated); ok {
-		runtime.SetRequestGuard(chatGPTRequestGuard(sessionHistory.Current))
-	}
 	artifactStore, err := artifact.NewLocalStore(filepath.Join(config.GlobalDir(), "artifacts"), cfg.Compaction.ArtifactMaxBytes)
 	if err != nil {
 		return nil, fmt.Errorf("app: artifacts: %w", err)
@@ -383,9 +379,6 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 	// the selected account catalog. Other providers preserve explicit unknown
 	// model IDs for compatible custom gateways and CLI use.
 	if model.ID != "" && !configuredFound && modelCatalogAuthoritative(prov) {
-		if runtime, ok := prov.(*provider.Authenticated); ok && runtime.ID() == "chatgpt" && (opts.Model != "" || opts.Account != "" || runtime.Account() != "default") {
-			return nil, fmt.Errorf("app: model %q is unavailable to ChatGPT account %q; select an available model explicitly", model.ID, runtime.Account())
-		}
 		model.ID = ""
 	}
 	// Prefer the provider's documented default when it exists in the catalog;
@@ -830,17 +823,6 @@ func New(ctx context.Context, opts Options) (result *App, retErr error) {
 			if err != nil {
 				_ = childStore.Close()
 				return nil, err
-			}
-			var continuityParent session.Store
-			if !spec.Restore && spec.State.Agent.ParentPath == protocol.RootAgentPath {
-				continuityParent = sessionHistory.Current()
-			}
-			if err := seedChatGPTChildBinding(childStore, continuityParent); err != nil {
-				_ = childStore.Close()
-				return nil, err
-			}
-			if runtime, ok := childProvider.(*provider.Authenticated); ok && runtime.ID() == "chatgpt" {
-				childProvider = runtime.ForSession(chatGPTRequestGuard(func() session.Store { return childStore }))
 			}
 			childSkillNames := skillNamesForRegistry(skillCatalog, childReg)
 			childSystem := projectBasePrompt

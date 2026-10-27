@@ -91,9 +91,8 @@ type tuiOAuthInteraction struct{ events chan<- tea.Msg }
 
 type oauthProgressMsg struct{ progress chatgpt.LoginProgress }
 type oauthDoneMsg struct {
-	account string
-	status  chatgpt.AuthStatus
-	err     error
+	status chatgpt.AuthStatus
+	err    error
 }
 type logoutDoneMsg struct {
 	generation uint64
@@ -512,24 +511,16 @@ type Model struct {
 	provIndex      int
 
 	// ChatGPT login actions and compatible credential imports.
-	pickChatGPTAuth     bool
-	loginChatGPTAccount string
-	authAccounts        []chatGPTAccountChoice
-	authIndex           int
-	oauthLoading        bool
-	oauthProgress       chatgpt.LoginProgress
-	oauthCancel         context.CancelFunc
-	oauthEvents         chan tea.Msg
-	oauthBackRequested  bool
-	oauthWG             sync.WaitGroup
-	oauthLogin          func(context.Context, string, auth.LoginRequest, auth.Interaction) (auth.Status, error)
-
-	// Stored ChatGPT account picker state (for /account).
-	pickAccount       bool
-	accountList       []app.ChatGPTAccountStatus
-	accountIndex      int
-	accountError      string
-	accountGeneration uint64
+	pickChatGPTAuth    bool
+	authAccounts       []chatGPTAccountChoice
+	authIndex          int
+	oauthLoading       bool
+	oauthProgress      chatgpt.LoginProgress
+	oauthCancel        context.CancelFunc
+	oauthEvents        chan tea.Msg
+	oauthBackRequested bool
+	oauthWG            sync.WaitGroup
+	oauthLogin         func(context.Context, string, auth.LoginRequest, auth.Interaction) (auth.Status, error)
 
 	// Model picker state (for /model).
 	pickModel  bool

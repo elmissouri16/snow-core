@@ -87,7 +87,7 @@ func (m *Model) renderChatGPTAuthPickerCard() string {
 	footer := styleFooter.Render(truncateDisplayText(" ↑/↓ navigate · Enter authorize · Esc "+m.loginEscapeAction()+" ", geometry.innerWidth))
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		header,
-		styleHeaderDim.Render(truncateDisplayText(" Save as: "+m.loginChatGPTAccount+" · own OAuth token", geometry.innerWidth)),
+		styleHeaderDim.Render(truncateDisplayText(" Snow obtains its own OAuth token", geometry.innerWidth)),
 		separator,
 		fixedLoginBody(body, geometry.innerWidth, bodyHeight),
 		footer,
@@ -120,7 +120,7 @@ func (m *Model) renderChatGPTOAuthProgressCard(geometry pickerCardGeometry) stri
 	footer := styleFooter.Render(truncateDisplayText(" Esc cancel authorization ", geometry.innerWidth))
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		header,
-		styleHeaderDim.Render(truncateDisplayText(" Save as: "+m.loginChatGPTAccount+" · complete authorization", geometry.innerWidth)),
+		styleHeaderDim.Render(truncateDisplayText(" Complete the browser or device flow", geometry.innerWidth)),
 		separator,
 		fixedLoginBody(body, geometry.innerWidth, bodyHeight),
 		footer,
