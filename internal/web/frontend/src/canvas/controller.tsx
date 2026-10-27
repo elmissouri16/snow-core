@@ -40,6 +40,7 @@ export class Controller {
   publish = () => { if (this.current()) flushSync(() => this.root.render(<CanvasPanel controller={this} />)); };
   show = (path = this.selected) => {
     if (!this.current()) return;
+    if (path && !this.files.some(file => file.path === path)) this.files = [{path, text: '', truncated: false, tool: 'write', stale: true, error: ''}, ...this.files].slice(0, FILE_LIMIT);
     this.api.pane.hidden = false;
     if (path) this.selected = path;
     this.publish();
@@ -128,6 +129,6 @@ export function dispose(): void {
   flushSync(() => old.root.unmount());
 }
 /** Opens the pane from the menu or a slash command, even with nothing touched yet. */
-export function show(): boolean { if (!view) return false; view.show(); return true; }
+export function show(path?: string): boolean { if (!view) return false; view.show(typeof path === 'string' && path ? path : undefined); return true; }
 export const canvas = Object.freeze({init, render, dispose, show});
 export default canvas;

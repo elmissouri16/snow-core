@@ -5,6 +5,8 @@ import { Message } from './Message';
 import { defaultActions, mergeActions } from './actions';
 import type { ActionPresentation, ActionPresentationPatch } from './actions';
 import { ToolContents, ToolRow } from './ToolRow';
+import { ChangedFiles } from './ChangedFiles';
+import { touchedFiles } from '../canvas/model';
 import { projectActivities, projectMessages, record, sameActivityProjection, sameMessageProjection, text } from './model';
 import type { Activity, MessageData, ToolData } from './model';
 import { initialActivities, initialMessages } from './initial';
@@ -60,12 +62,16 @@ function move(node: HTMLElement, target: HTMLElement, before: ChildNode | null) 
   if (modern.moveBefore && node.isConnected && target.isConnected) modern.moveBefore(node, before);
   else target.insertBefore(node, before);
 }
+const openCanvas = (path: string) => { (window as {SnowCanvas?: {show: (path?: string) => boolean}}).SnowCanvas?.show(path); };
 function View({state}: {state: State}) {
   const markerIDs = new Set(state.messages.filter(message => message.role === 'tool_activity').map(message => message.id));
   const associated = new Set(state.activities.filter(activity => markerIDs.has(activity.messageID)).map(activity => activity.messageID));
+  // Files this group wrote, from the public write/edit result text only.
+  const projectPath = state.scope?.dataset.projectPath || '';
+  const changed = (messageID: string) => touchedFiles(state.activities.filter(activity => activity.messageID === messageID).map(activity => activity.data), projectPath);
   return <>
     {state.scope?.id !== 'live-session' && !state.messages.length && <div className="empty-state compact"><h2>No displayable messages</h2><p>This page has no displayable messages.</p></div>}
-    {state.messages.map(message => message.role === 'tool_activity' ? <section key={`${state.identity}:activity:${message.id}`} className="runtime-tool-group tool-timeline" data-message-id={message.id} data-message-role="tool_activity" data-runtime-activity-group="" role="group" aria-label="Runtime tool activity" hidden={!associated.has(message.id)}><div className="activity-list"/></section> : <Message key={`${state.identity}:message:${message.id}`} message={message} scope={state.scope} actions={state.actions}/>)}
+    {state.messages.map(message => message.role === 'tool_activity' ? <section key={`${state.identity}:activity:${message.id}`} className="runtime-tool-group tool-timeline" data-message-id={message.id} data-message-role="tool_activity" data-runtime-activity-group="" role="group" aria-label="Runtime tool activity" hidden={!associated.has(message.id)}><div className="activity-list"/><ChangedFiles files={changed(message.id)} onOpen={openCanvas}/></section> : <Message key={`${state.identity}:message:${message.id}`} message={message} scope={state.scope} actions={state.actions}/>)}
     {state.region && createPortal(<><div className="activity-provenance"><h2 id="tool-timeline-heading" className="sr-only">Unassociated runtime tools</h2><span>Unassociated runtime tools</span></div><div className="activity-list"/></>, state.region)}
     {state.noticeHost && createPortal(<p className="fine activity-limit" hidden={!state.truncated}>Earlier tool activity is omitted from this bounded view.</p>, state.noticeHost)}
     {state.region && state.activities.map(activity => createPortal(<ToolRow data={activity.data}/>, state.slots.get(activity.data.id)!, `${state.identity}:tool:${activity.data.id}`))}

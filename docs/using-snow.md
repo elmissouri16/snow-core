@@ -410,8 +410,9 @@ or use the interactive `snow login ...` workflow on the host. See
 When the agent writes or edits a file, a **Canvas** pane opens beside the
 chat on that file and keeps it current while the turn runs, with a tab for
 each file touched in this session (most recent first) and a **Live** marker
-during the turn. Open it any time with **Canvas · edited files** in the
-conversation menu or `/canvas`; **Open on edits** controls whether it opens
+during the turn. Each turn that wrote files also gets a **files changed** card under its tool
+rows; clicking a file opens it in the canvas. Open the canvas any time with
+**Canvas · edited files** in the conversation menu or `/canvas`; **Open on edits** controls whether it opens
 by itself. The pane is read-only and uses the same bounded, pinned-root file
 reads as the Files inspector. Which files changed comes only from the public
 result text of the write and edit tools ("Wrote … to path"), never from tool

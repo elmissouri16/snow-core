@@ -62,6 +62,9 @@ also include the generated GitHub comparison for the tagged commit.
   "Open on edits" can turn the automatic behavior off. It is read-only and
   reuses the inspector's bounded file reads; touched files come only from the
   public result text of the write and edit tools.
+- A "files changed" card under each turn's tool rows (after the DeepSeek
+  Harness deliverables card) lists the files that turn wrote or edited and
+  opens them in the canvas.
 - Find in conversation: a search bar over the transcript (menu, `/find`, or
   ⌘/Ctrl+F in the chat) with highlighted matches, a match counter, and
   next/previous navigation.

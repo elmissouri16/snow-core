@@ -827,6 +827,20 @@ silently pretend the current roadmap already promises a web application.
 
 ## Research findings
 
+### DeepSeek Harness: 2026-10-27 re-check against upstream
+
+Upstream `deepseek-ai/deepseek-harness` had 2,680 further client commits
+after the pinned revision `c291e79`. Patterns adopted from that delta on
+2026-10-27: the end-of-turn deliverables card (Snow's "files changed" card,
+which opens the read-only Canvas pane), icon-first message action rows, a
+single-row composer at medium widths, a live running-status indicator, and
+find in conversation. Upstream additions deliberately not adopted, because
+they need capabilities Snow's manager does not grant the browser: right-sidebar
+terminal and browser tabs, the docking split layout, the plugin market, the
+trajectory event ledger, quote-selection into the composer, and the turn
+navigator. The comparison table with ChatGPT and Claude is in
+[performance.md](performance.md#web-manager-responsiveness-targets).
+
 ### DeepSeek Harness: verified patterns
 
 Research pinned the repository tree to

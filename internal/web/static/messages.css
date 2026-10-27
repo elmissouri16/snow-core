@@ -184,3 +184,20 @@
 .find-bar .icon-button { width: 30px; height: 30px; min-height: 30px; padding: 4px; }
 ::highlight(snow-find) { background: color-mix(in srgb, var(--warning) 35%, transparent); color: inherit; }
 ::highlight(snow-find-current) { background: var(--warning); color: var(--canvas); }
+
+/* Files changed in a turn: a compact card under the turn's tool rows that opens
+ * the canvas on a file. Modeled on the Harness deliverables card. */
+.changed-files { margin: 10px 0 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; max-width: 520px; }
+.changed-files-header { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: 0; border-radius: 0; background: transparent; text-align: left; min-height: 0; }
+.changed-files-header:hover { background: var(--raised); }
+.changed-files-icon { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex: none; border-radius: 9px; background: var(--raised); color: var(--muted); }
+.changed-files-icon svg { width: 18px; height: 18px; }
+.changed-files-titles { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.changed-files-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.changed-files-stat { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.changed-files-list { list-style: none; margin: 0; padding: 4px 6px 6px; border-top: 1px solid var(--line); }
+.changed-files-list button { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; min-height: 32px; padding: 4px 8px; border: 0; border-radius: 8px; background: transparent; text-align: left; font-size: 12px; }
+.changed-files-list button:hover { background: var(--raised); }
+.changed-files-name { font-weight: 550; color: var(--text); }
+.changed-files-path { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; }
+.changed-files-kind { color: var(--muted); font-size: 11px; }
