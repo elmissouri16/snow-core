@@ -6,6 +6,7 @@ import {Sidebar} from './Sidebar';
 import {Settings} from './Settings';
 import {ShellPopup} from './Menu';
 import {DeleteDialog} from './DeleteDialog';
+import {RemoveDialog} from './RemoveDialog';
 export interface ReactShellProps {
   bootstrap: ShellBootstrap;
   navigationHost?: HTMLElement;
@@ -35,5 +36,6 @@ export function ReactShell({bootstrap, navigationHost, navigate, command}: React
   return <>{navigationHost ? createPortal(sidebar, navigationHost) : sidebar}<Settings controller={shell} view={view} />
     {view.menu && <ShellPopup controller={shell} menu={view.menu} />}
     <DeleteDialog controller={shell} />
+    <RemoveDialog controller={shell} />
   </>;
 }

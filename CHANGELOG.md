@@ -58,6 +58,12 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Changed
 
+- Removing a workspace from the Web Manager is one dialog: **Remove
+  workspace…** in the workspace menu (and × beside each workspace under
+  Settings → Workspaces) confirms in place, closes a live session when you
+  tick the box, keeps files and saved sessions on disk, and reports errors
+  inline instead of a bare error page. Adding one now focuses the folder field
+  as soon as the form appears.
 - The Web composer toolbar is tidier: the **+** menu now holds "Attach images
   or files" alongside project files and installed skills, so the separate
   paperclip is gone; Goal uses a target glyph; and Compact context moved next

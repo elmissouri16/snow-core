@@ -167,3 +167,8 @@ button.shell-project-action { font-size: 20px; line-height: 1; }
   .app-layout:not(.sidebar-collapsed) .sidebar { overflow-y: auto; overflow-x: hidden; overscroll-behavior-y: contain; }
   .app-layout:not(.sidebar-collapsed) .project-tree { min-height: 96px; flex-shrink: 0; }
 }
+
+.settings-workspace-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.settings-workspace-row > a { flex: 1; min-width: 0; }
+.settings-workspace-remove { flex: none; color: var(--muted); }
+.settings-workspace-remove:hover { color: var(--danger); }

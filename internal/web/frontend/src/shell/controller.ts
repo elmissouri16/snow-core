@@ -6,6 +6,10 @@ export interface Group {
   error: string; nextOffset: number; hasMore: boolean; truncated: boolean; pages: number;
 }
 export type ShellMenu = {kind: 'session' | 'project' | 'view' | 'workspace'; project: string; session: string; instance: string; trigger: HTMLElement; owner: object};
+export interface RemovalAttempt {
+  project: string; name: string; path: string; live: boolean; trigger: HTMLElement;
+  owner: object; pending: boolean; submitted: boolean; error: string;
+}
 export interface DeleteAttempt {
   project: string; session: string; instance: string; name: string; trigger: HTMLElement;
   owner: object; pending: boolean; submitted: boolean; error: string;
@@ -18,12 +22,13 @@ export interface ViewState {
   menu: ShellMenu | null; deletion: DeleteAttempt | null;
   /** The session a click is opening, shown as pending until the live selection catches up. */
   pending: {project: string; session: string} | null;
+  removal: RemovalAttempt | null;
 }
 const initialGroup = (project: string, expanded: boolean): Group => ({project, expanded, rows: [], instance: '', loaded: false,
   available: true, deleteSupported: false, activeSession: '', loading: false, error: '', nextOffset: 0, hasMore: false, truncated: false, pages: 0});
 export class ShellController {
   snapshot: ViewState = {bootstrap: null, groups: new Map(), live: null, query: '', searchOpen: false, hideSessions: false, pinnedOnly: false,
-    collapsed: false, navOpen: false, narrow: false, theme: 'dark', settings: null, settingsReturn: null, menu: null, deletion: null, pending: null};
+    collapsed: false, navOpen: false, narrow: false, theme: 'dark', settings: null, settingsReturn: null, menu: null, deletion: null, pending: null, removal: null};
   listeners = new Set<() => void>();
   requests = new Map<string, AbortController>();
   sidebarMemory: {list: number; rail: number; focused: {project: string; session: string; selector: string; href: string} | null; selection: [number, number] | null} | null = null;
@@ -84,7 +89,7 @@ export class ShellController {
       bootstrap.sessions.forEach(row => rows.set(row.session_id, row));
       selected.rows = [...rows.values()].slice(0, LIMITS.rows);
     }
-    this.publish({bootstrap, groups, live: null, pending: null, deletion: null, menu: null, settings: null,
+    this.publish({bootstrap, groups, live: null, pending: null, removal: null, deletion: null, menu: null, settings: null,
       theme: document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'});
     this.updateLive(bootstrap.live);
     this.initialize();
@@ -226,6 +231,46 @@ export class ShellController {
     const name = this.snapshot.groups.get(menu.project)?.rows.find(row => row.session_id === menu.session)?.name || 'Untitled session';
     this.closeMenu(false);
     this.publish({deletion: {...menu, name, pending: false, submitted: false, error: ''}});
+  }
+  openRemoval(menu: Pick<ShellMenu, 'project' | 'trigger'>) {
+    const project = this.snapshot.bootstrap?.projects.find(item => item.id === menu.project);
+    if (!this.mounted || !project || this.snapshot.removal?.pending) return;
+    this.closeMenu(false);
+    this.publish({removal: {project: project.id, name: project.name, path: project.path, live: this.snapshot.live?.project === project.id,
+      trigger: menu.trigger, owner: this.owner, pending: false, submitted: false, error: ''}});
+  }
+  closeRemoval = () => {
+    const previous = this.snapshot.removal; if (!previous || previous.pending) return;
+    this.publish({removal: null});
+    queueMicrotask(() => { if (previous.trigger.isConnected) previous.trigger.focus({preventScroll: true}); });
+  };
+  /** Removes only the manager entry; the server closes a live worker first because the confirmation said so. */
+  async removeWorkspace(confirmed: boolean) {
+    const attempt = this.snapshot.removal, csrf = this.snapshot.bootstrap?.csrf;
+    if (!attempt || !confirmed || !csrf || attempt.pending || attempt.submitted || attempt.owner !== this.owner) return;
+    attempt.pending = true; attempt.submitted = true;
+    this.publish({removal: {...attempt}});
+    const request = new AbortController(), timer = setTimeout(() => request.abort(), 15000);
+    let failure = 'Removal could not be confirmed. Reload the workspace list before trying again.';
+    try {
+      const response = await fetch(`/projects/${encodeURIComponent(attempt.project)}/remove`, {
+        method: 'POST', credentials: 'same-origin', signal: request.signal, headers: {Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded'},
+        body: new URLSearchParams({csrf, confirm: 'remove', close: 'live'})});
+      const text = await boundedText(response, 65536);
+      if (!response.ok) {
+        if ([400, 401, 403, 404, 409, 503].includes(response.status) && response.headers.get('content-type')?.startsWith('text/plain') && text.length <= 1024) failure = text.trim();
+        throw new Error('Removal not confirmed');
+      }
+      const receipt = JSON.parse(text);
+      if (receipt.project_id !== attempt.project || receipt.removed !== true) throw new Error('Invalid receipt');
+      document.dispatchEvent(new CustomEvent('snow:project-removed', {detail: {project: attempt.project}}));
+      if (!this.mounted || this.owner !== attempt.owner) return;
+      this.publish({removal: null});
+      const source = document.getElementById('project-navigation') || undefined;
+      await this.navigate('/?view=projects', source);
+    } catch {
+      if (this.mounted && this.owner === attempt.owner) this.publish({removal: {...attempt, pending: false, submitted: false, error: failure}});
+    } finally { clearTimeout(timer); }
   }
   closeDelete = () => {
     const previous = this.snapshot.deletion; if (!previous || previous.pending) return;

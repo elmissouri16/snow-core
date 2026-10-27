@@ -46,9 +46,13 @@
       const menu = $(".snow-menu"), links = [...menu.querySelectorAll('[role="menuitem"]')];
       check(menu.parentElement === document.body && !trigger.closest("a") && !add.closest(".project-link"), "Workspace actions are sibling controls and use the shared portal");
       bounds(menu, "Workspace actions");
-      check(links.map(node => node.textContent).join("|") === "Workspace settings…|Remove registration…", "Workspace menu exposes only supported project actions");
+      check(links.map(node => node.textContent).join("|") === "Workspace settings…|Remove workspace…", "Workspace menu exposes only supported project actions");
       links[1].click(); await settleFrame();
-      check(!panel.hidden && $("#inspection-tab-project").getAttribute("aria-selected") === "true", "Workspace removal opens the actual Project inspector tab");
+      const removeDialog = $("#workspace-remove-dialog");
+      check(!!removeDialog?.open && !removeDialog.querySelector("[data-remove-confirm]").checked && removeDialog.querySelector("[data-remove-submit]").disabled, "Workspace removal opens an unchecked confirmation dialog");
+      removeDialog.querySelector("[data-remove-cancel]").click(); await settleFrame();
+      document.dispatchEvent(new CustomEvent("snow:inspect-project", {detail: {project: panel.dataset.project, remove: true, trigger}})); await settleFrame();
+      check(!panel.hidden && $("#inspection-tab-project").getAttribute("aria-selected") === "true", "Inspector removal entrypoint opens the actual Project inspector tab");
       const details = $(".remove-project"), form = details.querySelector("form");
       check(details.open && document.activeElement === details.querySelector("summary"), "Removal entrypoint reveals and focuses existing confirmation");
       check(!form.checkValidity() && !form.querySelector('[name="confirm"]').checked, "Removal remains explicitly unchecked and invalid");

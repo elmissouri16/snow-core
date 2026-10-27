@@ -175,6 +175,9 @@
     if (event.detail?.target?.id === "workspace" && workspaceIntent && event.detail.source !== workspaceIntent.trigger) workspaceIntent = null;
     navigationProgress(true);
   });
+  // Landing on the add form puts the cursor in the folder field right away.
+  function focusAddProject() { if (location.hash === "#add-project") $("#project-path")?.focus(); }
+  focusAddProject();
   // A slim top progress bar for soft navigations that outlast one glance.
   let progressTimer = null, progressReset = null;
   function navigationProgress(active) {
@@ -1544,6 +1547,28 @@
     event.preventDefault(); event.stopPropagation();
     void registerProject(form);
   }, {capture: true});
+  // Workspace removal answers inline instead of leaving the page on an error.
+  document.addEventListener("submit", event => {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement) || !form.matches("[data-remove-project-form]") || !window.SnowNavigation?.visit) return;
+    event.preventDefault(); event.stopPropagation();
+    void removeProjectForm(form);
+  }, {capture: true});
+  async function removeProjectForm(form) {
+    if (form.dataset.pending) return;
+    form.dataset.pending = "true";
+    const error = form.querySelector("[data-remove-error]");
+    if (error) error.hidden = true;
+    try {
+      const response = await fetch(form.action, {method: "POST", credentials: "same-origin", cache: "no-store", headers: {Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded"}, body: new URLSearchParams(new FormData(form))});
+      const text = (await response.text()).slice(0, 4096);
+      if (!response.ok) throw new Error(text.trim().slice(0, 300) || "Removal was not confirmed.");
+      if (JSON.parse(text).removed !== true) throw new Error("Removal was not confirmed.");
+      await window.SnowNavigation.visit("/?view=projects", {source: form, history: "push"});
+    } catch (failure) {
+      if (error) { error.textContent = failure?.message || "Removal was not confirmed."; error.hidden = false; }
+    } finally { delete form.dataset.pending; }
+  }
   document.addEventListener("submit", async event => {
     const form = event.target;
     if (form.id === "home-composer") {
@@ -1707,6 +1732,7 @@
       navigation();
       if (narrow.matches || !$("#project-navigation")?.contains(document.activeElement)) $("#workspace-content")?.focus({preventScroll: true});
     }
+    focusAddProject();
     if ($("#connection-error")) $("#connection-error").hidden = true;
   });
   document.addEventListener("snow:navigation-error", event => {

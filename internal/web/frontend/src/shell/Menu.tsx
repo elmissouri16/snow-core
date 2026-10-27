@@ -46,20 +46,21 @@ export function ShellPopup({controller: c, menu}: {controller: ShellController; 
     </>}
     {menu.kind === 'project' && project && <>
       <div className="shell-workspace-menu-heading"><strong>{project.name}</strong><small>{project.path}</small></div>
-      {[false, true].map(remove => {
-        const href = projectURL(project.id, {inspect: 'project', ...(c.snapshot.bootstrap?.project === project.id && c.snapshot.bootstrap.session ? {session: c.snapshot.bootstrap.session} : {})}) + (remove ? '#remove-project' : '');
-        return <a key={String(remove)} className="snow-menu-row" role="menuitem" href={href} data-snow-navigation="" onClick={event => {
+      {(() => {
+        const href = projectURL(project.id, {inspect: 'project', ...(c.snapshot.bootstrap?.project === project.id && c.snapshot.bootstrap.session ? {session: c.snapshot.bootstrap.session} : {})});
+        return <a className="snow-menu-row" role="menuitem" href={href} data-snow-navigation="" onClick={event => {
           if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
           event.preventDefault(); event.stopPropagation(); if (!valid()) return;
           const localInspector = document.getElementById('project-inspector')?.dataset.project === project.id;
           c.closeMenu(false);
           if (localInspector) {
-            document.dispatchEvent(new CustomEvent('snow:inspect-project', {detail: {project: project.id, remove, trigger: menu.trigger}}));
+            document.dispatchEvent(new CustomEvent('snow:inspect-project', {detail: {project: project.id, remove: false, trigger: menu.trigger}}));
           } else {
             c.navigation(false); void c.navigate(href, event.currentTarget);
           }
-        }}>{remove ? 'Remove registration…' : 'Workspace settings…'}</a>;
-      })}
+        }}>Workspace settings…</a>;
+      })()}
+      <button type="button" className="snow-menu-row danger" role="menuitem" data-project-remove="" onClick={event => { event.stopPropagation(); if (valid()) c.openRemoval({project: project.id, trigger: menu.trigger}); }}>Remove workspace…</button>
     </>}
     {menu.kind === 'workspace' && <>
       <span className="picker-heading">Workspaces</span>

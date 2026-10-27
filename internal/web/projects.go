@@ -78,20 +78,38 @@ func (s *shell) removeProject(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Project registry is unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	if s.runtimes != nil {
-		if _, live := s.runtimes.Snapshot(r.PathValue("project")); live {
-			http.Error(w, "Close the live session before removing this project", http.StatusConflict)
-			return
-		}
-	}
 	if r.PostForm.Get("confirm") != "remove" {
 		http.Error(w, "Confirm removal from the manager; project files and sessions are retained", http.StatusBadRequest)
 		return
+	}
+	if s.runtimes != nil {
+		if snapshot, live := s.runtimes.Snapshot(r.PathValue("project")); live {
+			// A live worker is closed only when the confirmation said so; a plain
+			// removal of a live project still refuses rather than stopping work.
+			if r.PostForm.Get("close") != "live" {
+				http.Error(w, "Close the live session before removing this project", http.StatusConflict)
+				return
+			}
+			closeCtx, cancelClose := context.WithTimeout(r.Context(), 10*time.Second)
+			err := s.runtimes.CloseProject(closeCtx, r.PathValue("project"), snapshot.InstanceID)
+			cancelClose()
+			if err != nil {
+				http.Error(w, "The live session could not be closed; nothing was removed", http.StatusConflict)
+				return
+			}
+		}
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 	if err := s.registry.Remove(ctx, r.PathValue("project")); err != nil {
 		http.Error(w, "Could not remove this registration", http.StatusBadRequest)
+		return
+	}
+	if r.Header.Get("Accept") == "application/json" {
+		s.runtimeJSON(w, struct {
+			ProjectID string `json:"project_id"`
+			Removed   bool   `json:"removed"`
+		}{ProjectID: r.PathValue("project"), Removed: true})
 		return
 	}
 	http.Redirect(w, r, "/?view=projects", http.StatusSeeOther)

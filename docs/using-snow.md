@@ -355,8 +355,9 @@ than silently controlling another conversation.
 
 **Organize workspaces** changes manager metadata only. Rename a workspace label,
 pin/unpin it, or explicitly archive/restore its registration. Neither archive nor
-**Remove registration** deletes project files or saved sessions. Close a live
-workspace before archiving it. Restore retains the original registration ID and
+**Remove workspace** deletes project files or saved sessions. Close a live
+workspace before archiving it; removing one offers to close its live session
+for you. Restore retains the original registration ID and
 requires the same canonical folder path and device/inode identity, no active
 alias/duplicate, and room within the **100-active-project** limit. It does not
 activate work or recreate a missing directory.
@@ -603,9 +604,12 @@ before taking further action. Removal may already have happened even when a
 cleanup or connection error is reported.
 
 **Workspace settings…** opens the Project inspector tab, while
-**Remove registration…** reveals its existing unchecked confirmation. Opening
-these actions neither reads Files/Changes nor submits removal. Removing a live
-project remains disallowed until its runtime is explicitly closed.
+**Remove workspace…** opens a confirmation dialog in place (also available as
+the × beside each workspace under Settings → Workspaces). Tick the box and
+confirm: the manager entry goes away, files and saved sessions stay on disk,
+and a live session is closed first because the confirmation says so. Errors
+show inside the dialog. The inspector's own removal form behaves the same way
+and never leaves the page on an error.
 Text inputs, search fields, textareas and selects use a thin blue focus edge
 inside the field boundary, without a detached halo or a size change. Compound
 fields such as the composer and free-text answers highlight their outer field
