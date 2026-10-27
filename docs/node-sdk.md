@@ -29,7 +29,7 @@ agent loop. It is not the in-process Go SDK or the Goja plugin API.
   are included, with no runtime npm dependencies.
 - A compatible Snow executable already installed on `PATH`, or an explicit
   executable path. The SDK does not download or install Snow and has no install
-  hooks. Building Snow from source needs Go 1.27 (`1.27rc3` currently).
+  hooks. Building Snow from source needs Go 1.27.3 or newer.
 - A provider configured separately for real model requests. `fake` needs no
   credentials and makes no provider network requests.
 
@@ -269,7 +269,7 @@ required. See [Security model](security.md).
 
 ## Development and verification
 
-Run from the repository root with Node >=22.12.0 and Go 1.27rc3:
+Run from the repository root with Node >=22.12.0 and Go 1.27.3:
 
 ```sh
 go build -o build/bin/snow ./cmd/snow

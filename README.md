@@ -158,7 +158,7 @@ loopback tests.
 
 ## Development
 
-Source builds require the Go 1.27 line; the available toolchain is Go 1.27rc3.
+Source builds require Go 1.27.3 or newer on the 1.27 line.
 Ordinary Go builds use checked-in, embedded web assets and do not require Node.
 Developing the Node SDK or React frontend requires Node >=22.12.0 and npm
 (frontend CI pins 24.16.0).

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "go_version": "go1.27rc3",
+  "go_version": "go1.27.3",
   "samples": 3,
   "benchtime": "1x",
   "benchmark_timeout_seconds": 900,

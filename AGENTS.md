@@ -72,7 +72,7 @@ web manager → client boundary → RPC workers → app (explicit activation onl
   cohesive responsibility before they exceed this limit; do not create
   arbitrary numbered chunks solely to satisfy the cap.
 - Keep the Go requirement in `go.mod` and `README.md` synchronized (currently
-  the Go 1.27 line while 1.27rc3 is the available toolchain).
+  Go 1.27.3 on the 1.27 line).
 - Put local binaries, compiled test executables, release/evidence artifacts, and
   Pages output under ignored `build/`, not beside source at the repository root.
   Keep architecture, the bug tracker, design plans, and site sources under `docs/`.

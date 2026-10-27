@@ -111,7 +111,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         frontend = workflow[workflow.index("  frontend:\n"):workflow.index("  test:\n")]
         setup = step_block(frontend, "Set up Go for native React fixtures")
         self.assertIn("uses: actions/setup-go@", setup)
-        self.assertIn("go-version: '1.27.0-rc.3'", setup)
+        self.assertIn("go-version: '1.27.3'", setup)
         native = step_block(frontend, "Test native React pages")
         for expected in (
             "working-directory: .\n",

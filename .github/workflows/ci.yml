@@ -48,7 +48,7 @@ jobs:
       - name: Set up Go for native React fixtures
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: '1.27.0-rc.3'
+          go-version: '1.27.3'
           check-latest: true
           cache: true
           cache-dependency-path: go.sum
@@ -95,7 +95,7 @@ jobs:
       - name: Set up Go for subprocess integration
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: '1.27.0-rc.3'
+          go-version: '1.27.3'
           check-latest: true
           cache: true
           cache-dependency-path: go.sum
@@ -176,7 +176,7 @@ jobs:
         with:
           # setup-go currently drops rc suffixes when parsing go.mod. Keep this
           # semver-form prerelease synchronized with the root/module go lines.
-          go-version: '1.27.0-rc.3'
+          go-version: '1.27.3'
           check-latest: true
           cache: true
           cache-dependency-path: |
@@ -253,7 +253,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: '1.27.0-rc.3'
+          go-version: '1.27.3'
           check-latest: true
           cache: true
           cache-dependency-path: go.sum
@@ -281,7 +281,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: '1.27.0-rc.3'
+          go-version: '1.27.3'
           check-latest: true
           cache: true
           cache-dependency-path: go.sum
@@ -310,7 +310,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: '1.27.0-rc.3'
+          go-version: '1.27.3'
           check-latest: true
           cache: true
           cache-dependency-path: go.sum
@@ -334,7 +334,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: '1.27.0-rc.3'
+          go-version: '1.27.3'
           check-latest: true
           cache: true
           cache-dependency-path: go.sum
