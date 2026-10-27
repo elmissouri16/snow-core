@@ -413,6 +413,9 @@ func (r *Registry) migrate(ctx context.Context) error {
 		if err := migrateProjectSkills(ctx, tx); err != nil {
 			return err
 		}
+		if err := migrateManagerSettings(ctx, tx); err != nil {
+			return err
+		}
 		if err := tx.Commit(); err != nil {
 			return registryError(ctx)
 		}
@@ -457,6 +460,9 @@ func (r *Registry) migrate(ctx context.Context) error {
 		return err
 	}
 	if err := migrateProjectSkills(ctx, tx); err != nil {
+		return err
+	}
+	if err := migrateManagerSettings(ctx, tx); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

@@ -26,20 +26,23 @@ export const projectOperations = {
 export function ProjectOperations({
   csrf,
   enabled,
+  defaultParent = '',
 }: {
   csrf: string;
   enabled: boolean;
+  defaultParent?: string;
 }) {
   return (
     <OperationsView
       key={csrf + String(enabled)}
       csrf={csrf}
       enabled={enabled}
+      defaultParent={defaultParent}
     />
   );
 }
-function OperationsView({ csrf, enabled }: { csrf: string; enabled: boolean }) {
-  const [controller] = useState(() => new OperationController(csrf, enabled));
+function OperationsView({ csrf, enabled, defaultParent }: { csrf: string; enabled: boolean; defaultParent: string }) {
+  const [controller] = useState(() => new OperationController(csrf, enabled, defaultParent));
   const state = useSyncExternalStore(
       controller.subscribe,
       controller.getSnapshot,
@@ -135,7 +138,7 @@ function OperationsView({ csrf, enabled }: { csrf: string; enabled: boolean }) {
               data-op-parent
               type="text"
               maxLength={4096}
-              placeholder="/absolute/host/folder"
+              placeholder={defaultParent || '/absolute/host/folder'}
               autoComplete="off"
               autoCapitalize="none"
               spellCheck={false}

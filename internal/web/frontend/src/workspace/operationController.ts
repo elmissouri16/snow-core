@@ -90,7 +90,7 @@ export class OperationController {
   private alive = true;
   private csrf: string;
   readonly enabled: boolean;
-  constructor(csrf: string, enabled: boolean) {
+  constructor(csrf: string, enabled: boolean, defaultParent = '') {
     this.csrf = csrf;
     this.enabled = enabled;
     this.scope = scopeFor(csrf);
@@ -112,6 +112,8 @@ export class OperationController {
         'No operation submitted. Closing this panel never cancels accepted work.',
     };
     this.scope.listeners.add(this.scopeChanged);
+    // The projects folder is where new workspaces go unless the user picks another.
+    if (defaultParent && !this.scope.draft.parent) this.scope.draft = { ...this.scope.draft, parent: defaultParent };
   }
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);

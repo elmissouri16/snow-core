@@ -115,6 +115,7 @@ export function WorkspaceCatalog({
   csrf,
   registryEnabled,
   projectOperationsEnabled,
+  projectsDir,
 }: CatalogProps) {
   useWorkspaceMounted();
   const { projectPath } = useWorkspace();
@@ -200,9 +201,10 @@ export function WorkspaceCatalog({
                 method="post"
                 action="/projects/add"
                 id="add-project-form"
+                data-projects-dir={projectsDir}
               >
                 <input type="hidden" name="csrf" value={csrf} />
-                <label htmlFor="project-path">Folder on the Snow host</label>
+                <label htmlFor="project-path">Workspace name or folder</label>
                 <div className="path-input">
                   <input
                     id="project-path"
@@ -211,7 +213,7 @@ export function WorkspaceCatalog({
                     required
                     autoComplete="off"
                     spellCheck={false}
-                    placeholder="/path/to/project"
+                    placeholder={projectsDir ? 'my-project or /absolute/path' : '/path/to/project'}
                     aria-describedby="path-help"
                     value={projectPath}
                     onChange={(e) =>
@@ -223,8 +225,7 @@ export function WorkspaceCatalog({
                   </button>
                 </div>
                 <p id="path-help" className="fine">
-                  Browse the host filesystem, or enter an absolute path
-                  manually. This is not a browser upload.
+                  {projectsDir ? <>Type a name to create it under <code className="mono">{projectsDir}</code>, or an absolute path to use an existing folder. Change the projects folder under Settings → Workspaces.</> : <>Browse the host filesystem, or enter an absolute path manually.</>} This is not a browser upload.
                 </p>
                 <label htmlFor="project-name">
                   Display name <span className="optional">optional</span>
@@ -237,14 +238,14 @@ export function WorkspaceCatalog({
                   placeholder="Defaults to the folder name"
                 />
                 <div className="form-footer">
-                  <span className="fine">No files created or modified</span>
+                  <span className="fine">{projectsDir ? 'A new folder is created only under the projects folder' : 'No files created or modified'}</span>
                   <button className="primary" type="submit">
                     Add workspace <span aria-hidden="true">→</span>
                   </button>
                 </div>
               </form>
             </section>
-            <ProjectOperations csrf={csrf} enabled={projectOperationsEnabled} />
+            <ProjectOperations csrf={csrf} enabled={projectOperationsEnabled} defaultParent={projectsDir} />
           </div>
           <FolderPicker />
         </>

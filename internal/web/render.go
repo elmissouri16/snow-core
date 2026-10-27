@@ -72,6 +72,7 @@ type pageData struct {
 	Error                    string
 	PairingCode              string
 	RegistryEnabled          bool
+	ProjectsDir              string
 	Projects                 []Project
 	Project                  *Project
 	Sessions                 *CatalogSessions
@@ -152,6 +153,7 @@ func (s *shell) handlerForBoundary(boundary requestBoundary) http.Handler {
 	mux.HandleFunc("POST /projects/add", s.addProject)
 	mux.HandleFunc("POST /projects/folders", s.hostFolders)
 	mux.HandleFunc("POST /projects/{project}/remove", s.removeProject)
+	mux.HandleFunc("POST /settings/projects-dir", s.saveProjectsDir)
 	mux.HandleFunc("GET /activity", s.managerActivity)
 	s.registerOrganizationRoutes(mux)
 	s.registerProcessControlRoutes(mux)

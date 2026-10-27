@@ -172,3 +172,6 @@ button.shell-project-action { font-size: 20px; line-height: 1; }
 .settings-workspace-row > a { flex: 1; min-width: 0; }
 .settings-workspace-remove { flex: none; color: var(--muted); }
 .settings-workspace-remove:hover { color: var(--danger); }
+
+.settings-projects-dir { display: flex; gap: 8px; align-items: center; }
+.settings-projects-dir input { flex: 1; min-width: 0; min-height: 36px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: inherit; font: inherit; }

@@ -936,6 +936,13 @@ any uncertain outcome explicitly.
 
 #### Choose a folder on the Snow host
 
+The quickest add is a name: type `my-project` and the manager creates
+`<projects folder>/my-project` and registers it. The projects folder defaults to
+`~/snow-projects` and can be changed under **Settings → Workspaces → Projects
+folder**; the folder browser and the create/clone operations start there too.
+An absolute path always means an existing folder of your choosing and is never
+created for you.
+
 Choose **Add workspace** beside Workspaces, or **Settings → Workspaces → Manage workspaces**,
 then the host-folder browser. It lists directories **on the
 machine running Snow**, inside the manager UI—not directories on the accessing

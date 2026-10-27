@@ -56,7 +56,12 @@ func (s *shell) addProject(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-	project, err := s.registry.Add(ctx, r.PostForm.Get("name"), r.PostForm.Get("path"))
+	path, err := s.resolveNewWorkspace(ctx, r.PostForm.Get("path"))
+	if err != nil {
+		http.Redirect(w, r, "/?view=projects&notice=register_failed", http.StatusSeeOther)
+		return
+	}
+	project, err := s.registry.Add(ctx, r.PostForm.Get("name"), path)
 	if err != nil {
 		// Keep POST-only routes and user-supplied paths out of browser history.
 		http.Redirect(w, r, "/?view=projects&notice=register_failed", http.StatusSeeOther)
@@ -146,6 +151,7 @@ func (s *shell) projectData(ctx context.Context, query url.Values, data *pageDat
 		return nil
 	}
 	data.RegistryEnabled = true
+	data.ProjectsDir = s.projectsDir(ctx)
 	data.RuntimeEnabled = s.runtimes != nil
 	_, data.TurnCancelEnabled = s.runtimes.(RuntimeTurnCancelBackend)
 	_, data.WorkflowEnabled = s.runtimes.(RuntimeWorkflowBackend)

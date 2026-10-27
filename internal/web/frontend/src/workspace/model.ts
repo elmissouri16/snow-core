@@ -15,6 +15,8 @@ export interface CatalogProps extends HomeProps {
   csrf: string;
   registryEnabled: boolean;
   projectOperationsEnabled: boolean;
+  /** Folder a name-only workspace is created under; '' when the host has none. */
+  projectsDir: string;
 }
 export interface LoginProps {
   csrf: string;
@@ -81,6 +83,7 @@ export function validateCatalogProps(value: unknown): CatalogProps {
     csrf: string(v.csrf, 512),
     registryEnabled: bool(v.registryEnabled),
     projectOperationsEnabled: bool(v.projectOperationsEnabled),
+    projectsDir: string(v.projectsDir, 4096),
   };
 }
 export const projectURL = (id: string) =>

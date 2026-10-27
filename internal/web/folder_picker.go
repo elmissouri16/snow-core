@@ -120,7 +120,16 @@ func (s *shell) hostFolders(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-	page, err := readHostFolders(ctx, r.PostForm.Get("path"), offset)
+	start := r.PostForm.Get("path")
+	if start == "" {
+		// Browsing starts where new workspaces go when that folder exists.
+		if dir := s.projectsDir(ctx); dir != "" {
+			if info, err := os.Stat(dir); err == nil && info.IsDir() {
+				start = dir
+			}
+		}
+	}
+	page, err := readHostFolders(ctx, start, offset)
 	if err != nil {
 		http.Error(w, "Cannot browse that host folder. Check access or enter an absolute host path.", http.StatusBadRequest)
 		return

@@ -1483,7 +1483,7 @@
     else if (button.matches("#theme-toggle")) setTheme(root.dataset.theme === "dark" ? "light" : "dark");
     else if (button.matches("[data-nav-toggle]")) requestNav(true);
     else if (button.matches("[data-nav-close]")) requestNav(false);
-    else if (button.matches("[data-folder-open]")) { folderState = null; window.SnowWorkspace?.updateFolder({folders: [], path: "", parent: "", hasMore: false, canSelect: false, busy: false, error: "", status: ""}); openDialog($("#folder-picker"), button); browseFolders($("#project-path")?.value.trim() || ""); }
+    else if (button.matches("[data-folder-open]")) { folderState = null; window.SnowWorkspace?.updateFolder({folders: [], path: "", parent: "", hasMore: false, canSelect: false, busy: false, error: "", status: ""}); openDialog($("#folder-picker"), button); browseFolders($("#project-path")?.value.trim() || $("#add-project-form")?.dataset.projectsDir || ""); }
     else if (button.matches("[data-folder-close]")) closeDialog($("#folder-picker"));
     else if (button.matches("[data-folder-home]")) browseFolders();
     else if (button.matches("[data-folder-up]") && folderState) browseFolders(folderState.parent);

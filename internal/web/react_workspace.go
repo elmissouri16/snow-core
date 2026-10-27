@@ -25,6 +25,7 @@ type workspaceCatalogFrontendProps struct {
 	CSRF                     string `json:"csrf"`
 	RegistryEnabled          bool   `json:"registryEnabled"`
 	ProjectOperationsEnabled bool   `json:"projectOperationsEnabled"`
+	ProjectsDir              string `json:"projectsDir"`
 }
 
 type loginFrontendProps struct {
@@ -73,7 +74,7 @@ func workspaceCatalogReactProps(data pageData) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return marshalReactProps(workspaceCatalogFrontendProps{homeFrontendProps: projects, CSRF: data.CSRF, RegistryEnabled: data.RegistryEnabled, ProjectOperationsEnabled: data.ProjectOperationsEnabled})
+	return marshalReactProps(workspaceCatalogFrontendProps{homeFrontendProps: projects, CSRF: data.CSRF, RegistryEnabled: data.RegistryEnabled, ProjectsDir: data.ProjectsDir, ProjectOperationsEnabled: data.ProjectOperationsEnabled})
 }
 
 func loginReactProps(csrf, publicError, networkProfile string) (string, error) {

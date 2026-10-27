@@ -7,6 +7,11 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Added
 
+- A manager-wide projects folder. Adding a workspace by name alone creates
+  that folder under it (default `~/snow-projects`, changeable under Settings →
+  Workspaces), the host-folder browser opens there, and the create/clone
+  operations propose it as the parent. Absolute paths keep meaning an existing
+  folder you chose.
 - Sign in to providers from the Web Manager. An activated conversation's
   **Accounts & sign-in…** panel (also `/login`, `/logout`, and the **Sign in…**
   button on a login-required error) lists provider credential status, runs
