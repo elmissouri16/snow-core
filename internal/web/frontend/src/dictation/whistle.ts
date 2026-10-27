@@ -50,8 +50,23 @@ export function resample(input: Float32Array, from: number, to = SAMPLE_RATE): F
   return output;
 }
 
-/** Yields about one second of 16 kHz mono audio per chunk until the signal aborts. */
-export async function* microphone(stream: MediaStream, signal: AbortSignal, chunkSeconds = 1): AsyncGenerator<Float32Array> {
+/** Silence handling: dictation ends by itself after a pause once something was said, or after a longer quiet start. */
+export const SILENCE = {level: 0.012, afterSpeechSeconds: 4, withoutSpeechSeconds: 12};
+export type Quiet = {heardSpeech: boolean; lastLoudAt: number; startedAt: number};
+export function rms(samples: Float32Array): number {
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) sum += samples[i]! * samples[i]!;
+  return samples.length ? Math.sqrt(sum / samples.length) : 0;
+}
+/** Returns true when the capture should stop: silence has lasted long enough for the current situation. */
+export function quietEnough(state: Quiet, level: number, now: number, silence = SILENCE): boolean {
+  if (level >= silence.level) { state.heardSpeech = true; state.lastLoudAt = now; return false; }
+  const quietFor = (now - (state.heardSpeech ? state.lastLoudAt : state.startedAt)) / 1000;
+  return quietFor >= (state.heardSpeech ? silence.afterSpeechSeconds : silence.withoutSpeechSeconds);
+}
+
+/** Yields about one second of 16 kHz mono audio per chunk until the signal aborts or the room has gone quiet. */
+export async function* microphone(stream: MediaStream, signal: AbortSignal, chunkSeconds = 1, onQuiet?: () => void): AsyncGenerator<Float32Array> {
   const AudioContextClass = window.AudioContext || (window as unknown as {webkitAudioContext?: typeof AudioContext}).webkitAudioContext;
   if (!AudioContextClass) throw new Error('Audio capture is unavailable in this browser');
   let context: AudioContext;
@@ -62,13 +77,15 @@ export async function* microphone(stream: MediaStream, signal: AbortSignal, chun
   const source = context.createMediaStreamSource(stream);
   const processor = context.createScriptProcessor(4096, 1, 1);
   const queue: Float32Array[] = [];
-  let pending: Float32Array[] = [], pendingLength = 0, wake: (() => void) | null = null;
+  let pending: Float32Array[] = [], pendingLength = 0, wake: (() => void) | null = null, quiet = false;
   const target = SAMPLE_RATE * chunkSeconds;
+  const state: Quiet = {heardSpeech: false, lastLoudAt: 0, startedAt: performance.now()};
   processor.onaudioprocess = event => {
-    if (signal.aborted) return;
+    if (signal.aborted || quiet) return;
     const samples = resample(event.inputBuffer.getChannelData(0).slice(), context.sampleRate);
     // Web Audio does not clip; the engine requires finite samples in [-1, 1].
     for (let i = 0; i < samples.length; i++) { const v = samples[i]!; samples[i] = Number.isFinite(v) ? (v > 1 ? 1 : v < -1 ? -1 : v) : 0; }
+    if (quietEnough(state, rms(samples), performance.now())) { quiet = true; onQuiet?.(); wake?.(); return; }
     pending.push(samples); pendingLength += samples.length;
     if (pendingLength >= target) {
       const chunk = new Float32Array(pendingLength); let offset = 0;
@@ -80,7 +97,7 @@ export async function* microphone(stream: MediaStream, signal: AbortSignal, chun
   const stop = () => { wake?.(); };
   signal.addEventListener('abort', stop, {once: true});
   try {
-    while (!signal.aborted) {
+    while (!signal.aborted && !quiet) {
       if (!queue.length) await new Promise<void>(resolve => { wake = resolve; });
       wake = null;
       while (queue.length) yield queue.shift()!;

@@ -49,6 +49,7 @@ function Dictate({disabled}: {disabled: boolean}) {
   const [note, setNote] = useState('');
   const [progress, setProgress] = useState(0);
   const run = useRef<AbortController | null>(null), base = useRef(''), dialog = useRef<HTMLDialogElement>(null);
+  const listeningRef = useRef(false), done = useRef<Promise<void>>(Promise.resolve());
   const available = supported();
   useEffect(() => () => { run.current?.abort(); }, []);
   const open = phase === 'consent' || phase === 'downloading' || phase === 'loading' || phase === 'error';
@@ -71,7 +72,12 @@ function Dictate({disabled}: {disabled: boolean}) {
     setPhase('error');
   }
   async function start() {
-    if (run.current) { run.current.abort(); return; }
+    if (run.current) {
+      // A click while words are still flushing after an automatic stop starts
+      // a fresh round once that round has settled, instead of being swallowed.
+      if (listeningRef.current) { run.current.abort(); return; }
+      await done.current;
+    }
     setPhase('checking');
     let state: SpeechStatus | null = null;
     try { state = await status(); } catch { state = null; }
@@ -85,7 +91,11 @@ function Dictate({disabled}: {disabled: boolean}) {
     try { await download(csrf); } catch (error) { fail(error); return; }
     await listen();
   }
+  function hear(value: boolean) { listeningRef.current = value; setListening(value); }
   async function listen() {
+    const task = round(); done.current = task; await task;
+  }
+  async function round() {
     const controller = new AbortController(); run.current = controller;
     setPhase('loading'); setProgress(0);
     try {
@@ -93,11 +103,11 @@ function Dictate({disabled}: {disabled: boolean}) {
       base.current = prompt?.value || '';
       const [speech, stream] = await Promise.all([engine(p => setProgress(p.percentage)), navigator.mediaDevices.getUserMedia({audio: {channelCount: 1, echoCancellation: true, noiseSuppression: true}})]);
       if (controller.signal.aborted) { for (const track of stream.getTracks()) track.stop(); setPhase('idle'); return; }
-      setPhase('idle'); setListening(true);
+      setPhase('idle'); hear(true);
       let committed = '';
       // Stopping ends the microphone generator, which flushes the stream and
       // leaves the session reusable; an abort signal here would close it.
-      for await (const update of speech.stream(microphone(stream, controller.signal))) {
+      for await (const update of speech.stream(microphone(stream, controller.signal, 1, () => hear(false)))) {
         if (update.text) committed = committed ? committed + ' ' + update.text : update.text;
         write(committed, update.pending || '');
       }
@@ -107,11 +117,11 @@ function Dictate({disabled}: {disabled: boolean}) {
       if (!controller.signal.aborted) fail(error); else { resetEngine(); setPhase('idle'); }
     } finally {
       if (run.current === controller) run.current = null;
-      setListening(false);
+      hear(false);
     }
   }
   const busy = phase === 'checking' || phase === 'loading';
-  const label = listening ? 'Stop dictation' : busy ? 'Starting dictation…' : 'Dictate a message (on-device)';
+  const label = listening ? 'Stop dictation (stops by itself after a pause)' : busy ? 'Starting dictation…' : 'Dictate a message (on-device)';
   const step = phase === 'downloading' ? 'Downloading the model to the host and verifying it…' : phase === 'loading' ? (progress > 0 && progress < 100 ? `Loading the model in this browser… ${progress}%` : 'Starting the speech engine and microphone…') : '';
   return <>
     <button type="button" className={'quiet icon-button composer-mic' + (listening ? ' is-listening' : '')} data-composer-dictate="" aria-pressed={listening} aria-label={label} title={label} disabled={disabled} aria-busy={busy} onClick={() => void start()}>

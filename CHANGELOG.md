@@ -11,7 +11,8 @@ also include the generated GitHub comparison for the tagged commit.
   Whistle speech model (Cactus Compute, Apache-2.0) in the browser with
   WebAssembly instead of the browser's cloud speech service. The host downloads
   the 17 MB model once, on request, verifies its pinned checksum, and serves
-  it to paired browsers; audio never leaves the device.
+  it to paired browsers; audio never leaves the device. Dictation stops by
+  itself after a pause.
 - A manager-wide projects folder. Adding a workspace by name alone creates
   that folder under it (default `~/snow-projects`, changeable under Settings →
   Workspaces), the host-folder browser opens there, and the create/clone

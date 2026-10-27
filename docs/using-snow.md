@@ -439,8 +439,10 @@ The first click asks to download the 17 MB model. The host, not the browser,
 fetches it once from huggingface.co, verifies its pinned checksum, keeps it in
 the manager directory, and serves it to every paired browser; browsers cache
 it after the first load. Nothing is downloaded until you confirm. While you
-speak, confirmed words land in the draft and the current phrase follows them;
-click the button again to stop. The button is absent where the origin is not
+speak, confirmed words land in the draft and the current phrase follows them.
+Dictation stops by itself after about four seconds of silence once you have
+said something (twelve seconds if nothing was heard), or click the button
+again to stop early. The button is absent where the origin is not
 a secure context (the trusted-LAN URL) or the browser lacks WebAssembly
 workers or microphone capture.
 
