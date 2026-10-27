@@ -308,6 +308,9 @@ button, .button { padding: 6px 12px; }
   button:not(:disabled):active, .button:active, .session-tree a:active, .composer-mention-option:not([aria-disabled=true]):active { transform: scale(.97); }
   .icon-button:not(:disabled):active, .shell-session-more:not(:disabled):active { transform: scale(.88); }
 }
+/* Disabling that lasts less than a glance never dims: the fade only starts
+   once a control has stayed disabled for 250 ms, and re-enabling is instant. */
+button:disabled, .button:disabled { transition: opacity .15s .25s, background-color .15s, color .15s; }
 button[data-busy] { position: relative; cursor: progress; }
 button[data-busy]::after { content: ""; position: absolute; inset: 0; margin: auto; width: 14px; height: 14px; border-radius: 50%; border: 2px solid transparent; border-top-color: currentColor; border-right-color: currentColor; opacity: 0; animation: snow-spin .7s linear infinite, snow-busy-in .15s .12s forwards; }
 button[data-busy] > * { visibility: hidden; transition: visibility 0s .12s; }

@@ -745,6 +745,14 @@
     else if ((snapshot?.messages || []).at(-1)?.role === "assistant") label = "Writing…";
     return {label, thinking};
   }
+  // A request that settles within a glance must not expand the composer
+  // footer and collapse it again; the busy status appears only once it lasts.
+  let statusBusySince = 0, statusBusyTimer = null;
+  function settledStatusIdle(idle) {
+    if (idle) { clearTimeout(statusBusyTimer); statusBusyTimer = null; statusBusySince = 0; return true; }
+    if (!statusBusySince) { statusBusySince = Date.now(); statusBusyTimer = setTimeout(() => { statusBusyTimer = null; if (live) updateControls(); }, 260); }
+    return Date.now() - statusBusySince < 250;
+  }
   function updateControls() {
     if (!live) return;
     const stopping = !!live.cancel || !!live.snapshot?.cancel_requested;
@@ -782,7 +790,7 @@
       // Compaction already owns inline progress and the shared Stop button;
       // expanding a second footer moves the entire composer on every phase.
       // Connection and uncertain-outcome warnings must still remain visible.
-      statusIdle: !live.unknown && live.connected && (compacting || live.status === "idle" && !activeTurn && (!live.action || setting || switching) && !stopping)});
+      statusIdle: settledStatusIdle(!live.unknown && live.connected && (compacting || live.status === "idle" && !activeTurn && (!live.action || setting || switching) && !stopping))});
     updateReuse(ready && !contextDraftBusy()); updateEdit(ready && !goalBlocksHistory() && !contextDraftBusy()); updateRegeneration(ready && !goalBlocksHistory());
     window.SnowComposerContext?.render({safe: ready, editable: !editDrafts.has(live.key) && !reuseDrafts.has(live.key) && !live.regeneration && !live.invalidInstance && !live.snapshot?.permission && !live.snapshot?.input,
       readable: ready && !live.snapshot?.permission && !live.snapshot?.input, status: live.status});

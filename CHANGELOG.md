@@ -31,6 +31,10 @@ also include the generated GitHub comparison for the tagged commit.
 
 ### Fixed
 
+- Changing the thinking level (or any other request that settles within a
+  glance) no longer flickers the Web composer: the busy status line waits
+  250 ms before expanding the footer, and controls that are disabled only
+  momentarily never dim.
 - The Web composer's `$`, `/`, and `@` suggestion popup can be scrolled with the
   mouse wheel or touch again; it no longer snaps back to the selected row on
   every scroll, and hovering a row moves the selection without moving the list
